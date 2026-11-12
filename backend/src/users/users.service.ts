@@ -85,6 +85,23 @@ export class UsersService {
       .exec();
   }
 
+  updateProfile(
+    userId: string,
+    patch: { name?: string; phone?: string; preferredCurrency?: string },
+  ): Promise<UserDocument | null> {
+    return this.model
+      .findByIdAndUpdate(
+        userId,
+        { $set: patch },
+        { new: true, runValidators: true },
+      )
+      .exec();
+  }
+
+  async setStatus(userId: string, status: UserStatus): Promise<void> {
+    await this.model.updateOne({ _id: userId }, { status }).exec();
+  }
+
   async setPassword(
     userId: string,
     passwordHash: string,

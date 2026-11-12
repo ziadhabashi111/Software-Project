@@ -117,3 +117,19 @@ admin. Database tests run against a real MongoDB in memory (mongodb-memory-serve
 MongoDB driver needs Node's --experimental-vm-modules under Jest. Reviewed all code; checked the full
 flow against Atlas on a throwaway database that was dropped afterwards.
 ================================================
+
+================================================
+Date: 2026-11-13
+Student: Habashi
+Tool: Claude
+Related Requirement: ACC-09, ACC-11, ACC-12 (issue 4)
+Prompt:
+Continue with my issues: profile edit and account deactivation (issue 4), finishing all of Milestone 1
+before Milestone 2.
+
+How the output was used:
+Wrote tests first, then GET/PATCH/DELETE /api/users/me. Because bookings (Yahia, Amina) and the
+supported-currency list (Ahmed) do not exist yet, added two extension points (DeactivationBlockers and
+the optional CURRENCY_CATALOG token) instead of depending on those modules, and documented how they plug
+in. Reviewed all code; checked the endpoints against Atlas on a throwaway database that was dropped.
+================================================

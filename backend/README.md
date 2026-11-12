@@ -110,6 +110,27 @@ await this.audit.log({ actorId: admin.id, action: AuditAction.ACCOUNT_SUSPENDED,
 
 **Accounts:** admins are seeded with `npm run seed:admin` (there is no admin registration, ACC-18); moderators are created by an admin (ACC-13) with a temporary password, created with `mustChangePassword: true`.
 
+## Profile and deactivation (ACC-09, ACC-11, ACC-12; issue 4)
+
+| Endpoint | Who | What |
+|---|---|---|
+| `GET /api/users/me` | logged in | the profile of the logged-in user (never anyone else's) |
+| `PATCH /api/users/me` | logged in | edit `name`, `phone` and `preferredCurrency`; nothing is saved unless every field is valid. Email, role and status cannot be changed (`400`) |
+| `DELETE /api/users/me?confirm=true` | regular users only | deactivates the account and signs out every device. `409` with `code: "UPCOMING_BOOKINGS"` while the user has upcoming Confirmed bookings. Admins and moderators get `403` |
+
+**Hooks for the other modules** (these exist so the users module does not depend on them):
+
+- **Booking modules (Yahia, Amina):** import `UsersModule`, inject `DeactivationBlockers` and register in `onModuleInit`. Return `true` when the user has a Confirmed booking that has not happened yet:
+
+  ```ts
+  onModuleInit() { this.blockers.register(this); }          // class implements DeactivationBlocker
+  hasUpcomingConfirmedBookings(userId: string): Promise<boolean> { /* flight departs / hotel check-in in the future */ }
+  ```
+
+- **Reference data (Ahmed):** provide the `CURRENCY_CATALOG` token (`isSupported(code): Promise<boolean>`) from the module that holds the seeded currencies (GEN-12). Until it exists, a preferred currency only has to be a 3-letter code.
+- **Content modules (blog, itineraries, reviews):** a deactivated user (`status === 'deactivated'`) must have their posts and public itineraries hidden, and their comments and reviews shown as "Deleted user" (ACC-12). Check `UserStatus` from `users/user-status.ts` when you load an author.
+- **Admin module (suspend, deactivate provider):** call `SessionService.revokeAllForUser(id)` when you suspend an account so it is signed out immediately.
+
 ## Module ownership
 
 | Module | Owner |

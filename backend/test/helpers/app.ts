@@ -1,4 +1,10 @@
-import { Controller, Get, INestApplication, Module } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  INestApplication,
+  Module,
+  ModuleMetadata,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -32,7 +38,9 @@ export interface TestApp {
  * Boots the real application modules against a real MongoDB running in
  * memory (no Atlas, no mocks). The first run downloads the MongoDB binary.
  */
-export async function createTestApp(): Promise<TestApp> {
+export async function createTestApp(
+  options: { extraModules?: NonNullable<ModuleMetadata['imports']> } = {},
+): Promise<TestApp> {
   // Generous launch limit: the first start on Windows is slow while the fresh
   // mongod binary is scanned.
   const mongo = await MongoMemoryServer.create({
@@ -57,6 +65,7 @@ export async function createTestApp(): Promise<TestApp> {
       UsersModule,
       AuthApiModule,
       ProbeModule,
+      ...(options.extraModules ?? []),
     ],
   }).compile();
 

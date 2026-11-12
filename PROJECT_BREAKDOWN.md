@@ -252,7 +252,7 @@ Common to **every** member, for their own module(s):
 > - **Role:** everything between "user picks a flight" and "booking confirmed or cancelled": seat holds, passengers, baggage, round-trip, e-ticket, cancellation. Folder: `flight-bookings`.
 > - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** the seat hold must be atomic so two requests for the last seat never both succeed. It lasts **10 minutes**, then the booking becomes Expired and the seats are released. A round-trip is one booking with two segments, one payment and one reference. Infants pay 10% and take no seat. Nothing becomes Confirmed before Ziad's verified webhook. Write the parallel-request test.
-> - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings`, the booking queries for the admin list and FLT-29.
+> - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings` (register your service with `DeactivationBlockers` from `UsersModule`; see `backend/README.md`), the booking queries for the admin list and FLT-29.
 > - **You depend on:** Youssef (flight, cabin and policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, booking-status enum, Sat 14/11).
 > - **Bonus (only after your own mandatory issues are merged):** FLT-27 change flight booking (issue 58): reserve the new seats before releasing the old ones, and settle the fare difference through Stripe or a refund. See section 15.
 
@@ -299,7 +299,7 @@ Common to **every** member, for their own module(s):
 > - **Role:** everything between "user picks rooms" and "reservation confirmed, cancelled or reviewed". Folder: `hotel-bookings` (reviews included).
 > - **Install:** nothing required. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** publish the Hotel Reservation schema by **Sat 14/11** (Abdelrahman needs it). Multi-room booking is all-or-nothing and no two reservations may overlap, even under parallel requests. The hold lasts **10 minutes**, then Expired. Guests per room respect occupancy, with at least one adult. Cancel the whole reservation only, before check-in. Reviews only after a Completed stay, one per reservation. Write the parallel-request test.
-> - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings`, booking queries for the admin list, reviews and `isHidden` for moderation.
+> - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings` (register your service with `DeactivationBlockers` from `UsersModule`; see `backend/README.md`), booking queries for the admin list, reviews and `isHidden` for moderation.
 > - **You depend on:** Abdelrahman (hotel, room, availability, policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, status enum).
 > - **Bonus (only after your own mandatory issues are merged):** HTL-26 hotel moderator replies to reviews (issue 62). It is the easiest bonus, so do it first. See section 15.
 
@@ -352,7 +352,7 @@ Common to **every** member, for their own module(s):
 > - **Role:** blog and community, report submission, the seed script and reference-data endpoints, the shared upload helper, docs upkeep, and in M2 the shared frontend shell and design system. Folders: `blog`, `uploads`, plus a new reference-data/seed folder.
 > - **Install (in `backend/`):** `npm install csv-parse` and `npm install -D @types/multer`, and add an `npm run seed` script to `backend/package.json`. In M2, pick one styling approach for `frontend/` (for example Tailwind CSS) and install it once for the whole team.
 > - **Most important:** by **Fri 13/11** deliver the seed script (official datasets from the PDF link, IDs unchanged, idempotent), the reference-data endpoints (countries, cities, currencies) and the upload helper (JPG/PNG, max 5 MB, up to 5 images per post/activity/hotel, 1 logo per airline), because everyone else needs them. Then blog rules: one like per user per post, up to 5 tags of 30 characters, search ordered by likes plus comments, and one report per user per item. Own the Report schema and share it with Habashi by Mon 16/11 at the latest.
-> - **Others depend on you for:** seed data, upload helper, Report schema, `isHidden` and `hide/unhide/delete` on posts and comments, the shared UI shell in M2.
+> - **Others depend on you for:** seed data, upload helper, Report schema, `isHidden` and `hide/unhide/delete` on posts and comments, the shared UI shell in M2, and the `CURRENCY_CATALOG` provider (`isSupported(code)`) so profiles can validate the preferred currency against the seeded currencies (see `backend/README.md`).
 > - **You depend on:** Habashi (public itineraries for the author page, guards and pagination helper).
 > - **Bonus:** none assigned (the bonuses in his area are with Habashi). If your mandatory work and the frontend shell are finished early, ask the team leader for extra work.
 
