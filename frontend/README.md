@@ -1,6 +1,18 @@
 # Frontend (Next.js + TypeScript)
 
-Milestone 2 (deadline 11/12/2026). Scaffold with `npx create-next-app@latest .` once the backend is stable.
+Milestone 2 (deadline 11/12/2026). Next.js 15 App Router scaffold is in place.
+
+```bash
+cd frontend
+npm install
+npm run dev      # http://localhost:3001 (backend runs on :3000)
+npm run lint
+npm run build
+```
+
+- `NEXT_PUBLIC_API_URL` (default `http://localhost:3000/api`) and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` go in `frontend/.env.local` (never commit it).
+- Call the backend only through `lib/api.ts` (sends cookies with `credentials: 'include'`).
+- Fonts use the system stack, so builds work offline.
 
 Each member builds the pages for their own backend module (see `PROJECT_BREAKDOWN.md`).
 
