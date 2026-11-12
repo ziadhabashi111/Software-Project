@@ -4,7 +4,7 @@ One issue per work package, grouped by member. Each is small enough for one bran
 
 Day 1 = Thu 12/11, day 2 = Fri 13/11, day 3 = Sat 14/11. M1 deadline Fri 20/11. M2 deadline Fri 11/12.
 
-Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-36 | Amina 37-43 | Ahmed 44-52
+Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-36 | Amina 37-43 | Ahmed 44-52 | Bonus and deployment 53-65 (start only after your own mandatory issues are merged)
 
 ---
 
@@ -31,6 +31,7 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 - [ ] Scheduler module (`@nestjs/schedule`) for hold-expiry and daily FX jobs
 - [ ] Salted password hashing
 - [ ] Install `@nestjs/jwt`, `bcryptjs`, `@nestjs/schedule` in `backend/` (approved list: `PROJECT_BREAKDOWN.md` section 3.1)
+- [ ] Read cookie options from env (`COOKIE_SECURE`, `COOKIE_SAMESITE`, optional `COOKIE_DOMAIN`) so deployment needs no code change (see section 15.3)
 
 ## Issue 3: Registration, login, session (ACC-01, 04, 05, 06, 08, 19)
 **Owner:** Habashi | **Milestone:** M1 | **Due:** day 3
@@ -379,6 +380,7 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 - [ ] JPG/PNG only, <= 5 MB each; up to **5 images per post, activity or hotel**, **1 logo per airline**; stored on the server and served by URL
 - [ ] Reject out-of-limit uploads with a clear error
 - [ ] Install `@types/multer` (dev) in `backend/`; serve uploaded files with Express static assets (no extra package)
+- [ ] Read the upload folder and public base URL from env; keep all file access inside this helper so a persistent disk or cloud storage can replace it at deployment (section 15.3)
 - [ ] Usage note for Habashi (activity images), Youssef (airline logo), Abdelrahman (hotel photos)
 
 ## Issue 46: Blog posts, drafts, tags, images (BLG-01, 03, 04, 08, 10)
@@ -426,3 +428,88 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 - [ ] Blog listing/search (dynamic SSR), published post page (ISR + metadata), author page (ISR), tag pages
 - [ ] Editor with drafts (dynamic SSR + client components); likes and comments (client components); report button
 - [ ] Revalidate ISR pages on edit, hide, delete
+
+---
+
+# BONUS AND DEPLOYMENT (we are doing all of them, after your own mandatory issues are merged)
+
+Order and owners are in `PROJECT_BREAKDOWN.md` section 15. Bonus cutoff: Sat 5/12. Each issue includes its UI in M2.
+
+## Issue 53: Email service and email notifications (GEN-01-B)
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** 25/11
+- [ ] `MailService` with SMTP (install `nodemailer` and `@types/nodemailer`); dev uses a test inbox (e.g. Mailtrap or Ethereal)
+- [ ] SMTP variable names added to `.env.example` (names only, no values)
+- [ ] Send the GEN-01 notifications by email (booking confirmation, cancellation and refund, flight schedule change, account/provider suspension) plus moderator invitations
+- [ ] Ziad's `NotificationService` calls `MailService`; in-app notifications keep working if email fails
+
+## Issue 54: Email verification (ACC-02)
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** 30/11
+- [ ] Send a verification link after registration; `GET /api/auth/verify-email`
+- [ ] Booking blocked until the email is verified; resend option
+- [ ] Changes live in the `auth` module; depends on issue 53
+
+## Issue 55: Forgot and reset password by email (ACC-07)
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** 30/11
+- [ ] `POST /api/auth/forgot-password` and `POST /api/auth/reset-password`
+- [ ] Link expires after 30 minutes, is single-use, and a newer request invalidates older ones
+- [ ] The response never reveals whether the email exists
+- [ ] Depends on issue 53
+
+## Issue 56: Favourites (BON-02)
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** 28/11
+- [ ] Add, remove and list favourite hotels and public itineraries (owner-only)
+- [ ] Hidden, deactivated or private items disappear from the list
+
+## Issue 57: Attach an itinerary to a blog post (BLG-13)
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** 28/11
+- [ ] `PATCH /api/posts/:id/itinerary`: the author attaches one of their own itineraries
+- [ ] Decide what readers see when the itinerary is private (ITN-20); coordinate with Ahmed's blog module
+
+## Issue 58: Change flight booking (FLT-27)
+**Owner:** Yahia Tarek | **Milestone:** M2 (bonus) | **Due:** 3/12
+- [ ] `PATCH /api/flight-bookings/:id/change-flight`: change date or flight on a Confirmed booking (same route and cabin), subject to seat availability
+- [ ] Reserve the new seats before releasing the old ones (no overselling, parallel-request test)
+- [ ] Higher fare: pay the difference through Stripe; lower fare: refund the difference (`RefundService`)
+
+## Issue 59: Seat selection (FLT-28)
+**Owner:** Youssef Wahby | **Milestone:** M2 (bonus) | **Due:** 3/12
+- [ ] Seat layout per cabin and a seat map endpoint
+- [ ] `PATCH /api/flight-bookings/:id/seat`: a seat can belong to only one passenger per flight (unique constraint, concurrency-safe)
+- [ ] Coordinate with Yahia's booking module
+
+## Issue 60: Itinerary PDF export (ITN-28)
+**Owner:** Youssef Wahby | **Milestone:** M2 (bonus) | **Due:** 28/11
+- [ ] `GET /api/itineraries/:id/pdf` for the owner (and public itineraries): title, days, activities, budget
+- [ ] Reuse `pdfkit` installed by Yahia; print-friendly download button in the UI
+
+## Issue 61: Link bookings to itinerary days (ITN-27)
+**Owner:** Abdelrahman | **Milestone:** M2 (bonus) | **Due:** 30/11
+- [ ] `POST /api/itineraries/:id/bookings`: attach the user's own Confirmed flight or hotel bookings to itinerary days
+- [ ] Linked bookings feed the budget summary (coordinate with Youssef's FX and Habashi's days)
+- [ ] Owner-only for both the itinerary and the booking
+
+## Issue 62: Hotel moderator review replies (HTL-26)
+**Owner:** Amina | **Milestone:** M2 (bonus) | **Due:** 25/11
+- [ ] `POST /api/reviews/:id/reply`: only the moderator of that hotel; one reply per review
+- [ ] Reply shown with the review in `GET /api/hotels/:id/reviews`
+
+## Issue 63: Admin analytics (BON-01)
+**Owner:** Ziad Mohannad | **Milestone:** M2 (bonus) | **Due:** 30/11
+- [ ] Admin-only endpoint (e.g. `GET /api/admin/analytics`): bookings and revenue per provider over a selected period
+- [ ] Define revenue (net of refunds) and document it in Swagger
+- [ ] Dashboard in the admin UI
+
+## Issue 64: Deployment rehearsal and the four decisions
+**Owner:** Habashi (with Ziad for Stripe) | **Milestone:** M2 (bonus) | **Due:** 25/11
+- [ ] Decide and record in `PROJECT_BREAKDOWN.md` section 15.3: cookies across two domains, uploaded images storage, scheduled jobs on the host, Stripe webhook endpoint (start the discussion Mon 16/11)
+- [ ] Deploy the backend (Render, Railway or Fly.io) and the starter frontend (Vercel); environment variables set in the dashboards only
+- [ ] Connect to Atlas; run the seed once against it
+- [ ] Register the Stripe webhook endpoint for the deployed backend and test one payment (Ziad)
+
+## Issue 65: Final deployment and go/no-go
+**Owner:** Habashi | **Milestone:** M2 (bonus) | **Due:** go/no-go Sat 5/12, freeze Wed 9/12
+- [ ] First full deployment of `main` on Thu 3/12; every member checks their own module on the deployed URL
+- [ ] All-roles walkthrough on the deployed URL (guest, user, airline moderator, hotel moderator, admin)
+- [ ] Go/no-go on 5/12: the deployed version is the only one graded for the bonus; if it cannot be fixed by 9/12, do not apply
+- [ ] Ask the TAs or Dr. Nada how a team opts in to the deployment bonus
+- [ ] Final deployment on 9/12 and fresh-seed check on 10/12

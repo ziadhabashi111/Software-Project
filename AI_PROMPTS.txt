@@ -52,3 +52,19 @@ assigned, cross-module hooks, rendering table, M2 plan, ownership appendix) and 
 docs/issues.md as 52 granular issues. A script confirmed all 104 mandatory IDs and all
 non-optional PDF endpoints are covered. Team to review the reassignments before work starts.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Habashi
+Tool: Claude
+Related Requirement: Optional bonuses (ACC-02, ACC-07, GEN-01-B, BON-01, BON-02, FLT-27, FLT-28, HTL-26, ITN-27, ITN-28, BLG-13) and cloud deployment
+Prompt:
+Plan all the optional bonuses and the cloud deployment, put each bonus next to the member whose work
+it belongs to (Ahmed's bonuses go to Habashi), add per-member setup briefs, and leave the cookie,
+upload, scheduled-job and Stripe-webhook decisions for later.
+
+How the output was used:
+Used as PROJECT_BREAKDOWN.md section 15 (bonus owners and order, deployment dates, decision log,
+go/no-go warning), the per-member briefs in section 6, and docs/issues.md issues 53 to 65. The team
+to review owners and dates before bonus work starts.
+================================================
