@@ -35,3 +35,20 @@ How the output was used:
 Used as the starting point for PROJECT_BREAKDOWN.md and the repository docs. Task split to be
 reviewed and adjusted by the team before work starts.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Habashi
+Tool: Claude
+Related Requirement: Project planning (all mandatory IDs)
+Prompt:
+Review PROJECT_BREAKDOWN.md against the project description PDF and the requirements, revise it,
+and make sure the tasks and issues for each member are complete and nothing is missing.
+
+How the output was used:
+Audited the breakdown against the PDF and requirements. Rewrote PROJECT_BREAKDOWN.md (main + develop
+branch rules, GEN-11 booking states, 10-minute holds, previously unowned IDs
+assigned, cross-module hooks, rendering table, M2 plan, ownership appendix) and rewrote
+docs/issues.md as 52 granular issues. A script confirmed all 104 mandatory IDs and all
+non-optional PDF endpoints are covered. Team to review the reassignments before work starts.
+================================================

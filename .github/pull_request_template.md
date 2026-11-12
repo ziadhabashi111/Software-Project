@@ -25,7 +25,8 @@ If used:
 - [ ] Relevant entry added to `AI_PROMPTS.txt`
 
 ## Security / scope
-- [ ] Branch is from latest `main` and targets `main`
+- [ ] Branch is from latest `develop`, I pulled the latest `develop` before pushing, and there are no merge conflicts
+- [ ] PR targets `develop` (I did not push directly to `develop` or `main`)
 - [ ] Only related changes included
 - [ ] Backend validation and ownership/role checks in place
 - [ ] Swagger docs updated

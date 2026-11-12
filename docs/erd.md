@@ -26,4 +26,4 @@ erDiagram
     BLOG_POST ||--o{ LIKE : has
 ```
 
-Notes to decide as a team: embedded vs referenced documents (passengers, cabins, availability), booking state machine (Held, Pending, Confirmed, Cancelled, Expired), and the Report, Audit Log and Moderator Assignment entities.
+Notes to decide as a team: embedded vs referenced documents (passengers, cabins, availability), the booking state machine (GEN-11: Pending Payment -> Confirmed -> Completed; Pending Payment -> Expired; Confirmed -> Cancelled; no other transitions), and the Report, Audit Log, Moderator Assignment, Notification, Refund and Exchange Rate entities.

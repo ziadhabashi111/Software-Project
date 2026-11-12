@@ -54,10 +54,14 @@ npm run build
 ```
 
 ## Git workflow
-- `main` is the only long-lived branch and must always work. Never commit directly to `main`.
-- Branches from latest `main`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
+- Two long-lived branches: `develop` (integration: where everyone's work is pushed and checked together) and `main` (only verified, working code).
+- **Always create a branch for every change. Never commit or push straight to `develop` or `main`.**
+- Branches from latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
+- **Pull the latest `develop` into your branch (`git pull origin develop`) before pushing your changes**, then re-run tests and lint.
+- **Never merge with conflicts.** Resolve every conflict on your own branch first, re-test, and only then open or merge the PR. Never delete a teammate's work to resolve one; ask the team leader if unsure.
 - Conventional Commits: `feat(flights): add round-trip search`. Never `update`, `final`, `fix`.
-- PRs target `main` and are reviewed by the team leader.
+- PRs target `develop` and are reviewed by the team leader. Merged work is pushed to `develop` to make sure everything works together (build, lint, tests, Swagger, server starts).
+- **Only when `develop` is verified working:** the team leader pulls the latest `main`, merges `develop` into it (conflict-free, via PR) and re-checks. Never merge broken code into `main`.
 
 ## AI usage
 Log every prompt that materially helped in `AI_PROMPTS.txt` (date, student, tool, requirement, prompt, how output was used). Never put secrets in prompts. Review all AI output; every member must be able to explain their code.

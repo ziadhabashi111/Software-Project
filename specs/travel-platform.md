@@ -62,4 +62,4 @@ See `docs/erd.md`.
 - Swagger reflects API changes.
 - Diff is reviewed in full.
 - AI usage is logged in `AI_PROMPTS.txt`.
-- PR is reviewed by the team leader and merged to `main`.
+- Work is done on a branch (never directly on `develop` or `main`), updated with the latest `develop` before pushing, free of merge conflicts, then reviewed by the team leader and merged to `develop`. When `develop` is verified working, the latest `main` is pulled and `develop` is merged into `main`.
