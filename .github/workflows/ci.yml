@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check backend is scaffolded
+        id: scaffold
+        run: |
+          if [ -f package.json ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "Backend not scaffolded yet, skipping."; fi
+      - uses: actions/setup-node@v4
+        if: steps.scaffold.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm run lint
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm test -- --runInBand
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check frontend is scaffolded
+        id: scaffold
+        run: |
+          if [ -f package.json ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "Frontend not scaffolded yet, skipping."; fi
+      - uses: actions/setup-node@v4
+        if: steps.scaffold.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm run lint
+      - if: steps.scaffold.outputs.ready == 'true'
+        run: npm run build

@@ -1,0 +1,20 @@
+# Fill in real GitHub usernames, then uncomment. Invalid handles make GitHub flag this file.
+# Team lead reviews everything by default.
+# *                              @habashi-username
+#
+# /backend/src/auth/             @habashi-username
+# /backend/src/users/            @habashi-username
+# /backend/src/admin/            @habashi-username
+# /backend/src/flights/          @youssef-username
+# /backend/src/flight-bookings/  @yahia-username
+# /backend/src/payments/         @ziad-username
+# /backend/src/notifications/    @ziad-username
+# /backend/src/itineraries/      @ziad-username @youssef-username
+# /backend/src/hotels/           @amina-username
+# /backend/src/hotel-bookings/   @abdelrahman-username
+# /backend/src/blog/             @ahmed-username
+# /backend/src/uploads/          @ahmed-username
+#
+# /.github/                      @habashi-username
+# /AGENTS.md                     @habashi-username
+# /CLAUDE.md                     @habashi-username
