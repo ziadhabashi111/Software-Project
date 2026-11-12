@@ -14,12 +14,12 @@ Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 | Member | Area |
 |---|---|
-| Habashi (team lead) | Auth, Accounts, Admin, Audit logs |
+| Habashi (team lead) | Auth, Accounts, Admin, Audit logs, Itinerary structure |
 | Youssef Wahby | Airlines, Flights, Flight search, Itinerary budgets/FX |
 | Yahia Tarek | Flight booking, holds, cancellation |
-| Ziad Mohannad | Payments, Refunds, Notifications, Itinerary structure |
-| Abdelrahman | Hotel booking, Reviews |
-| Amina | Hotels, Rooms, Availability, Hotel search |
+| Ziad Mohannad | Payments, Refunds, Notifications |
+| Abdelrahman | Hotels, Rooms, Availability, Hotel search |
+| Amina | Hotel booking, Reviews |
 | Ahmed Ismail | Blog and community, Seeding, Uploads, Docs |
 
 ## Repository Structure

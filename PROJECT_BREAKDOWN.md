@@ -59,12 +59,12 @@ Today is 12/11, so Milestone 1 is **8 days away**. Section 9 has a day-by-day pl
 
 | # | Member | Area | Load |
 |---|---|---|---|
-| 1 | **Habashi** | Team lead, Auth, Accounts, Admin, Audit logs | Medium-High |
+| 1 | **Habashi** | Team lead, Auth, Accounts, Admin, Audit logs + Itinerary structure | High |
 | 2 | **Youssef Wahby** | Airlines, Flights, Flight search + Itinerary budgets/FX | Medium-High |
 | 3 | **Yahia Tarek** | Flight booking, inventory holds, flight cancellation | High |
-| 4 | **Ziad Mohannad** | Payments (Stripe), Refunds, Policy acceptance, Notifications + Itinerary structure | High |
-| 5 | **Abdelrahman** | Hotel booking, concurrency, cancellation, Reviews | High |
-| 6 | **Amina** | Hotels, Rooms, Availability, Hotel search | Medium |
+| 4 | **Ziad Mohannad** | Payments (Stripe), Refunds, Policy acceptance, Notifications | High |
+| 5 | **Abdelrahman** | Hotels, Rooms, Availability, Hotel search | Medium |
+| 6 | **Amina** | Hotel booking, concurrency, cancellation, Reviews | High |
 | 7 | **Ahmed Ismail** | Blog and community, DB seeding script, shared upload helper, docs upkeep | **Lightest** |
 
 Ahmed has the easiest load by design: Blog is mostly standard CRUD with no concurrency or payments logic. Everyone else carries at least one concurrency, money, or multi-entity integration problem.
@@ -81,7 +81,7 @@ Common to **every** member, for their own module(s):
 - Log AI prompts in `AI_PROMPTS.txt`
 - **M2:** build the Next.js pages for your own module (listed under each person)
 
-### 🟨 **HABASHI**: Team Lead, Auth, Accounts, Admin, Audit Logs
+### 🟨 **HABASHI**: Team Lead, Auth, Accounts, Admin, Audit Logs + Itinerary Structure
 
 **Milestone 1 (backend)**
 - Repo owner and team leader: create the shared MongoDB Atlas DB, share the connection string privately, review and merge PRs, resolve merge conflicts without deleting teammates' work
@@ -90,8 +90,10 @@ Common to **every** member, for their own module(s):
 - Admin (ACC-07a, ACC-13..17): `POST /api/admin/users/:id/reset-password`, `POST /api/admin/moderators` (moderator assignment to exactly one provider), `GET /api/admin/accounts`, suspend/reactivate accounts, deactivate/reactivate providers (`/api/admin/providers/:type/:id/...`, hidden from search, existing Confirmed bookings stay valid, in-app notification to affected parties), `GET /api/admin/bookings`
 - Moderation and audit (GEN-07, GEN-09, GEN-10): `GET /api/admin/reports`, `PATCH /api/admin/reports/:id` (dismiss/hide/delete), `DELETE /api/admin/content/:type/:id`, `GET /api/admin/audit-logs`
 - Seed the administrator account (no admin self-registration)
+- Itinerary structure (ITN-01..12, ITN-20..21): itinerary CRUD, ordered days (`POST/PATCH/DELETE /api/itineraries/:id/days`, `PATCH .../days/reorder`), activities, activity images, dates derived from start date + day order, renumbering/budget recalculation on add/delete/reorder, public/private visibility, `GET /api/itineraries/public/search`, `GET /api/itineraries/public/:id`, `POST /api/itineraries/:id/clone` (independent private copy with attribution)
+- `GET /api/itineraries/:id/hotels` (ITN-25): reuse Abdelrahman's hotel search
 
-**Milestone 2 (frontend):** registration, login, profile, change password, account deactivation, route protection (UI only, backend still enforces), admin dashboard (accounts, moderators, bookings, reports, audit logs)
+**Milestone 2 (frontend):** registration, login, profile, change password, account deactivation, route protection (UI only, backend still enforces), admin dashboard (accounts, moderators, bookings, reports, audit logs), itinerary editor (days, activities, reorder), public itinerary search/detail, clone
 
 **Mandatory deliverable:** auth/guards available on `main` by day 2 so others can protect their endpoints.
 
@@ -119,21 +121,19 @@ Common to **every** member, for their own module(s):
 
 **Milestone 2 (frontend):** passenger/baggage form, booking summary and policy acceptance, my flight bookings, cancel flow with confirmation dialog, e-ticket view
 
-### 🟨 **ZIAD MOHANNAD**: Payments, Refunds, Policy Acceptance, Notifications + Itinerary Structure
+### 🟨 **ZIAD MOHANNAD**: Payments, Refunds, Policy Acceptance, Notifications
 
 **Milestone 1 (backend)**
 - Payments with **Stripe test mode** (PAY-01): `POST /api/payments`, `POST /api/payments/:id/retry`, `GET /api/payments/:id`, `POST /api/payments/webhook` (verify the Stripe signature; the backend verifies outcomes before confirming any booking); never store raw card data
 - Policies (PAY-02): `GET /api/bookings/:type/:id/policies`, `POST /api/bookings/:type/:id/accept-policies` (store acceptance with timestamp)
-- Refunds (PAY-03): refund calculation by the policy applicable to the booking, `GET /api/refunds/:id`; expose a shared `RefundService` that Yahia and Abdelrahman call on cancellation
+- Refunds (PAY-03): refund calculation by the policy applicable to the booking, `GET /api/refunds/:id`; expose a shared `RefundService` that Yahia and Amina call on cancellation
 - Failed or expired payments leave bookings unconfirmed and release inventory
 - Shared **in-app notification service** (GEN notifications): `NotificationService.notify(userId, type, message)` that every other module calls; notification list/read endpoints
 - **Do first (by day 3):** publish the `PaymentService`/`RefundService`/`NotificationService` interfaces so booking owners can integrate
-- Itinerary structure (ITN-01..12, ITN-20..21): itinerary CRUD, ordered days (`POST/PATCH/DELETE /api/itineraries/:id/days`, `PATCH .../days/reorder`), activities, activity images, dates derived from start date + day order, renumbering/budget recalculation on add/delete/reorder, public/private visibility, `GET /api/itineraries/public/search`, `GET /api/itineraries/public/:id`, `POST /api/itineraries/:id/clone` (independent private copy with attribution)
-- `GET /api/itineraries/:id/hotels` (ITN-25): reuse Amina's hotel search
 
-**Milestone 2 (frontend):** payment page (Stripe test mode, Stripe-hosted fields so no raw card data), retry, payment/refund status, notification bell and list, itinerary editor (days, activities, reorder), public itinerary search/detail, clone
+**Milestone 2 (frontend):** payment page (Stripe test mode, Stripe-hosted fields so no raw card data), retry, payment/refund status, notification bell and list
 
-### 🟨 **ABDELRAHMAN**: Hotel Booking, Concurrency, Cancellation, Reviews
+### 🟨 **AMINA**: Hotel Booking, Concurrency, Cancellation, Reviews
 
 **Milestone 1 (backend)**
 - Hotel booking (HTL-16..23): `POST /api/hotel-bookings`, `GET /api/hotel-bookings`, `GET /api/hotel-bookings/:id`, `POST /api/hotel-bookings/:id/cancel`
@@ -145,13 +145,13 @@ Common to **every** member, for their own module(s):
 
 **Milestone 2 (frontend):** booking summary and policy acceptance, my hotel bookings, cancel flow, review form and review list, hotel moderator reservations view
 
-### 🟨 **AMINA**: Hotels, Rooms, Availability, Hotel Search
+### 🟨 **ABDELRAHMAN**: Hotels, Rooms, Availability, Hotel Search
 
 **Milestone 1 (backend)**
 - Hotels and rooms (HTL-01..10, HTL-15, HTL-22): `POST/GET/PATCH /api/hotels`, room CRUD (`/api/hotels/:id/rooms`), `POST/PATCH /api/hotels/:id/rooms/:roomId/availability` (including blocked dates), `GET /api/hotels/:id/availability`, `GET /api/hotels/:id/rooms/available`, `PUT /api/hotels/:id/policies`, `GET /api/hotels/:id/reservations`
 - Hotel moderator restriction: manage **only** their assigned hotel
 - Hotel search (HTL-11, HTL-12): `GET /api/hotels/search` by destination, dates, guest count, with filtering, sorting, pagination
-- **Do first (by day 3):** publish the Hotel, Room, Availability and Policy schemas so Abdelrahman (hotel booking) and Ziad (itinerary hotels) can build on them
+- **Do first (by day 3):** publish the Hotel, Room, Availability and Policy schemas so Amina (hotel booking) and Habashi (itinerary hotels) can build on them
 
 **Milestone 2 (frontend):** hotel search and results, room selection, hotel moderator dashboard (hotel profile, rooms, availability, policies, reservations)
 
@@ -174,10 +174,10 @@ Common to **every** member, for their own module(s):
 |---|---|---|
 | Everyone | Habashi | Auth guards, roles decorator, error filter, Swagger setup (day 2) |
 | Everyone | Ahmed | Seed script for countries, cities, airports, attractions (day 2) |
-| Yahia, Abdelrahman | Ziad | `PaymentService`, `RefundService`, `NotificationService` interfaces (day 3) |
+| Yahia, Amina | Ziad | `PaymentService`, `RefundService`, `NotificationService` interfaces (day 3) |
 | Yahia | Youssef | Flights, cabins and policy schemas (day 3) |
-| Abdelrahman, Ziad | Amina | Hotel, room, availability, policy schemas (day 3) |
-| Ziad, Youssef | Youssef/Ziad | Itinerary schema shared: agree on it on day 1 |
+| Amina, Habashi | Abdelrahman | Hotel, room, availability, policy schemas (day 3) |
+| Habashi, Youssef | Habashi/Youssef | Itinerary schema shared: agree on it on day 1 |
 | Habashi | All | Provider deactivation and notifications touch Flights/Hotels/Bookings |
 
 Agree on schemas on **day 1** in a 30-minute call before anyone writes models.
@@ -270,12 +270,12 @@ Per member, the thing evaluators will probe hardest:
 
 | Member | Must be able to demo and defend |
 |---|---|
-| **Habashi** | Lockout after failed logins, session expiry, suspended account blocked, moderator tied to one provider, provider deactivation vs moderator suspension, audit logs written for admin actions, merge-conflict handling |
+| **Habashi** | Lockout after failed logins, session expiry, suspended account blocked, moderator tied to one provider, provider deactivation vs moderator suspension, audit logs written for admin actions, merge-conflict handling; day reorder updates numbering, dates and budget; clone keeps attribution and is private |
 | **Youssef Wahby** | Airline moderator cannot touch another airline; round-trip search with filters/sorting; time zones; FX conversion plus all three failure cases (invalid code, no rate, API down); key never exposed to frontend |
 | **Yahia Tarek** | Two simultaneous requests for the last seat: only one succeeds; hold expiry releases seats; no confirmation before verified payment; policy-based cancellation |
-| **Ziad Mohannad** | Stripe test mode with webhook signature verification; failed/expired payment releases inventory; policy acceptance timestamp stored; refund calculations; notifications fire from other modules; day reorder updates numbering, dates and budget; clone keeps attribution and is private |
-| **Abdelrahman** | No overlapping reservations under concurrency; multi-room booking is all-or-nothing; review only after a completed stay; cancellation refund by policy |
-| **Amina** | Moderator limited to own hotel; blocked dates and availability; search by destination/dates/guests with filters and sorting; room availability reflects bookings |
+| **Ziad Mohannad** | Stripe test mode with webhook signature verification; failed/expired payment releases inventory; policy acceptance timestamp stored; refund calculations; notifications fire from other modules |
+| **Abdelrahman** | Moderator limited to own hotel; blocked dates and availability; search by destination/dates/guests with filters and sorting; room availability reflects bookings |
+| **Amina** | No overlapping reservations under concurrency; multi-room booking is all-or-nothing; review only after a completed stay; cancellation refund by policy |
 | **Ahmed Ismail** | Draft vs published visibility; author-only edit/delete; one like per user per post; tag and author pages; seed script reproduces the official reference data and IDs; upload validation |
 
 ---
@@ -284,6 +284,6 @@ Per member, the thing evaluators will probe hardest:
 
 - **Concurrency bugs** (holds and overlapping hotel bookings): write a test that fires parallel requests
 - **Schema disagreements** discovered late: lock shared schemas on day 1
-- **Payment/booking coupling** between Ziad, Yahia and Abdelrahman: agree on the booking-state machine early
+- **Payment/booking coupling** between Ziad, Yahia and Amina: agree on the booking-state machine early
 - **One big merge at the end:** merge to `main` at least every 1 to 2 days
 - **Leaked secrets:** a committed `.env` or Stripe/Mongo credential must be rotated immediately

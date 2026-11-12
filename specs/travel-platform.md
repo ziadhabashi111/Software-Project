@@ -14,10 +14,10 @@ Guest, Registered User, Administrator (seeded, no self-registration), Airline Mo
 | Accounts, auth, admin | ACC, GEN | Habashi |
 | Flights, flight search | FLT | Youssef Wahby |
 | Flight booking, holds, cancel | FLT | Yahia Tarek |
-| Hotels, rooms, availability, search | HTL | Amina |
-| Hotel booking, reviews | HTL | Abdelrahman |
+| Hotels, rooms, availability, search | HTL | Abdelrahman |
+| Hotel booking, reviews | HTL | Amina |
 | Payments, refunds, notifications | PAY, GEN | Ziad Mohannad |
-| Itineraries (structure) | ITN | Ziad Mohannad |
+| Itineraries (structure) | ITN | Habashi |
 | Itinerary budgets and FX | ITN | Youssef Wahby |
 | Blog and community | BLG, GEN | Ahmed Ismail |
 

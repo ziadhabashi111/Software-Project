@@ -44,21 +44,21 @@ One issue per member for Milestone 1. Create more granular issues per requiremen
 - [ ] `NotificationService` + list/read endpoints
 
 ## Issue 6: Itinerary structure (ITN-01..12, ITN-20, ITN-21, ITN-25)
-**Owner:** Ziad Mohannad
+**Owner:** Habashi
 - [ ] Itinerary CRUD, days, activities, images
 - [ ] Dates derived from start date and order; renumbering and budget recalculation on add/delete/reorder
 - [ ] Public/private, public search, clone with attribution
 - [ ] `GET /api/itineraries/:id/hotels`
 
 ## Issue 7: Hotels, rooms, availability, hotel search (HTL-01..12, HTL-15, HTL-22)
-**Owner:** Amina (publish schemas by day 3)
+**Owner:** Abdelrahman (publish schemas by day 3)
 - [ ] Hotel profile, rooms, availability, blocked dates, policies
 - [ ] Moderator limited to own hotel
 - [ ] Search by destination, dates, guests with filters, sorting, pagination
 - [ ] Available rooms and reservations view
 
 ## Issue 8: Hotel booking and reviews (HTL-16..24)
-**Owner:** Abdelrahman
+**Owner:** Amina
 - [ ] Booking with no overlapping reservations under concurrency
 - [ ] Multi-room booking is atomic
 - [ ] Confirm only after verified payment; cancel per hotel policy
