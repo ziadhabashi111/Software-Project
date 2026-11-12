@@ -128,7 +128,24 @@ Common to **every** member, for their own module(s):
 - Log AI prompts in `AI_PROMPTS.txt`
 - **M2:** build the Next.js pages for your own module (listed under each person) with loading, error, empty and confirmation states, confirm-before-destructive-action dialogs, and responsive layouts
 
+#### Setup for every member (do this first; if you use an AI assistant, tell it to read this section and your own brief below)
+
+1. Install Node.js 22+. Clone the repo, `git checkout develop`, then `git checkout -b feature/<REQ-ID>-<description>`. Never work directly on `develop` or `main`.
+2. There is no `package.json` in the repo root. Run `npm install` inside `backend/` and inside `frontend/`.
+3. `cd backend && cp ../.env.example .env`, then fill it using the Environment Variables table in `README.md`. The team leader shares `MONGODB_URI` and the Stripe and FXRates keys privately. Never paste keys into an AI tool and never commit `.env` files. AI assistants must not read, print or edit `.env` files.
+4. Work only inside your own module folder (`backend/src/<module>/`) and your own frontend routes. Use only the packages in section 3.1 plus those in your brief; ask the team leader before adding any other package.
+5. Before pushing: `git pull origin develop`, resolve conflicts on your own branch, run `npm run lint` and `npm test`, then open a PR into `develop` (never merge with conflicts).
+6. Log helpful AI prompts in `AI_PROMPTS.txt` (no secrets). An AI assistant must read `AGENTS.md`, the requirement IDs of its member in `docs/requirements/REQUIREMENTS.md`, and that member's issues in `docs/issues.md` before writing code.
+
 ### 🟨 **HABASHI**: Team Lead, Foundations, Auth, Accounts, Admin, Moderation, Audit Logs + Itinerary Structure
+
+> **Brief (for you and your Claude)**
+> - **Role:** team lead and owner of the shared foundations; also auth, accounts, admin, moderation, audit logs and itinerary structure. Folders: `auth`, `users`, `admin`, `audit`, `itineraries`.
+> - **Install (in `backend/`):** `npm install @nestjs/jwt bcryptjs @nestjs/schedule`
+> - **Most important:** the foundations (guards, roles, ownership helper, pagination helper, error filter, Swagger, `AuditLogService`, scheduler) merged to `develop` by **Fri 13/11**, because every other member is blocked on them. Then lockout (5 failures, 15 min), 30-minute session expiry, and ownership checks.
+> - **Others depend on you for:** guards, `@Roles()`, pagination, errors, Swagger, audit log, `isHidden` moderation hooks.
+> - **You depend on:** Ahmed (Report schema, upload helper, seed), Yahia and Amina (`hasUpcomingConfirmedBookings`), Youssef and Abdelrahman (`setActive`), Ziad (`NotificationService`), Abdelrahman (hotel search for ITN-25), Youssef (budget data for city-group subtotals).
+> - **Team lead:** protect branches, accept/confirm teammates' repo access, review PRs, make sure conflicts never delete a teammate's work.
 
 **Milestone 1 (backend)**
 
@@ -188,6 +205,13 @@ Common to **every** member, for their own module(s):
 
 ### 🟨 **YOUSSEF WAHBY**: Airlines, Flights, Flight Status, Flight Search + Itinerary Budgets and FX
 
+> **Brief (for you and your Claude)**
+> - **Role:** airline and flight data, flight search, flight status, and itinerary budgets with FX conversion. Folders: `flights` (and the budget/FX files that live in `itineraries`; agree the exact folder with Habashi).
+> - **Install:** nothing extra. Call FXRatesAPI with Node's built-in `fetch`, build the CSV export by hand, and use Habashi's `@nestjs/schedule` for the daily FX fetch and the "Departed" status.
+> - **Most important:** publish the Flight, Cabin and Policy schemas by **Sat 14/11** (Yahia waits on them). Local airport times stored as UTC, correct validations (FLT-03), search availability = total - booked - held, flight cancel refunds 100% via Ziad's `RefundService`, FX with a daily cache, the last cached rates as fallback, and the rate date shown. The FXRates key stays in the backend only.
+> - **Others depend on you for:** flight/cabin/policy schemas, `setActive()` on Airline, flight search reused by itineraries.
+> - **You depend on:** Yahia (`cancelBookingsForFlight`, `getConfirmedPassengers`), Ziad (`RefundService`, `NotificationService`), Habashi (itinerary and day schemas), Ahmed (upload helper for airline logos, `GET /api/airports` data from the seed).
+
 **Milestone 1 (backend)**
 
 *Airlines and flights (FLT-01..06, 08, 09, 17, 29, 30; FLT-02)*
@@ -221,6 +245,13 @@ Common to **every** member, for their own module(s):
 
 ### 🟨 **YAHIA TAREK**: Flight Booking, Passengers, Inventory Holds, E-ticket, Cancellation
 
+> **Brief (for you and your Claude)**
+> - **Role:** everything between "user picks a flight" and "booking confirmed or cancelled": seat holds, passengers, baggage, round-trip, e-ticket, cancellation. Folder: `flight-bookings`.
+> - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` (use a replica set, because transactions need one).
+> - **Most important:** the seat hold must be atomic so two requests for the last seat never both succeed. It lasts **10 minutes**, then the booking becomes Expired and the seats are released. A round-trip is one booking with two segments, one payment and one reference. Infants pay 10% and take no seat. Nothing becomes Confirmed before Ziad's verified webhook. Write the parallel-request test.
+> - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings`, the booking queries for the admin list and FLT-29.
+> - **You depend on:** Youssef (flight, cabin and policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, booking-status enum, Sat 14/11).
+
 **Milestone 1 (backend)**
 - `POST /api/flight-bookings/hold` (FLT-22): **atomically reserve the requested seats only if enough remain**, creating a booking in **Pending Payment** held for **10 minutes**; if payment does not succeed in time the booking becomes **Expired** and the seats are released (scheduled job plus a lazy check on read/pay). Concurrent requests must never book more seats than available. Round-trip holds both segments or neither.
 - `POST /api/flight-bookings` (FLT-19, FLT-21): per passenger full name, date of birth, passport/ID number; passenger type derived from date of birth (adult 12+, child 2-11, infant <2) with **infants paying 10% of the fare and occupying no seat**, at least one adult per booking and no more infants than adults; optional extra baggage (bags and weight) per passenger up to the airline's maximum with the fee added to the total; **price snapshot** at booking time; booking summary (flight, passengers, baggage, total) before payment
@@ -238,6 +269,14 @@ Common to **every** member, for their own module(s):
 
 ### 🟨 **ZIAD MOHANNAD**: Payments, Refunds, Policy Acceptance, Notifications, Booking-State Rules
 
+> **Brief (for you and your Claude)**
+> - **Role:** the money and messaging layer used by both booking modules: Stripe payments, refunds, policy acceptance, in-app notifications and the shared booking-status rules. Folders: `payments`, `notifications`.
+> - **Install:** backend `npm install stripe`. Frontend (M2) `npm install @stripe/stripe-js @stripe/react-stripe-js` inside `frontend/`. Also install the Stripe CLI (tool, not npm): `winget install Stripe.StripeCli`, then `stripe login`.
+> - **Most important:** publish `PaymentService`, `RefundService`, `NotificationService` and the booking-status enum by **Sat 14/11**, because Yahia and Amina are blocked on them. The webhook is the only thing that confirms a booking: verify the Stripe signature on the raw body and handle events idempotently. Refund tier rule (highest threshold not above days remaining, else 0%), one platform currency (PAY-04). No raw card data ever reaches the backend.
+> - **Webhook secret:** `STRIPE_WEBHOOK_SECRET` is generated on your own machine by `stripe listen --forward-to localhost:3000/api/payments/webhook` (or `stripe listen --print-secret`). It is per developer and is not shared. The shared test keys come from the team leader.
+> - **Others depend on you for:** the three service interfaces, the status enum, refund preview and issue, notification delivery.
+> - **You depend on:** Yahia and Amina (confirm/expire callbacks), every module that calls `NotificationService`.
+
 **Milestone 1 (backend)**
 - **Do first (by end of day 3, Sat 14/11):** publish the `PaymentService`, `RefundService` (`preview()` and `issue()`), `NotificationService.notify(userId, type, message)` interfaces and the shared booking-status enum with allowed transitions (GEN-11) so Yahia and Amina can integrate.
 - PAY-01 `POST /api/payments`: pay a **Pending Payment** flight booking or hotel reservation within its hold using Stripe test mode (Elements + PaymentIntents) so card details never reach the backend; reject if the user is not the owner, the hold has expired or **policies are not accepted**; `POST /api/payments/:id/retry` (retry until the hold expires); `GET /api/payments/:id`; **`POST /api/payments/webhook`** verifies the Stripe signature (use the raw request body) and is the only thing that confirms a booking; handle webhooks idempotently; on hold expiry cancel the PaymentIntent; failed or expired payment leaves the booking unconfirmed and releases inventory. Store only the Stripe payment ID, amount, currency and status.
@@ -250,6 +289,13 @@ Common to **every** member, for their own module(s):
 **Milestone 2 (frontend):** payment page with Stripe-hosted fields (no raw card data), policy display and acceptance checkbox, hold countdown, retry on failure, payment and refund status views, notification bell with unread count and list with mark-as-read.
 
 ### 🟨 **AMINA**: Hotel Booking, Concurrency, Cancellation, Reviews
+
+> **Brief (for you and your Claude)**
+> - **Role:** everything between "user picks rooms" and "reservation confirmed, cancelled or reviewed". Folder: `hotel-bookings` (reviews included).
+> - **Install:** nothing required. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` in `backend/` (use a replica set, because transactions need one).
+> - **Most important:** publish the Hotel Reservation schema by **Sat 14/11** (Abdelrahman needs it). Multi-room booking is all-or-nothing and no two reservations may overlap, even under parallel requests. The hold lasts **10 minutes**, then Expired. Guests per room respect occupancy, with at least one adult. Cancel the whole reservation only, before check-in. Reviews only after a Completed stay, one per reservation. Write the parallel-request test.
+> - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings`, booking queries for the admin list, reviews and `isHidden` for moderation.
+> - **You depend on:** Abdelrahman (hotel, room, availability, policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, status enum).
 
 **Milestone 1 (backend)**
 - **Publish the hotel reservation schema by end of day 3** (rooms, check-in/out, status, hold expiry): Abdelrahman needs it for availability, search, block rules and the moderator reservations view.
@@ -267,6 +313,13 @@ Common to **every** member, for their own module(s):
 **Milestone 2 (frontend):** room selection with guest assignment per room, booking summary and policy acceptance, hold countdown, my hotel bookings (Upcoming/Past/Cancelled), booking details, cancel flow with refund preview and confirmation, review form (rating + text) and review list, hotel moderator reservations view.
 
 ### 🟨 **ABDELRAHMAN**: Hotels, Rooms, Availability, Policies, Hotel Search
+
+> **Brief (for you and your Claude)**
+> - **Role:** hotel catalogue and inventory data: hotels, rooms, availability and blocked dates, policies, hotel search. Folder: `hotels`.
+> - **Install:** nothing extra.
+> - **Most important:** publish the Hotel, Room, Availability and Policy schemas by **Sat 14/11** (Amina and Habashi wait on them) and agree the reservation shape with Amina. Availability ranges must not overlap. Blocking, deactivating or deleting a room is rejected if it overlaps a Confirmed or Pending Payment reservation. Search rules: city or country, dates, guests, rooms, combined occupancy, and "free" means no overlap with Confirmed reservations, unexpired holds or blocked ranges. A moderator manages only their own hotel.
+> - **Others depend on you for:** the four schemas, `setActive()` on Hotel, hotel search reused by itineraries (ITN-25).
+> - **You depend on:** Amina (reservation schema and holds), Ahmed (upload helper for hotel photos, seed data), Ziad (`RefundService` applies your cancellation tiers).
 
 **Milestone 1 (backend)**
 - **Do first (by end of day 3):** publish the Hotel, Room, Availability and Policy schemas so Amina (hotel booking) and Habashi (itinerary hotels) can build on them; agree the reservation shape with Amina.
@@ -287,6 +340,13 @@ Common to **every** member, for their own module(s):
 **Milestone 2 (frontend):** hotel search and results (rooms count, filters, sort), hotel details page (photos, amenities, policy, reviews, rooms for the searched dates), room selection, hotel moderator dashboard (hotel profile and photos, rooms, availability and blocked dates, per-room status calendar, check-in/out times, cancellation tiers, reservations).
 
 ### 🟨 **AHMED ISMAIL**: Blog and Community, Reports, Seeding and Reference Data, Upload Helper, Docs, Frontend Shell
+
+> **Brief (for you and your Claude)**
+> - **Role:** blog and community, report submission, the seed script and reference-data endpoints, the shared upload helper, docs upkeep, and in M2 the shared frontend shell and design system. Folders: `blog`, `uploads`, plus a new reference-data/seed folder.
+> - **Install (in `backend/`):** `npm install csv-parse` and `npm install -D @types/multer`, and add an `npm run seed` script to `backend/package.json`. In M2, pick one styling approach for `frontend/` (for example Tailwind CSS) and install it once for the whole team.
+> - **Most important:** by **Fri 13/11** deliver the seed script (official datasets from the PDF link, IDs unchanged, idempotent), the reference-data endpoints (countries, cities, currencies) and the upload helper (JPG/PNG, max 5 MB, up to 5 images per post/activity/hotel, 1 logo per airline), because everyone else needs them. Then blog rules: one like per user per post, up to 5 tags of 30 characters, search ordered by likes plus comments, and one report per user per item. Own the Report schema and share it with Habashi by Mon 16/11 at the latest.
+> - **Others depend on you for:** seed data, upload helper, Report schema, `isHidden` and `hide/unhide/delete` on posts and comments, the shared UI shell in M2.
+> - **You depend on:** Habashi (public itineraries for the author page, guards and pagination helper).
 
 **Milestone 1 (backend)**
 - **Do first (by end of day 2):** seeding script for **countries, cities, airports (with IANA time zones), attractions** and the **supported currencies** (the currency codes in the countries dataset), using the **official reference datasets linked in the PDF**: the CSVs currently in `docs/requirements/reference-data/` are small samples, replace them with the official files and keep the dataset IDs unchanged (`code`, `city_id`, `iata_code`, `attraction_id`), because the final evaluation uses the same records and IDs. Make the script idempotent. Also expose read endpoints other modules need for the "selected from a predefined list" rules: countries, cities, supported currencies (airports are `GET /api/airports`, owned by Youssef).

@@ -75,7 +75,7 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `JWT_EXPIRES_IN`, `PORT`, `NODE_ENV`, `FRONTEND_URL`, `COOKIE_SECURE` | `backend/.env` | Keep the defaults from `.env.example` locally (`COOKIE_SECURE=false` on localhost only) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | `backend/.env` | Used by the seed script to create the administrator. Choose any email; the password must follow the password rule (8+ characters, at least one letter and one digit) |
 | `STRIPE_SECRET_KEY` | `backend/.env` | Shared Stripe **test** key (`sk_test_...`) from the team leader |
-| `STRIPE_WEBHOOK_SECRET` | `backend/.env` | Per developer: run `stripe listen --forward-to localhost:3000/api/payments/webhook` and copy the `whsec_...` it prints |
+| `STRIPE_WEBHOOK_SECRET` | `backend/.env` | Per developer, generated on your own machine (it cannot be shared). Install the Stripe CLI (`winget install Stripe.StripeCli`), run `stripe login`, then `stripe listen --forward-to localhost:3000/api/payments/webhook` and copy the `whsec_...` it prints. Only needed for payment work. |
 | `FXRATES_API_KEY` | `backend/.env` | Shared FXRatesAPI key from the team leader (backend only, never in the frontend) |
 | `FLIGHT_HOLD_MINUTES` | `backend/.env` | `10` (flight and hotel holds both last 10 minutes: FLT-22, HTL-18) |
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
@@ -100,7 +100,7 @@ All members use the same shared Atlas database (`travel-platform`).
 | `MongooseServerSelectionError` / timeout / "Could not connect to any servers" | Your IP is not in Atlas Network Access: ask the team leader to add it (or `0.0.0.0/0`). |
 | `bad auth` / `Authentication failed` | Wrong user or password in `MONGODB_URI`, or the password needs URL-encoding. |
 | `Invalid environment ... placeholder value` on startup | `backend/.env` still has `<...>` placeholders for `MONGODB_URI` or `JWT_SECRET`. |
-| Stripe webhook returns 400 | `STRIPE_WEBHOOK_SECRET` is from an old `stripe listen` session: restart it and copy the new secret. |
+| Stripe webhook returns 400 | `STRIPE_WEBHOOK_SECRET` is wrong or missing: run `stripe listen --forward-to localhost:3000/api/payments/webhook` on your own machine, copy the `whsec_...` it prints into your `backend/.env`, and restart the backend. |
 
 ## Milestones
 
