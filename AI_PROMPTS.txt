@@ -82,3 +82,20 @@ How the output was used:
 Used the explanation and checklist as the "Verifying develop before it goes to main" section in
 CONTRIBUTING.md. The team leader runs it before every develop -> main merge.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Habashi
+Tool: Claude
+Related Requirement: ACC-19, GEN-02, GEN-05, GEN-07, GEN-13 (issue 2, shared foundations)
+Prompt:
+Start with my issues: build the shared foundations (JWT cookie auth guards and roles, ownership
+helper, pagination helper, field-level validation errors, Swagger requirement-ID decorator, audit
+log service, password hashing, scheduler) test-first.
+
+How the output was used:
+Wrote the tests first, then the implementation. Reviewed all code and the Nest 11 compatible package
+versions (@nestjs/jwt 11, @nestjs/schedule 6, because the latest majors are ESM-only for Nest 12).
+Added the usage guide to backend/README.md. Lint, 79 unit tests, 9 e2e tests, build and a real boot
+against Atlas pass.
+================================================

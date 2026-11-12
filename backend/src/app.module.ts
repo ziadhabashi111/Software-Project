@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { validateEnv } from './config/env.validation';
 import { HealthModule } from './health/health.module';
 import { AdminModule } from './admin/admin.module';
@@ -34,6 +35,8 @@ import { UsersModule } from './users/users.module';
         uri: config.getOrThrow<string>('MONGODB_URI'),
       }),
     }),
+    // One shared scheduler: use @Cron/@Interval in any module (hold expiry, daily FX).
+    ScheduleModule.forRoot(),
     HealthModule,
     AuthModule,
     UsersModule,
