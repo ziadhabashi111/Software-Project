@@ -1,6 +1,7 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ForbiddenException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -64,6 +65,25 @@ describe('AllExceptionsFilter', () => {
         statusCode: 400,
         message: 'Validation failed',
         errors,
+      }),
+    );
+  });
+
+  it('passes a machine-readable error code through', () => {
+    const json = jest.fn();
+    filter.catch(
+      new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'You must change your password first',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      }),
+      hostWith(json),
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 403,
+        code: 'PASSWORD_CHANGE_REQUIRED',
       }),
     );
   });

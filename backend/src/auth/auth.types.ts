@@ -13,6 +13,10 @@ export interface AuthUser {
   role: Role;
   /** Airline or hotel id for moderators (they manage exactly one provider). */
   providerId?: string;
+  /** The login session this token belongs to (inactivity expiry, revocation). */
+  sessionId?: string;
+  /** Temporary password: only changing it is allowed (ACC-07a, ACC-13). */
+  mustChangePassword?: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {

@@ -65,7 +65,7 @@ The scaffold already has NestJS, Mongoose, Swagger, `class-validator`/`class-tra
 
 No package needed: FXRatesAPI calls (use built-in `fetch`), CSV export (plain string), serving uploaded images (Express static assets on the Nest app), in-app notifications.
 
-Optional dev dependency for the parallel-request tests (Yahia, Amina): `mongodb-memory-server` using a replica set (MongoDB transactions need one), or a separate test database on Atlas.
+`mongodb-memory-server` is already installed as a dev dependency (with `develop`). It starts a real MongoDB in memory for the database tests: see `backend/test/helpers/app.ts` and `npm run test:e2e` (the script sets Node's `--experimental-vm-modules` flag, which the MongoDB driver needs under Jest; the first run downloads the MongoDB binary once). The parallel-request tests (Yahia, Amina) need transactions, which need a replica set: use `MongoMemoryReplSet` in your own test helper.
 
 Tools, not packages: the [Stripe CLI](https://docs.stripe.com/stripe-cli) for webhook testing (Ziad and anyone testing payments).
 
@@ -250,7 +250,7 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** everything between "user picks a flight" and "booking confirmed or cancelled": seat holds, passengers, baggage, round-trip, e-ticket, cancellation. Folder: `flight-bookings`.
-> - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` (use a replica set, because transactions need one).
+> - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** the seat hold must be atomic so two requests for the last seat never both succeed. It lasts **10 minutes**, then the booking becomes Expired and the seats are released. A round-trip is one booking with two segments, one payment and one reference. Infants pay 10% and take no seat. Nothing becomes Confirmed before Ziad's verified webhook. Write the parallel-request test.
 > - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings`, the booking queries for the admin list and FLT-29.
 > - **You depend on:** Youssef (flight, cabin and policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, booking-status enum, Sat 14/11).
@@ -297,7 +297,7 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** everything between "user picks rooms" and "reservation confirmed, cancelled or reviewed". Folder: `hotel-bookings` (reviews included).
-> - **Install:** nothing required. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` in `backend/` (use a replica set, because transactions need one).
+> - **Install:** nothing required. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** publish the Hotel Reservation schema by **Sat 14/11** (Abdelrahman needs it). Multi-room booking is all-or-nothing and no two reservations may overlap, even under parallel requests. The hold lasts **10 minutes**, then Expired. Guests per room respect occupancy, with at least one adult. Cancel the whole reservation only, before check-in. Reviews only after a Completed stay, one per reservation. Write the parallel-request test.
 > - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings`, booking queries for the admin list, reviews and `isHidden` for moderation.
 > - **You depend on:** Abdelrahman (hotel, room, availability, policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, status enum).

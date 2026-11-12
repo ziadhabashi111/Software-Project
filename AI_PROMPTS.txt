@@ -99,3 +99,21 @@ versions (@nestjs/jwt 11, @nestjs/schedule 6, because the latest majors are ESM-
 Added the usage guide to backend/README.md. Lint, 79 unit tests, 9 e2e tests, build and a real boot
 against Atlas pass.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Habashi
+Tool: Claude
+Related Requirement: ACC-01, ACC-04, ACC-05, ACC-06, ACC-08, ACC-18, ACC-19, ACC-07a (issue 3)
+Prompt:
+Use JWT for login and logout with refresh and access tokens, plus changing the password. Does the
+project say to seed the admin or allow creating an account?
+
+How the output was used:
+Answered from the requirements (guests self-register, admins are seeded, moderators are created by an
+admin). Wrote tests first, then register, login, refresh with rotation, logout, me, change password,
+lockout, 30-minute session expiry (server-side sessions), temporary-password enforcement and a seeded
+admin. Database tests run against a real MongoDB in memory (mongodb-memory-server); found that the
+MongoDB driver needs Node's --experimental-vm-modules under Jest. Reviewed all code; checked the full
+flow against Atlas on a throwaway database that was dropped afterwards.
+================================================

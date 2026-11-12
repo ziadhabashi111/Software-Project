@@ -1,4 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+} from '@nestjs/common';
 import type { ValidationError } from 'class-validator';
 
 export interface FieldError {
@@ -18,6 +22,23 @@ function flatten(errors: ValidationError[], parent = ''): FieldError[] {
     }
   }
   return result;
+}
+
+/** One inline error on one field, e.g. "Email is already registered" (409). */
+export function fieldError(
+  field: string,
+  message: string,
+  status: 400 | 409 = 400,
+): HttpException {
+  const body = {
+    statusCode: status,
+    error: status === 409 ? 'Conflict' : 'Bad Request',
+    message: 'Validation failed',
+    errors: [{ field, messages: [message] }],
+  };
+  return status === 409
+    ? new ConflictException(body)
+    : new BadRequestException(body);
 }
 
 /** Field-level validation errors for the forms (GEN-02). */
