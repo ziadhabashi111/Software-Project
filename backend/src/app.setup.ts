@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { buildValidationException } from './common/validation/validation-errors';
 
 /**
  * Shared HTTP setup. Used by main.ts and by the e2e tests so tests run
@@ -17,6 +18,7 @@ export function configureApp(app: INestApplication): void {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: buildValidationException,
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());

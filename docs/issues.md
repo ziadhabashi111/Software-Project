@@ -30,7 +30,7 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 - [ ] `AuditLogService` (action, actor, target, timestamp)
 - [ ] Scheduler module (`@nestjs/schedule`) for hold-expiry and daily FX jobs
 - [ ] Salted password hashing
-- [ ] Install `@nestjs/jwt`, `bcryptjs`, `@nestjs/schedule` in `backend/` (approved list: `PROJECT_BREAKDOWN.md` section 3.1)
+- [ ] Install `@nestjs/jwt@^11`, `@nestjs/schedule@^6` and `bcryptjs` in `backend/` (the latest majors are ESM-only for Nest 12; approved list: `PROJECT_BREAKDOWN.md` section 3.1)
 - [ ] Read cookie options from env (`COOKIE_SECURE`, `COOKIE_SAMESITE`, optional `COOKIE_DOMAIN`) so deployment needs no code change (see section 15.3)
 
 ## Issue 3: Registration, login, session (ACC-01, 04, 05, 06, 08, 19)

@@ -47,6 +47,27 @@ describe('AllExceptionsFilter', () => {
     );
   });
 
+  it('passes field-level validation errors through (GEN-02)', () => {
+    const json = jest.fn();
+    const errors = [{ field: 'email', messages: ['email must be an email'] }];
+    filter.catch(
+      new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Validation failed',
+        errors,
+      }),
+      hostWith(json),
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 400,
+        message: 'Validation failed',
+        errors,
+      }),
+    );
+  });
+
   it('maps Mongo duplicate key errors to 409', () => {
     const json = jest.fn();
     filter.catch({ code: 11000 }, hostWith(json));

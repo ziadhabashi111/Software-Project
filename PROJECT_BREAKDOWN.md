@@ -52,9 +52,9 @@ The scaffold already has NestJS, Mongoose, Swagger, `class-validator`/`class-tra
 
 | Package (install inside `backend/` unless noted) | Who installs | When | Why |
 |---|---|---|---|
-| `@nestjs/jwt` | Habashi | day 2 | Sign and verify access/refresh tokens |
+| `@nestjs/jwt@^11` | Habashi | day 2 | Sign and verify access/refresh tokens (v12 is ESM-only for Nest 12 and breaks Jest and this Nest 11 project) |
 | `bcryptjs` | Habashi | day 2 | Salted password hashing (pure JS, no native build on Windows) |
-| `@nestjs/schedule` | Habashi | day 2 | One shared scheduler for hold expiry, daily FX fetch, flight "Departed" status |
+| `@nestjs/schedule@^6` | Habashi | day 2 | One shared scheduler for hold expiry, daily FX fetch, flight "Departed" status (v12 is ESM-only; use v6 with Nest 11) |
 | `csv-parse` | Ahmed | day 2 | Read the official reference CSVs in the seed script (also add an `npm run seed` script) |
 | `@types/multer` (dev) | Ahmed | day 2 | Typings for the upload helper (multer itself ships with `@nestjs/platform-express`) |
 | `stripe` | Ziad | day 3 | PaymentIntents, Refunds API, webhook signature verification |
@@ -142,7 +142,7 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** team lead and owner of the shared foundations; also auth, accounts, admin, moderation, audit logs and itinerary structure. Folders: `auth`, `users`, `admin`, `audit`, `itineraries`.
-> - **Install (in `backend/`):** `npm install @nestjs/jwt bcryptjs @nestjs/schedule`. For the email bonuses later: `npm install nodemailer` and `npm install -D @types/nodemailer`.
+> - **Install (in `backend/`):** `npm install @nestjs/jwt@^11 @nestjs/schedule@^6 bcryptjs` (already installed on `develop` once the foundations PR is merged). For the email bonuses later: `npm install nodemailer` and `npm install -D @types/nodemailer`.
 > - **Most important:** the foundations (guards, roles, ownership helper, pagination helper, error filter, Swagger, `AuditLogService`, scheduler) merged to `develop` by **Fri 13/11**, because every other member is blocked on them. Then lockout (5 failures, 15 min), 30-minute session expiry, and ownership checks.
 > - **Others depend on you for:** guards, `@Roles()`, pagination, errors, Swagger, audit log, `isHidden` moderation hooks.
 > - **You depend on:** Ahmed (Report schema, upload helper, seed), Yahia and Amina (`hasUpcomingConfirmedBookings`), Youssef and Abdelrahman (`setActive`), Ziad (`NotificationService`), Abdelrahman (hotel search for ITN-25), Youssef (budget data for city-group subtotals).
