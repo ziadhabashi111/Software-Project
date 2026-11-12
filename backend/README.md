@@ -18,9 +18,12 @@ npm run start:dev
 ```bash
 npm run lint
 npm test                # unit tests
-npm run test:e2e        # e2e tests (no database needed)
+npm run test:e2e        # integration tests against a real MongoDB in memory (first run downloads it once)
 npm run build
+npm run seed:admin      # creates the administrator from ADMIN_EMAIL / ADMIN_PASSWORD (safe to run twice)
 ```
+
+**Database tests.** `backend/test/helpers/app.ts` boots the real modules against a MongoDB running in memory (no Atlas, no mocks). The script runs Node with `--experimental-vm-modules` because the MongoDB driver needs it under Jest (without it the in-memory server rejects the connection). On Windows the very first run can take a minute while the downloaded MongoDB binary is scanned.
 
 ## What the scaffold already gives you
 
@@ -88,7 +91,24 @@ await this.audit.log({ actorId: admin.id, action: AuditAction.ACCOUNT_SUSPENDED,
 
 **Cookies and tokens.** `TokenService` signs/verifies the tokens and `AuthCookiesService` sets/clears the cookies. Cookie settings come from env (`COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN`), token lifetimes from `JWT_EXPIRES_IN` and `JWT_REFRESH_EXPIRES_IN`.
 
+**Sessions.** Every login creates a server-side session (`auth/sessions`). A session expires after 30 minutes without an authenticated request, is revoked on logout, and `SessionService.revokeAllForUser(id)` must be called when an admin suspends or deactivates an account (the admin module does this). `AuthUser.sessionId` is the current session.
+
 **Scheduler.** `ScheduleModule` is set up once in `AppModule`; use `@Cron()` / `@Interval()` from `@nestjs/schedule` in your own service. Make jobs safe to run twice and also check expiry when reading, so a sleeping server never breaks correctness.
+
+## Authentication API (ACC-01, 04, 05, 06, 08, 19; issue 3)
+
+| Endpoint | Who | What |
+|---|---|---|
+| `POST /api/auth/register` | guest | name, email, password (8+ chars, letter and digit), `consent: true`. Always creates a regular `user`. `409` with `errors[0].field = "email"` if taken |
+| `POST /api/auth/login` | guest | sets the `access_token` and `refresh_token` httpOnly cookies, returns `{ user, mustChangePassword }`. Wrong email or password is always the generic `401 Invalid email or password`. 5 failures lock the account for 15 minutes (`429`). A suspended account gets `403 Your account is suspended` |
+| `POST /api/auth/refresh` | cookie | new access and refresh tokens (rotation), `204`. Reusing an old refresh token kills the session |
+| `POST /api/auth/logout` | anyone | clears the cookies and revokes the session, `204` |
+| `GET /api/auth/me` | logged in | the current user (this is how the frontend learns who is logged in) |
+| `PATCH /api/auth/change-password` | logged in | `currentPassword` + `newPassword`; signs out other devices, keeps this one, `204` |
+
+**For the frontend (Milestone 2):** tokens are never in the response body or readable by JavaScript; send requests with `credentials: 'include'`. The access token lives 15 minutes (`JWT_EXPIRES_IN`). On a `401`, call `POST /api/auth/refresh` once and retry; if that also fails, go to login (and return to the page afterwards, ACC-10). A `403` with `code: "PASSWORD_CHANGE_REQUIRED"` means a temporary password: send the user to the change-password page (only `me`, `change-password` and `logout` work until then).
+
+**Accounts:** admins are seeded with `npm run seed:admin` (there is no admin registration, ACC-18); moderators are created by an admin (ACC-13) with a temporary password, created with `mustChangePassword: true`.
 
 ## Module ownership
 

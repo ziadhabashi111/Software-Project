@@ -7,11 +7,6 @@ import { TokenService } from './token.service';
 function configWith(values: Record<string, string>): ConfigService {
   return {
     get: (key: string, fallback?: string) => values[key] ?? fallback,
-    getOrThrow: (key: string) => {
-      const value = values[key];
-      if (value === undefined) throw new Error(`${key} missing`);
-      return value;
-    },
   } as unknown as ConfigService;
 }
 
@@ -50,17 +45,50 @@ describe('TokenService', () => {
     );
   });
 
+  it('keeps the session id and the must-change-password flag in the access token', () => {
+    const tokens = service();
+    const withSession = {
+      ...user,
+      sessionId: 'session-1',
+      mustChangePassword: true,
+    };
+    expect(
+      tokens.verifyAccessToken(tokens.signAccessToken(withSession)),
+    ).toEqual(withSession);
+  });
+
+  it('omits the must-change-password flag when it is false', () => {
+    const tokens = service();
+    const decoded = tokens.verifyAccessToken(
+      tokens.signAccessToken({
+        ...user,
+        sessionId: 's',
+        mustChangePassword: false,
+      }),
+    );
+    expect(decoded.mustChangePassword).toBeUndefined();
+  });
+
+  it('carries the session id and a rotation id (jti) in the refresh token', () => {
+    const tokens = service();
+    const refresh = tokens.signRefreshToken(
+      { ...user, sessionId: 'session-1' },
+      'jti-abc',
+    );
+    expect(tokens.verifyRefreshToken(refresh)).toEqual({
+      user: { ...user, sessionId: 'session-1' },
+      jti: 'jti-abc',
+    });
+  });
+
   it('does not accept a refresh token as an access token (and vice versa)', () => {
     const tokens = service();
     expect(() =>
-      tokens.verifyAccessToken(tokens.signRefreshToken(user)),
+      tokens.verifyAccessToken(tokens.signRefreshToken(user, 'j')),
     ).toThrow(UnauthorizedException);
     expect(() =>
       tokens.verifyRefreshToken(tokens.signAccessToken(user)),
     ).toThrow(UnauthorizedException);
-    expect(tokens.verifyRefreshToken(tokens.signRefreshToken(user))).toEqual(
-      user,
-    );
   });
 
   it('rejects tampered tokens and tokens signed with another secret', () => {

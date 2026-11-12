@@ -10,8 +10,14 @@ type TokenType = 'access' | 'refresh';
 interface TokenPayload {
   sub: string;
   role: Role;
-  providerId?: string;
   typ: TokenType;
+  providerId?: string;
+  /** Session id. */
+  sid?: string;
+  /** Rotation id of a refresh token. */
+  jti?: string;
+  /** Must change password. */
+  mcp?: true;
 }
 
 /** Signs and verifies the access and refresh JWTs (ACC-19). */
@@ -37,35 +43,64 @@ export class TokenService {
   }
 
   signAccessToken(user: AuthUser): string {
-    return this.sign(user, 'access', this.accessTtlMs);
+    return this.sign(
+      {
+        ...this.identity(user),
+        typ: 'access',
+        ...(user.mustChangePassword ? { mcp: true as const } : {}),
+      },
+      this.accessTtlMs,
+    );
   }
 
-  signRefreshToken(user: AuthUser): string {
-    return this.sign(user, 'refresh', this.refreshTtlMs);
+  /** `jti` changes on every refresh; the session stores the current one. */
+  signRefreshToken(user: AuthUser, jti: string): string {
+    return this.sign(
+      { ...this.identity(user), typ: 'refresh', jti },
+      this.refreshTtlMs,
+    );
   }
 
   verifyAccessToken(token: string): AuthUser {
-    return this.verify(token, 'access');
+    const payload = this.verify(token, 'access');
+    return {
+      ...this.toUser(payload),
+      ...(payload.mcp ? { mustChangePassword: true } : {}),
+    };
   }
 
-  verifyRefreshToken(token: string): AuthUser {
-    return this.verify(token, 'refresh');
+  verifyRefreshToken(token: string): { user: AuthUser; jti: string } {
+    const payload = this.verify(token, 'refresh');
+    if (!payload.jti) throw new UnauthorizedException('Invalid token');
+    return { user: this.toUser(payload), jti: payload.jti };
   }
 
-  private sign(user: AuthUser, typ: TokenType, ttlMs: number): string {
-    const payload: TokenPayload = {
+  private identity(user: AuthUser): Omit<TokenPayload, 'typ'> {
+    return {
       sub: user.id,
       role: user.role,
-      typ,
       ...(user.providerId ? { providerId: user.providerId } : {}),
+      ...(user.sessionId ? { sid: user.sessionId } : {}),
     };
+  }
+
+  private toUser(payload: TokenPayload): AuthUser {
+    return {
+      id: payload.sub,
+      role: payload.role,
+      ...(payload.providerId ? { providerId: payload.providerId } : {}),
+      ...(payload.sid ? { sessionId: payload.sid } : {}),
+    };
+  }
+
+  private sign(payload: TokenPayload, ttlMs: number): string {
     return this.jwt.sign(payload, {
       secret: this.secret,
       expiresIn: Math.floor(ttlMs / 1000),
     });
   }
 
-  private verify(token: string, expected: TokenType): AuthUser {
+  private verify(token: string, expected: TokenType): TokenPayload {
     let payload: TokenPayload;
     try {
       payload = this.jwt.verify<TokenPayload>(token, { secret: this.secret });
@@ -75,10 +110,6 @@ export class TokenService {
     if (payload.typ !== expected) {
       throw new UnauthorizedException('Invalid token type');
     }
-    return {
-      id: payload.sub,
-      role: payload.role,
-      ...(payload.providerId ? { providerId: payload.providerId } : {}),
-    };
+    return payload;
   }
 }

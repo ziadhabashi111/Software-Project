@@ -14,6 +14,8 @@ export interface ErrorResponseBody {
   message: string | string[];
   /** Field-level validation errors (GEN-02), present on validation failures. */
   errors?: { field: string; messages: string[] }[];
+  /** Machine-readable reason for the UI, e.g. PASSWORD_CHANGE_REQUIRED. */
+  code?: string;
   path: string;
   timestamp: string;
 }
@@ -32,7 +34,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const { statusCode, error, message, errors } = this.normalize(exception);
+    const { statusCode, error, message, errors, code } =
+      this.normalize(exception);
 
     if (statusCode >= 500) {
       this.logger.error(
@@ -46,6 +49,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error,
       message,
       ...(errors ? { errors } : {}),
+      ...(code ? { code } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };
@@ -57,6 +61,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     error: string;
     message: string | string[];
     errors?: ErrorResponseBody['errors'];
+    code?: string;
   } {
     if (exception instanceof HttpException) {
       const statusCode = exception.getStatus();
@@ -72,12 +77,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error?: string;
         message?: string | string[];
         errors?: ErrorResponseBody['errors'];
+        code?: string;
       };
       return {
         statusCode,
         error: obj.error ?? HttpStatus[statusCode] ?? 'Error',
         message: obj.message ?? exception.message,
         ...(obj.errors ? { errors: obj.errors } : {}),
+        ...(obj.code ? { code: obj.code } : {}),
       };
     }
 
