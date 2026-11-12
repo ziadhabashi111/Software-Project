@@ -62,9 +62,9 @@ Today is 12/11, so Milestone 1 is **8 days away**. Section 9 has a day-by-day pl
 | 1 | **Habashi** | Team lead, Auth, Accounts, Admin, Audit logs | Medium-High |
 | 2 | **Youssef Wahby** | Airlines, Flights, Flight search + Itinerary budgets/FX | Medium-High |
 | 3 | **Yahia Tarek** | Flight booking, inventory holds, flight cancellation | High |
-| 4 | **Ziad Mohannad** | Hotels, Rooms, Availability, Hotel search + Itinerary structure | Medium-High |
+| 4 | **Ziad Mohannad** | Payments (Stripe), Refunds, Policy acceptance, Notifications + Itinerary structure | High |
 | 5 | **Abdelrahman** | Hotel booking, concurrency, cancellation, Reviews | High |
-| 6 | **Amina** | Payments (Stripe), Refunds, Policy acceptance, Notifications | High |
+| 6 | **Amina** | Hotels, Rooms, Availability, Hotel search | Medium |
 | 7 | **Ahmed Ismail** | Blog and community, DB seeding script, shared upload helper, docs upkeep | **Lightest** |
 
 Ahmed has the easiest load by design: Blog is mostly standard CRUD with no concurrency or payments logic. Everyone else carries at least one concurrency, money, or multi-entity integration problem.
@@ -113,36 +113,13 @@ Common to **every** member, for their own module(s):
 - Flight booking flow (FLT-19..26): `POST /api/flight-bookings/hold`, `POST /api/flight-bookings`, `GET /api/flight-bookings`, `GET /api/flight-bookings/:id`, `POST /api/flight-bookings/:id/cancel`, `GET /api/flight-bookings/:id/e-ticket`
 - **Concurrency-safe inventory holds** (FLT-22): concurrent requests must never reserve more seats than available; holds expire after the period in the Excel sheet and release capacity (scheduled job)
 - Passengers and baggage details, price snapshot at booking time, unique booking reference, booking states (Held, Pending, Confirmed, Cancelled, Expired)
-- Booking becomes Confirmed **only after payment verification** (coordinate with Amina), then generates the e-ticket
-- Cancellation per the airline's policy (refund amount calculated through the shared refund logic from Amina)
+- Booking becomes Confirmed **only after payment verification** (coordinate with Ziad), then generates the e-ticket
+- Cancellation per the airline's policy (refund amount calculated through the shared refund logic from Ziad)
 - Optional bonus only after mandatory work is done: change flight (FLT-27), seat selection (FLT-28)
 
 **Milestone 2 (frontend):** passenger/baggage form, booking summary and policy acceptance, my flight bookings, cancel flow with confirmation dialog, e-ticket view
 
-### 🟨 **ZIAD MOHANNAD**: Hotels, Rooms, Availability, Hotel Search + Itinerary Structure
-
-**Milestone 1 (backend)**
-- Hotels and rooms (HTL-01..10, HTL-15, HTL-22): `POST/GET/PATCH /api/hotels`, room CRUD (`/api/hotels/:id/rooms`), `POST/PATCH /api/hotels/:id/rooms/:roomId/availability` (including blocked dates), `GET /api/hotels/:id/availability`, `GET /api/hotels/:id/rooms/available`, `PUT /api/hotels/:id/policies`, `GET /api/hotels/:id/reservations`
-- Hotel moderator restriction: manage **only** their assigned hotel
-- Hotel search (HTL-11, HTL-12): `GET /api/hotels/search` by destination, dates, guest count, with filtering, sorting, pagination
-- Itinerary structure (ITN-01..12, ITN-20..21): itinerary CRUD, ordered days (`POST/PATCH/DELETE /api/itineraries/:id/days`, `PATCH .../days/reorder`), activities, activity images, dates derived from start date + day order, renumbering/budget recalculation on add/delete/reorder, public/private visibility, `GET /api/itineraries/public/search`, `GET /api/itineraries/public/:id`, `POST /api/itineraries/:id/clone` (independent private copy with attribution)
-- `GET /api/itineraries/:id/hotels` (ITN-25)
-
-**Milestone 2 (frontend):** hotel search and room selection, hotel moderator dashboard, itinerary editor (days, activities, reorder), public itinerary search/detail, clone
-
-### 🟨 **ABDELRAHMAN**: Hotel Booking, Concurrency, Cancellation, Reviews
-
-**Milestone 1 (backend)**
-- Hotel booking (HTL-16..23): `POST /api/hotel-bookings`, `GET /api/hotel-bookings`, `GET /api/hotel-bookings/:id`, `POST /api/hotel-bookings/:id/cancel`
-- **No overlapping reservations** on the same room/dates under concurrent requests; selecting multiple rooms in one hotel must succeed or fail **as one operation** (use a MongoDB transaction or an equivalent atomic approach)
-- Total price, policy snapshot, booking states, confirmation only after payment verification (coordinate with Amina), inventory release on failed/expired payment
-- Cancellation per the hotel's policy with refund calculation
-- Reviews (HTL-23, HTL-24): `POST /api/hotel-bookings/:id/review`, `PATCH/DELETE /api/reviews/:id`, `GET /api/hotels/:id/reviews`; only eligible completed stays may review
-- Optional bonus after mandatory work: moderator replies (HTL-26)
-
-**Milestone 2 (frontend):** booking summary and policy acceptance, my hotel bookings, cancel flow, review form and review list, hotel moderator reservations view
-
-### 🟨 **AMINA**: Payments, Refunds, Policy Acceptance, Notifications
+### 🟨 **ZIAD MOHANNAD**: Payments, Refunds, Policy Acceptance, Notifications + Itinerary Structure
 
 **Milestone 1 (backend)**
 - Payments with **Stripe test mode** (PAY-01): `POST /api/payments`, `POST /api/payments/:id/retry`, `GET /api/payments/:id`, `POST /api/payments/webhook` (verify the Stripe signature; the backend verifies outcomes before confirming any booking); never store raw card data
@@ -151,8 +128,32 @@ Common to **every** member, for their own module(s):
 - Failed or expired payments leave bookings unconfirmed and release inventory
 - Shared **in-app notification service** (GEN notifications): `NotificationService.notify(userId, type, message)` that every other module calls; notification list/read endpoints
 - **Do first (by day 3):** publish the `PaymentService`/`RefundService`/`NotificationService` interfaces so booking owners can integrate
+- Itinerary structure (ITN-01..12, ITN-20..21): itinerary CRUD, ordered days (`POST/PATCH/DELETE /api/itineraries/:id/days`, `PATCH .../days/reorder`), activities, activity images, dates derived from start date + day order, renumbering/budget recalculation on add/delete/reorder, public/private visibility, `GET /api/itineraries/public/search`, `GET /api/itineraries/public/:id`, `POST /api/itineraries/:id/clone` (independent private copy with attribution)
+- `GET /api/itineraries/:id/hotels` (ITN-25): reuse Amina's hotel search
 
-**Milestone 2 (frontend):** payment page (Stripe test mode, Stripe-hosted fields so no raw card data), retry, payment/refund status, notification bell and list
+**Milestone 2 (frontend):** payment page (Stripe test mode, Stripe-hosted fields so no raw card data), retry, payment/refund status, notification bell and list, itinerary editor (days, activities, reorder), public itinerary search/detail, clone
+
+### 🟨 **ABDELRAHMAN**: Hotel Booking, Concurrency, Cancellation, Reviews
+
+**Milestone 1 (backend)**
+- Hotel booking (HTL-16..23): `POST /api/hotel-bookings`, `GET /api/hotel-bookings`, `GET /api/hotel-bookings/:id`, `POST /api/hotel-bookings/:id/cancel`
+- **No overlapping reservations** on the same room/dates under concurrent requests; selecting multiple rooms in one hotel must succeed or fail **as one operation** (use a MongoDB transaction or an equivalent atomic approach)
+- Total price, policy snapshot, booking states, confirmation only after payment verification (coordinate with Ziad), inventory release on failed/expired payment
+- Cancellation per the hotel's policy with refund calculation
+- Reviews (HTL-23, HTL-24): `POST /api/hotel-bookings/:id/review`, `PATCH/DELETE /api/reviews/:id`, `GET /api/hotels/:id/reviews`; only eligible completed stays may review
+- Optional bonus after mandatory work: moderator replies (HTL-26)
+
+**Milestone 2 (frontend):** booking summary and policy acceptance, my hotel bookings, cancel flow, review form and review list, hotel moderator reservations view
+
+### 🟨 **AMINA**: Hotels, Rooms, Availability, Hotel Search
+
+**Milestone 1 (backend)**
+- Hotels and rooms (HTL-01..10, HTL-15, HTL-22): `POST/GET/PATCH /api/hotels`, room CRUD (`/api/hotels/:id/rooms`), `POST/PATCH /api/hotels/:id/rooms/:roomId/availability` (including blocked dates), `GET /api/hotels/:id/availability`, `GET /api/hotels/:id/rooms/available`, `PUT /api/hotels/:id/policies`, `GET /api/hotels/:id/reservations`
+- Hotel moderator restriction: manage **only** their assigned hotel
+- Hotel search (HTL-11, HTL-12): `GET /api/hotels/search` by destination, dates, guest count, with filtering, sorting, pagination
+- **Do first (by day 3):** publish the Hotel, Room, Availability and Policy schemas so Abdelrahman (hotel booking) and Ziad (itinerary hotels) can build on them
+
+**Milestone 2 (frontend):** hotel search and results, room selection, hotel moderator dashboard (hotel profile, rooms, availability, policies, reservations)
 
 ### 🟨 **AHMED ISMAIL**: Blog and Community (lightest load), Seeding, Upload Helper, Docs
 
@@ -173,9 +174,9 @@ Common to **every** member, for their own module(s):
 |---|---|---|
 | Everyone | Habashi | Auth guards, roles decorator, error filter, Swagger setup (day 2) |
 | Everyone | Ahmed | Seed script for countries, cities, airports, attractions (day 2) |
-| Yahia, Abdelrahman | Amina | `PaymentService`, `RefundService`, `NotificationService` interfaces (day 3) |
+| Yahia, Abdelrahman | Ziad | `PaymentService`, `RefundService`, `NotificationService` interfaces (day 3) |
 | Yahia | Youssef | Flights, cabins and policy schemas (day 3) |
-| Abdelrahman | Ziad | Hotel, room, availability, policy schemas (day 3) |
+| Abdelrahman, Ziad | Amina | Hotel, room, availability, policy schemas (day 3) |
 | Ziad, Youssef | Youssef/Ziad | Itinerary schema shared: agree on it on day 1 |
 | Habashi | All | Provider deactivation and notifications touch Flights/Hotels/Bookings |
 
@@ -222,7 +223,7 @@ Agree on schemas on **day 1** in a 30-minute call before anyone writes models.
 | Thu 12/11 | Push repo, everyone clones, team leader shares Mongo URI privately, 30-min schema agreement call, create GitHub issues per requirement ID |
 | Fri 13/11 | Habashi: auth/guards/Swagger/error filter. Ahmed: seed script. Others: schemas and basic CRUD |
 | Sat 14/11 | Foundations merged into `develop`. Everyone rebases. Provider modules (flights, hotels) core endpoints |
-| Sun 15/11 | Search and filters. Amina publishes Payment/Refund/Notification interfaces |
+| Sun 15/11 | Search and filters. Ziad publishes Payment/Refund/Notification interfaces |
 | Mon 16/11 | Booking flows (holds, concurrency) start. Itinerary structure and budgets |
 | Tue 17/11 | Payments integration with bookings. Blog complete |
 | Wed 18/11 | Cross-module integration, cancellation and refund paths, audit logging |
@@ -273,9 +274,9 @@ Per member, the thing evaluators will probe hardest:
 | **Habashi** | Lockout after failed logins, session expiry, suspended account blocked, moderator tied to one provider, provider deactivation vs moderator suspension, audit logs written for admin actions, merge-conflict handling |
 | **Youssef Wahby** | Airline moderator cannot touch another airline; round-trip search with filters/sorting; time zones; FX conversion plus all three failure cases (invalid code, no rate, API down); key never exposed to frontend |
 | **Yahia Tarek** | Two simultaneous requests for the last seat: only one succeeds; hold expiry releases seats; no confirmation before verified payment; policy-based cancellation |
-| **Ziad Mohannad** | Moderator limited to own hotel; blocked dates and availability; search by destination/dates/guests; day reorder updates numbering, dates and budget; clone keeps attribution and is private |
+| **Ziad Mohannad** | Stripe test mode with webhook signature verification; failed/expired payment releases inventory; policy acceptance timestamp stored; refund calculations; notifications fire from other modules; day reorder updates numbering, dates and budget; clone keeps attribution and is private |
 | **Abdelrahman** | No overlapping reservations under concurrency; multi-room booking is all-or-nothing; review only after a completed stay; cancellation refund by policy |
-| **Amina** | Stripe test mode with webhook signature verification; failed/expired payment releases inventory; policy acceptance timestamp stored; refund calculations; notifications fire from other modules |
+| **Amina** | Moderator limited to own hotel; blocked dates and availability; search by destination/dates/guests with filters and sorting; room availability reflects bookings |
 | **Ahmed Ismail** | Draft vs published visibility; author-only edit/delete; one like per user per post; tag and author pages; seed script reproduces the official reference data and IDs; upload validation |
 
 ---
@@ -284,6 +285,6 @@ Per member, the thing evaluators will probe hardest:
 
 - **Concurrency bugs** (holds and overlapping hotel bookings): write a test that fires parallel requests
 - **Schema disagreements** discovered late: lock shared schemas on day 1
-- **Payment/booking coupling** between Amina, Yahia and Abdelrahman: agree on the booking-state machine early
+- **Payment/booking coupling** between Ziad, Yahia and Abdelrahman: agree on the booking-state machine early
 - **One big merge at the end:** merge to `develop` at least every 1 to 2 days
 - **Leaked secrets:** a committed `.env` or Stripe/Mongo credential must be rotated immediately

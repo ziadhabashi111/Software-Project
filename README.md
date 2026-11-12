@@ -17,9 +17,9 @@ Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 | Habashi (team lead) | Auth, Accounts, Admin, Audit logs |
 | Youssef Wahby | Airlines, Flights, Flight search, Itinerary budgets/FX |
 | Yahia Tarek | Flight booking, holds, cancellation |
-| Ziad Mohannad | Hotels, Rooms, Hotel search, Itinerary structure |
+| Ziad Mohannad | Payments, Refunds, Notifications, Itinerary structure |
 | Abdelrahman | Hotel booking, Reviews |
-| Amina | Payments, Refunds, Notifications |
+| Amina | Hotels, Rooms, Availability, Hotel search |
 | Ahmed Ismail | Blog and community, Seeding, Uploads, Docs |
 
 ## Repository Structure

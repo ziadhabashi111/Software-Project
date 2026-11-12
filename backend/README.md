@@ -9,9 +9,9 @@ Scaffold with `npx @nestjs/cli new .` inside this folder (first PR from the team
 | auth, users, admin, audit | Habashi |
 | airlines, flights (+ flight search), itinerary budgets / exchange rates | Youssef Wahby |
 | flight-bookings (holds, e-ticket, cancel) | Yahia Tarek |
-| hotels, rooms, availability (+ hotel search), itineraries (structure) | Ziad Mohannad |
+| payments, refunds, notifications, itineraries (structure) | Ziad Mohannad |
 | hotel-bookings, reviews | Abdelrahman |
-| payments, refunds, notifications | Amina |
+| hotels, rooms, availability (+ hotel search) | Amina |
 | blog (posts, comments, likes, tags), uploads, seed script | Ahmed Ismail |
 
 ## Rules
