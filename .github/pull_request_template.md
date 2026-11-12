@@ -25,7 +25,7 @@ If used:
 - [ ] Relevant entry added to `AI_PROMPTS.txt`
 
 ## Security / scope
-- [ ] Branch is from latest `develop` and targets `develop`
+- [ ] Branch is from latest `main` and targets `main`
 - [ ] Only related changes included
 - [ ] Backend validation and ownership/role checks in place
 - [ ] Swagger docs updated

@@ -4,9 +4,8 @@ Follow this for every change. The team leader reviews all PRs.
 
 ## Branches
 
-- `main`: stable milestone releases only. **Never commit directly.**
-- `develop`: integration branch. All work merges here via pull request.
-- Short-lived branches from the latest `develop`:
+- `main`: the only long-lived branch. It must always work. **Never commit directly**; everything merges via reviewed pull request (branch protection enforces this).
+- Short-lived branches from the latest `main`:
   - `feature/<REQ-ID>-<description>`, e.g. `feature/FLT-11-flight-search`
   - `fix/<REQ-ID>-<description>`, e.g. `fix/FLT-22-seat-hold-race-condition`
   - `refactor/<description>`
@@ -15,20 +14,20 @@ Follow this for every change. The team leader reviews all PRs.
 ## Daily Flow
 
 ```bash
-git checkout develop
-git pull origin develop
+git checkout main
+git pull origin main
 git checkout -b feature/FLT-11-flight-search
 
 # work, then commit small and often
 git add <files>
 git commit -m "feat(flights): implement search"
 git push -u origin feature/FLT-11-flight-search
-# open a PR: feature/FLT-11-flight-search -> develop
+# open a PR: feature/FLT-11-flight-search -> main
 ```
 
-Sync with `develop` regularly (`git pull origin develop` on your branch). Resolve conflicts carefully and never delete a teammate's work.
+Sync with `main` regularly (`git pull origin main` on your branch). Resolve conflicts carefully and never delete a teammate's work.
 
-At milestone release only: `develop` -> `main`.
+Keep branches small and merge within 1 to 2 days. The submission is simply `main` at the deadline.
 
 ## Commit Messages (Conventional Commits)
 

@@ -54,10 +54,10 @@ npm run build
 ```
 
 ## Git workflow
-- `main` = milestone releases only. `develop` = integration. Never commit to `main`.
-- Branches from latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
+- `main` is the only long-lived branch and must always work. Never commit directly to `main`.
+- Branches from latest `main`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`.
 - Conventional Commits: `feat(flights): add round-trip search`. Never `update`, `final`, `fix`.
-- PRs target `develop` and are reviewed by the team leader.
+- PRs target `main` and are reviewed by the team leader.
 
 ## AI usage
 Log every prompt that materially helped in `AI_PROMPTS.txt` (date, student, tool, requirement, prompt, how output was used). Never put secrets in prompts. Review all AI output; every member must be able to explain their code.

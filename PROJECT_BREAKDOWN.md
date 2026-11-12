@@ -93,7 +93,7 @@ Common to **every** member, for their own module(s):
 
 **Milestone 2 (frontend):** registration, login, profile, change password, account deactivation, route protection (UI only, backend still enforces), admin dashboard (accounts, moderators, bookings, reports, audit logs)
 
-**Mandatory deliverable:** auth/guards available on `develop` by day 2 so others can protect their endpoints.
+**Mandatory deliverable:** auth/guards available on `main` by day 2 so others can protect their endpoints.
 
 ### 🟨 **YOUSSEF WAHBY**: Airlines, Flights, Flight Search + Itinerary Budgets and FX
 
@@ -187,11 +187,10 @@ Agree on schemas on **day 1** in a 30-minute call before anyone writes models.
 ## 8. Guidelines We Must Follow
 
 ### Git and GitHub
-- Two long-lived branches: `main` (milestone releases only) and `develop` (integration). **Never develop on `main`.**
-- Branch from the latest `develop`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`. Example: `feature/FLT-22-seat-hold`
-- Open a PR to `develop`; it needs a meaningful title and description, requirement IDs, only related changes, no secrets, and **team-leader review** before merge
-- Sync your branch with `develop` regularly; resolve conflicts carefully
-- Merge `develop` into `main` only at milestone release
+- One long-lived branch: `main`. It must always run. **Never commit directly to `main`**; merge only through reviewed pull requests.
+- Branch from the latest `main`: `feature/<REQ-ID>-<description>`, `fix/<REQ-ID>-<description>`, `refactor/<description>`, `docs/<description>`. Example: `feature/FLT-22-seat-hold`
+- Open a PR to `main`; it needs a meaningful title and description, requirement IDs, only related changes, no secrets, and **team-leader review** before merge
+- Sync your branch with `main` regularly; resolve conflicts carefully
 - Commit often. Git history must show real contributions from **every** member throughout (a single upload at the end is not acceptable)
 - Commit style (Conventional Commits): `feat(flights): add round-trip search`, `fix(hotels): prevent double booking`. Never `update`, `changes`, `final`, `fix`
 
@@ -222,13 +221,13 @@ Agree on schemas on **day 1** in a 30-minute call before anyone writes models.
 |---|---|
 | Thu 12/11 | Push repo, everyone clones, team leader shares Mongo URI privately, 30-min schema agreement call, create GitHub issues per requirement ID |
 | Fri 13/11 | Habashi: auth/guards/Swagger/error filter. Ahmed: seed script. Others: schemas and basic CRUD |
-| Sat 14/11 | Foundations merged into `develop`. Everyone rebases. Provider modules (flights, hotels) core endpoints |
+| Sat 14/11 | Foundations merged into `main`. Everyone rebases. Provider modules (flights, hotels) core endpoints |
 | Sun 15/11 | Search and filters. Ziad publishes Payment/Refund/Notification interfaces |
 | Mon 16/11 | Booking flows (holds, concurrency) start. Itinerary structure and budgets |
 | Tue 17/11 | Payments integration with bookings. Blog complete |
 | Wed 18/11 | Cross-module integration, cancellation and refund paths, audit logging |
 | Thu 19/11 | Swagger polish, concurrency tests, README, `AI_PROMPTS.txt`, bug fixing |
-| Fri 20/11 | **Deadline.** Merge `develop` into `main`, verify a fresh clone runs |
+| Fri 20/11 | **Deadline.** Verify a fresh clone of `main` runs |
 
 Milestone 2 (frontend) runs 21/11 to 11/12: same ownership, each person builds the UI for their own module, with a final integration week.
 
@@ -286,5 +285,5 @@ Per member, the thing evaluators will probe hardest:
 - **Concurrency bugs** (holds and overlapping hotel bookings): write a test that fires parallel requests
 - **Schema disagreements** discovered late: lock shared schemas on day 1
 - **Payment/booking coupling** between Ziad, Yahia and Abdelrahman: agree on the booking-state machine early
-- **One big merge at the end:** merge to `develop` at least every 1 to 2 days
+- **One big merge at the end:** merge to `main` at least every 1 to 2 days
 - **Leaked secrets:** a committed `.env` or Stripe/Mongo credential must be rotated immediately
