@@ -1,0 +1,37 @@
+AI PROMPT LOG
+=============
+Mandatory for this project. Record every prompt that materially contributed to the
+submitted work. Keep this file updated throughout development (not at the end).
+Never include passwords, tokens or credentials in prompts or in this file.
+
+Entry format:
+
+================================================
+Date: YYYY-MM-DD
+Student: Student Name
+Tool: ChatGPT / Claude / Copilot / Gemini / ...
+Related Requirement: e.g. FLT-22
+Prompt:
+<the prompt>
+
+How the output was used:
+<what you used, changed or rejected>
+================================================
+
+
+ENTRIES
+=======
+
+================================================
+Date: 2026-11-12
+Student: Team
+Tool: Claude
+Related Requirement: Project planning
+Prompt:
+Break down the Travel Planning and Booking Platform project PDF, split the work across 7 members
+(Ahmed Ismail gets the easiest part), and create the repo files (README, CONTRIBUTING, etc.).
+
+How the output was used:
+Used as the starting point for PROJECT_BREAKDOWN.md and the repository docs. Task split to be
+reviewed and adjusted by the team before work starts.
+================================================
