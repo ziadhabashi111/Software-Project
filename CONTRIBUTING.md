@@ -34,9 +34,31 @@ git push -u origin feature/FLT-11-flight-search
 
 Pull `develop` into your branch regularly, and always right before you push. If the pull reports conflicts, resolve them on your branch, re-run tests and lint, and commit the resolution before pushing. Never push or merge a branch with unresolved conflicts, and never delete a teammate's work to make a conflict go away (ask the team leader if unsure).
 
+### Verifying `develop` before it goes to `main`
+
+`develop` is where everyone's work meets for the first time: seven modules that call each other, on one shared Atlas database. We check it there so `main`, the branch that gets graded, always works. CI runs automatically on every PR (backend lint and tests, frontend lint and build); this manual pass covers what CI cannot.
+
+**When:** before every `develop` -> `main` merge, and at least before each milestone (20/11 and 11/12). **Who:** the team leader, with the module owner for anything that fails. Copy this checklist (ticked) into the `develop` -> `main` PR description. Early on, only test what has been merged so far.
+
+Start from a fresh `git pull origin develop`:
+
+- [ ] CI is green on the latest `develop` commit (backend and frontend)
+- [ ] Backend: `cd backend && npm install && npm run lint && npm test && npm run build`
+- [ ] Frontend (from Milestone 2): `cd frontend && npm install && npm run lint && npm run build`
+- [ ] Backend starts with a fresh `backend/.env` (from `.env.example` plus the shared values) and `GET /api/health` returns ok
+- [ ] Swagger (`/api/docs`) loads and every merged endpoint shows its requirement ID
+- [ ] Smoke test each merged module in Swagger (or the UI from Milestone 2): register, login, logout; flight and hotel search; flight hold, pay with a Stripe test card, booking Confirmed; hotel booking; cancellation and refund; itinerary create, days, clone; blog post, comment, like; admin suspend and report handling
+- [ ] Parallel-request tests pass (last flight seat; overlapping hotel rooms)
+- [ ] Ownership and role spot checks: another user's booking is rejected, a moderator cannot touch another provider, a suspended account cannot log in
+- [ ] Before a milestone release: a fresh clone runs from the README alone
+
+Optional: run the check against a separate database on the same Atlas cluster (change only the database name at the end of `MONGODB_URI`, for example `travel-platform-verify`) and run the seed there, so test data does not mix with everyone's development data.
+
+If anything fails, do not merge into `main`. Open a `fix/<REQ-ID>-<description>` branch from `develop`, PR it into `develop`, and run the checklist again.
+
 ### Getting work into `main` (team leader)
 
-Once your change is merged into `develop`, check that everything works there (build, lint, tests, server starts, Swagger loads). When `develop` is verified working:
+Once your change is merged into `develop` and the checklist above passes, `develop` is verified working. Then:
 
 ```bash
 git checkout main

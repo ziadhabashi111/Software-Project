@@ -68,3 +68,17 @@ Used as PROJECT_BREAKDOWN.md section 15 (bonus owners and order, deployment date
 go/no-go warning), the per-member briefs in section 6, and docs/issues.md issues 53 to 65. The team
 to review owners and dates before bonus work starts.
 ================================================
+
+================================================
+Date: 2026-11-12
+Student: Habashi
+Tool: Claude
+Related Requirement: Team workflow (develop and main branches, testing)
+Prompt:
+What is the point of the develop branch in this project, and how do we test develop before it goes
+to main?
+
+How the output was used:
+Used the explanation and checklist as the "Verifying develop before it goes to main" section in
+CONTRIBUTING.md. The team leader runs it before every develop -> main merge.
+================================================
