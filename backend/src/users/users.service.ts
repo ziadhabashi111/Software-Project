@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, QueryFilter, Types } from 'mongoose';
 import { Role } from '../auth/auth.types';
 import { LOCK_DURATION_MS, MAX_FAILED_LOGINS } from '../auth/login-policy';
 import { User, UserDocument } from './schemas/user.schema';
 import { UserStatus } from './user-status';
+
+/** Search text is matched literally, never as a pattern. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 export interface NewUser {
   name: string;
@@ -100,6 +105,83 @@ export class UsersService {
 
   async setStatus(userId: string, status: UserStatus): Promise<void> {
     await this.model.updateOne({ _id: userId }, { status }).exec();
+  }
+
+  /**
+   * Moves an account from one status to another only if it is still in the
+   * `from` status and has one of `roles`, so two admins acting at once cannot
+   * both succeed. Returns `null` when nothing matched.
+   */
+  transitionStatus(
+    userId: string,
+    from: UserStatus,
+    to: UserStatus,
+    roles: Role[],
+  ): Promise<UserDocument | null> {
+    return this.model
+      .findOneAndUpdate(
+        { _id: userId, status: from, role: { $in: roles } },
+        { status: to },
+        { new: true },
+      )
+      .exec();
+  }
+
+  /** The admin account list (ACC-14): newest registrations first. */
+  async findPage(
+    filter: { search?: string; role?: Role; status?: UserStatus },
+    page: { skip: number; limit: number },
+  ): Promise<{ items: UserDocument[]; total: number }> {
+    const query: QueryFilter<UserDocument> = {};
+    if (filter.role) query.role = filter.role;
+    if (filter.status) query.status = filter.status;
+    if (filter.search) {
+      const text = new RegExp(escapeRegExp(filter.search), 'i');
+      query.$or = [{ name: text }, { email: text }];
+    }
+    const [items, total] = await Promise.all([
+      this.model
+        .find(query)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(page.skip)
+        .limit(page.limit)
+        .exec(),
+      this.model.countDocuments(query).exec(),
+    ]);
+    return { items, total };
+  }
+
+  findByIds(ids: string[]): Promise<UserDocument[]> {
+    return this.model.find({ _id: { $in: ids } }).exec();
+  }
+
+  async findModeratorIdsByProvider(providerId: string): Promise<string[]> {
+    const moderators = await this.model
+      .find({
+        providerId: new Types.ObjectId(providerId),
+        role: { $in: [Role.AIRLINE_MODERATOR, Role.HOTEL_MODERATOR] },
+      })
+      .select('_id')
+      .exec();
+    return moderators.map((moderator) => moderator.id);
+  }
+
+  /** ACC-07a: a temporary password the account must replace at its next login. */
+  async setTemporaryPassword(
+    userId: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.model
+      .updateOne(
+        { _id: userId },
+        {
+          passwordHash,
+          mustChangePassword: true,
+          failedLoginAttempts: 0,
+          $unset: { lockUntil: 1 },
+        },
+      )
+      .exec();
   }
 
   async setPassword(
