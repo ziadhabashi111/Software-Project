@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -29,18 +30,30 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { UserProfile } from '../users/user-profile';
 import { AdminAccountsService } from './admin-accounts.service';
+import { AdminAuditService, AuditLogRow } from './admin-audit.service';
 import {
   AdminBookingRow,
   AdminBookingsService,
 } from './admin-bookings.service';
 import {
+  AdminModerationService,
+  AdminReportRow,
+  ContentModerationResult,
+  ReportResolution,
+} from './admin-moderation.service';
+import {
   AdminProvidersService,
   ProviderState,
 } from './admin-providers.service';
+import { ContentType } from './content-moderators';
 import { CreateModeratorDto } from './dto/create-moderator.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts.dto';
+import { ListAuditLogsQueryDto } from './dto/list-audit-logs.dto';
 import { ListBookingsQueryDto } from './dto/list-bookings.dto';
+import { ListReportsQueryDto } from './dto/list-reports.dto';
+import { ModerateContentQueryDto } from './dto/moderate-content.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ProviderType } from './provider-directory';
 
 /** Every route here is for administrators only. */
@@ -53,6 +66,8 @@ export class AdminController {
     private readonly accounts: AdminAccountsService,
     private readonly providers: AdminProvidersService,
     private readonly bookings: AdminBookingsService,
+    private readonly moderation: AdminModerationService,
+    private readonly auditLogs: AdminAuditService,
   ) {}
 
   @Get('accounts')
@@ -184,5 +199,74 @@ export class AdminController {
     @Query() query: ListBookingsQueryDto,
   ): Promise<Paginated<AdminBookingRow>> {
     return this.bookings.list(query);
+  }
+
+  @Get('reports')
+  @ApiReq(
+    ['GEN-09', 'GEN-10'],
+    'List open reports',
+    'Reports of posts, comments, reviews and itineraries that are still open, newest first, 10 per page. Empty until the report module is connected.',
+  )
+  @ApiOkResponse({ description: 'A page of open reports' })
+  listReports(
+    @Query() query: ListReportsQueryDto,
+  ): Promise<Paginated<AdminReportRow>> {
+    return this.moderation.listReports(query);
+  }
+
+  @Patch('reports/:id')
+  @ApiReq(
+    'GEN-10',
+    'Resolve a report',
+    'dismiss: nothing happens to the content. hide: the content is hidden (visible only to its author and admins). delete: the content is removed. Every resolution is audited.',
+  )
+  @ApiParam({ name: 'id', description: 'Report id' })
+  @ApiOkResponse({ description: 'What was done' })
+  @ApiNotFoundResponse({ description: 'No such report' })
+  @ApiConflictResponse({ description: 'The report is already resolved' })
+  @ApiServiceUnavailableResponse({
+    description: 'The report or content module is not available yet',
+  })
+  resolveReport(
+    @CurrentUser() admin: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: ResolveReportDto,
+  ): Promise<ReportResolution> {
+    return this.moderation.resolveReport(admin.id, id, dto.action);
+  }
+
+  @Delete('content/:type/:id')
+  @ApiReq(
+    'GEN-10',
+    'Hide or delete content directly',
+    'Any post, comment, review or itinerary, without a report. mode=hide (default) keeps it visible to its author and admins; mode=delete removes it. Audited.',
+  )
+  @ApiParam({ name: 'type', enum: ContentType })
+  @ApiParam({ name: 'id', description: 'Content id' })
+  @ApiOkResponse({ description: 'What was done' })
+  @ApiNotFoundResponse({ description: 'No such content' })
+  @ApiServiceUnavailableResponse({
+    description: 'The module that owns this content is not available yet',
+  })
+  moderateContent(
+    @CurrentUser() admin: AuthUser,
+    @Param('type', new ParseEnumPipe(ContentType)) type: ContentType,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Query() query: ModerateContentQueryDto,
+  ): Promise<ContentModerationResult> {
+    return this.moderation.moderateContent(admin.id, type, id, query.mode);
+  }
+
+  @Get('audit-logs')
+  @ApiReq(
+    'GEN-07',
+    'List the audit trail',
+    'Suspensions, reactivations, password resets, provider deactivations, hides, deletions and report resolutions. Newest first, 10 per page. Filter by action, acting admin, target type and date range.',
+  )
+  @ApiOkResponse({ description: 'A page of audit log entries' })
+  listAuditLogs(
+    @Query() query: ListAuditLogsQueryDto,
+  ): Promise<Paginated<AuditLogRow>> {
+    return this.auditLogs.list(query);
   }
 }

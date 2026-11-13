@@ -152,6 +152,25 @@ Every change writes an audit log entry (never containing a password).
 - **Flight and hotel bookings (Yahia, Amina):** inject `BookingSources` and `register({ type: 'flight' | 'hotel', find })`. `find({ status?, from?, to?, skip, limit })` returns `{ items, total }` newest first (`createdAt` descending); rows are `AdminBookingRecord` (see `admin/booking-sources.ts`). Until one is registered the list is simply empty.
 - **Notifications (Ziad):** provide the `ADMIN_NOTIFIER` token (`notify(userIds, { type, message })`, an adapter around `NotificationService`). The admin module tells the provider's moderators and `affectedUserIds` when a provider is deactivated or reactivated. If the token is missing nothing is sent.
 
+## Moderation and audit logs (GEN-07, GEN-09 admin side, GEN-10; issue 6)
+
+All routes are `ADMIN` only.
+
+| Endpoint | What |
+|---|---|
+| `GET /api/admin/audit-logs` | paginated (10), newest first, with the acting admin; filters `action`, `actorId`, `targetType`, `from`/`to` (`YYYY-MM-DD` covers the whole day, UTC) |
+| `GET /api/admin/reports` | open reports, newest first, with the reporter. Empty until the report module is connected |
+| `PATCH /api/admin/reports/:id` | body `{ action: "dismiss" \| "hide" \| "delete" }`. `409` if already resolved |
+| `DELETE /api/admin/content/:type/:id?mode=hide\|delete` | `type` is `post`, `comment`, `review` or `itinerary`; `hide` is the default |
+
+Resolving a report and moderating content are audited (`REPORT_RESOLVED`, `CONTENT_HIDDEN`, `CONTENT_DELETED`). Until a module registers, resolving with `hide` or `delete` answers `503` with `code: "CONTENT_MODULE_UNAVAILABLE"` (the report stays open), and `PATCH /reports/:id` answers `503` with `code: "REPORTS_MODULE_UNAVAILABLE"`.
+
+**Hooks for the other modules** (import `AdminModule`, register in `onModuleInit`):
+
+- **Reports (Ahmed, GEN-09):** inject `ReportDirectory` and `register(source)`. `ReportSource` has `list({ skip, limit })` (open reports, newest first), `findById(id)` and `resolve(id, { action, adminId })`, which must be atomic and return `false` if the report was already resolved. A report's `status` is `open` or `resolved`. See `admin/report-source.ts`.
+- **Posts and comments (Ahmed), reviews (Amina), itineraries (Habashi):** inject `ContentModerators` and `register(ContentType.POST | COMMENT | REVIEW | ITINERARY, handler)`. The handler has `hide(id)` and `delete(id)`, each returning `{ authorId?, title? }` or `null` for an unknown id, and both must be safe to call twice. `hide` sets `isHidden`.
+- **Showing hidden content:** use `canViewContent(content, user)` or `assertContentVisible(content, user)` from `common/security/content-visibility.ts` wherever you read or list content. Hidden content is visible only to its author and to admins (everyone else gets a `404`).
+
 ## Module ownership
 
 | Module | Owner |
