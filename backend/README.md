@@ -131,6 +131,27 @@ await this.audit.log({ actorId: admin.id, action: AuditAction.ACCOUNT_SUSPENDED,
 - **Content modules (blog, itineraries, reviews):** a deactivated user (`status === 'deactivated'`) must have their posts and public itineraries hidden, and their comments and reviews shown as "Deleted user" (ACC-12). Check `UserStatus` from `users/user-status.ts` when you load an author.
 - **Admin module (suspend, deactivate provider):** call `SessionService.revokeAllForUser(id)` when you suspend an account so it is signed out immediately.
 
+## Admin API (ACC-07a, 13, 14, 15, 16, 17; issue 5)
+
+Every route is `ADMIN` only (`401` without a login, `403` for users and moderators). Administrators are never changed through the API (`403`).
+
+| Endpoint | What |
+|---|---|
+| `GET /api/admin/accounts` | paginated (10), newest first; `search` (name or email, literal text), `role`, `status` |
+| `POST /api/admin/moderators` | `name`, `email`, `role` (`airline_moderator` or `hotel_moderator`), `providerId`, `temporaryPassword`. Must change the password at first login. `409` if the email exists |
+| `POST /api/admin/users/:id/reset-password` | `temporaryPassword`; signs the account out everywhere, clears a login lock, next login must set a new password. `204` |
+| `PATCH /api/admin/accounts/:id/suspend` / `reactivate` | users and moderators; suspended accounts are signed out at once and get `403 Your account is suspended` on login. `409` if the account is in the wrong state (a self-deactivated account stays deactivated) |
+| `PATCH /api/admin/providers/:type/:id/deactivate` / `reactivate` | `type` is `hotel` or `airline`; returns `{ id, type, name, active, changed }`; nothing is audited or notified when `changed` is false |
+| `GET /api/admin/bookings` | read-only, newest first; filters `type` (`flight`/`hotel`), `status`, `from`/`to` (on the departure or check-in date; `YYYY-MM-DD` covers the whole day, UTC) |
+
+Every change writes an audit log entry (never containing a password).
+
+**Hooks for the other modules.** Import `AdminModule` and register in `onModuleInit`:
+
+- **Airlines (Youssef) and hotels (Abdelrahman):** inject `ProviderDirectory` and `register(ProviderType.AIRLINE | ProviderType.HOTEL, handler)`. The handler has `exists(id)` and `setActive(id, active)`. `setActive` returns `{ name, changed, affectedUserIds? }`, or `null` for an unknown id. Deactivated providers must be hidden from search and rejected by booking, existing Confirmed bookings stay valid. Until a type is registered, creating a moderator or (de)activating a provider of that type answers `503` with `code: "PROVIDER_MODULE_UNAVAILABLE"`.
+- **Flight and hotel bookings (Yahia, Amina):** inject `BookingSources` and `register({ type: 'flight' | 'hotel', find })`. `find({ status?, from?, to?, skip, limit })` returns `{ items, total }` newest first (`createdAt` descending); rows are `AdminBookingRecord` (see `admin/booking-sources.ts`). Until one is registered the list is simply empty.
+- **Notifications (Ziad):** provide the `ADMIN_NOTIFIER` token (`notify(userIds, { type, message })`, an adapter around `NotificationService`). The admin module tells the provider's moderators and `affectedUserIds` when a provider is deactivated or reactivated. If the token is missing nothing is sent.
+
 ## Module ownership
 
 | Module | Owner |
