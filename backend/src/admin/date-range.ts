@@ -1,3 +1,9 @@
+import {
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+} from 'class-validator';
+
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -12,4 +18,20 @@ export function parseRangeDate(value: string, endOfRange: boolean): Date {
     );
   }
   return new Date(value);
+}
+
+/** For a `to` filter: the range must not end before its `from`. */
+@ValidatorConstraint({ name: 'isNotBeforeFrom', async: false })
+export class IsNotBeforeFrom implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const from = (args.object as { from?: unknown }).from;
+    if (typeof value !== 'string' || typeof from !== 'string') return true;
+    const start = parseRangeDate(from, false).getTime();
+    const end = parseRangeDate(value, true).getTime();
+    return Number.isNaN(start) || Number.isNaN(end) || end >= start;
+  }
+
+  defaultMessage(): string {
+    return 'End date must not be before the start date';
+  }
 }

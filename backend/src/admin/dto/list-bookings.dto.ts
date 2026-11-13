@@ -7,27 +7,9 @@ import {
   IsString,
   MaxLength,
   Validate,
-  ValidationArguments,
-  ValidatorConstraint,
-  ValidatorConstraintInterface,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
-import { parseRangeDate } from '../date-range';
-
-@ValidatorConstraint({ name: 'isNotBeforeFrom', async: false })
-class IsNotBeforeFrom implements ValidatorConstraintInterface {
-  validate(value: unknown, args: ValidationArguments): boolean {
-    const from = (args.object as { from?: unknown }).from;
-    if (typeof value !== 'string' || typeof from !== 'string') return true;
-    const start = parseRangeDate(from, false).getTime();
-    const end = parseRangeDate(value, true).getTime();
-    return Number.isNaN(start) || Number.isNaN(end) || end >= start;
-  }
-
-  defaultMessage(): string {
-    return 'End date must not be before the start date';
-  }
-}
+import { IsNotBeforeFrom } from '../date-range';
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
