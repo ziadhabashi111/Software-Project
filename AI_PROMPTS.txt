@@ -168,3 +168,23 @@ Because the Report schema (Ahmed), posts and comments (Ahmed), reviews (Amina) a
 do not exist yet, added two hooks (ReportDirectory, ContentModerators) documented in backend/README.md
 instead of depending on those modules. Reviewed all code.
 ================================================
+
+================================================
+Date: 2026-11-13
+Student: Habashi
+Tool: Claude
+Related Requirement: ITN-01, ITN-03, ITN-05, ITN-07, ITN-08, ITN-09, ITN-10, ITN-20, GEN-10 (issue 7)
+Prompt:
+Start issue 7 (itinerary core: itineraries, days, activities): build what does not depend on other
+members' modules.
+
+How the output was used:
+Wrote tests first (97 database tests against a real MongoDB in memory, plus unit tests for the date and
+city-group maths), then the itinerary module: create, list, open, edit, delete with confirmation, days
+(add, edit, delete, move), city groups, activities and public/private visibility. Day numbers and dates
+are derived from position and start date instead of stored, and days and activities are embedded with
+optimistic concurrency so parallel requests cannot pass the 60-day limit. The country and city lists
+(Ahmed), budget totals (Youssef) and activity images (upload helper) are other members' work, so added two
+hooks (PlaceCatalog, ItineraryBudgets) documented in backend/README.md, and registered the itinerary
+admin hide/delete handler for issue 6. Reviewed all code.
+================================================

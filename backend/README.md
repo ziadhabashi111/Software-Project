@@ -171,6 +171,34 @@ Resolving a report and moderating content are audited (`REPORT_RESOLVED`, `CONTE
 - **Posts and comments (Ahmed), reviews (Amina), itineraries (Habashi):** inject `ContentModerators` and `register(ContentType.POST | COMMENT | REVIEW | ITINERARY, handler)`. The handler has `hide(id)` and `delete(id)`, each returning `{ authorId?, title? }` or `null` for an unknown id, and both must be safe to call twice. `hide` sets `isHidden`.
 - **Showing hidden content:** use `canViewContent(content, user)` or `assertContentVisible(content, user)` from `common/security/content-visibility.ts` wherever you read or list content. Hidden content is visible only to its author and to admins (everyone else gets a `404`).
 
+## Itineraries (ITN-01, 03, 05, 07, 08, 09, 10, 20; issue 7)
+
+Regular users only (`403` for admins and moderators). An itinerary belongs to its owner: anyone else gets `404` (ACC-11).
+
+| Endpoint | What |
+|---|---|
+| `POST /api/itineraries` | `title` (<= 100), `countries` (codes like `EG`), `startDate` (`YYYY-MM-DD`). Always created private |
+| `GET /api/itineraries` | mine, most recently updated first, 10 per page: title, countries, start date, `dayCount`, visibility |
+| `GET /api/itineraries/:id` | the full itinerary: numbered, dated `days` (with activities) and `groups` |
+| `PATCH /api/itineraries/:id` | title, countries, start date (all day dates follow it), `visibility` (`public`/`private`) |
+| `DELETE /api/itineraries/:id?confirm=true` | `204`; copies other users made earlier are not affected |
+| `POST /api/itineraries/:id/days` | `city` (required, from the city list), `notes`. Added at the end, at most 60 (`409`, `code: "MAX_DAYS_REACHED"`) |
+| `PATCH /api/itineraries/:id/days/:dayId` | `city`, `notes` (`null` clears) |
+| `DELETE /api/itineraries/:id/days/:dayId?confirm=true` | the rest are renumbered and re-dated; returns the itinerary |
+| `PATCH /api/itineraries/:id/days/reorder` | `{ dayId, position }` moves one day (1 to the number of days) |
+| `POST /api/itineraries/:id/days/:dayId/activities` | `name`, optional `description`, `time` (`HH:mm`), `cost`, `currency` |
+| `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity |
+
+A day has no stored number or date: both follow from its position and the start date, so deleting or moving a day can never leave them wrong. `groups` lists consecutive days in the same city with `startDay`, `endDay`, `dayCount`, dates and a `subtotal`. Days and activities are embedded in the itinerary, saved with optimistic concurrency, so parallel requests never push an itinerary past 60 days or lose a day.
+
+Admins can hide or delete any itinerary through `DELETE /api/admin/content/itinerary/:id` (GEN-10). A hidden itinerary (`isHidden: true`) stays visible to its owner and admins. The public search and the public view (issue 8) must leave out hidden itineraries and those of deactivated owners, and may use `canViewContent`.
+
+**Hooks for the other modules** (import `ItinerariesModule` and register in `onModuleInit`):
+
+- **Countries and cities (Ahmed, GEN-12):** inject `PlaceCatalog` and `register({ isCountry(code), isCity(id) })`. Until then a country only has to look like `EG` and a city like `cairo`.
+- **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
+- **Activity images (ITN-12):** `images` is in the schema; the upload and delete endpoints follow once Ahmed's shared upload helper (GEN-08) exists.
+
 ## Module ownership
 
 | Module | Owner |
