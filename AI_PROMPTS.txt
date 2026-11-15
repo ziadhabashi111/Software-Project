@@ -188,3 +188,17 @@ optimistic concurrency so parallel requests cannot pass the 60-day limit. The co
 hooks (PlaceCatalog, ItineraryBudgets) documented in backend/README.md, and registered the itinerary
 admin hide/delete handler for issue 6. Reviewed all code.
 ================================================
+
+================================================
+Date: 2026-11-15
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-04
+Prompt:
+Explain my role in PROJECT_BREAKDOWN.md and guide me step by step through Milestone 1.
+Help me create the platform currency constant (USD) with a test.
+
+How the output was used:
+Used the explanation to plan my issues. Wrote platform-currency.ts and its spec myself
+following the guidance; chose USD as a constant (not an env variable) after comparing both.
+================================================
