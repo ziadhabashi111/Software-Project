@@ -81,7 +81,7 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |
 
-The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned additions: a platform-currency variable (PAY-04, Ziad) and, if the team wants a separate value, a hotel hold duration.
+The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned addition: a hotel hold duration, if the team wants a separate value. The platform currency (PAY-04) is not a variable: it is the constant PLATFORM_CURRENCY = 'USD' in backend/src/payments/platform-currency.ts, so it is identical on every machine.
 
 ## MongoDB Atlas Access
 
