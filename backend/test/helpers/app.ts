@@ -8,7 +8,7 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet, MongoMemoryServer } from 'mongodb-memory-server';
 import { configureApp } from '../../src/app.setup';
 import { AuthApiModule } from '../../src/auth/auth-api.module';
 import { AuthModule } from '../../src/auth/auth.module';
@@ -39,13 +39,22 @@ export interface TestApp {
  * memory (no Atlas, no mocks). The first run downloads the MongoDB binary.
  */
 export async function createTestApp(
-  options: { extraModules?: NonNullable<ModuleMetadata['imports']> } = {},
+  options: {
+    extraModules?: NonNullable<ModuleMetadata['imports']>;
+    /** Start a one-node replica set so MongoDB transactions work. */
+    replSet?: boolean;
+  } = {},
 ): Promise<TestApp> {
   // Generous launch limit: the first start on Windows is slow while the fresh
   // mongod binary is scanned.
-  const mongo = await MongoMemoryServer.create({
-    instance: { launchTimeout: 120_000 },
-  });
+  const mongo = options.replSet
+    ? await MongoMemoryReplSet.create({
+        replSet: { count: 1, storageEngine: 'wiredTiger' },
+        instanceOpts: [{ launchTimeout: 120_000 }],
+      })
+    : await MongoMemoryServer.create({
+        instance: { launchTimeout: 120_000 },
+      });
   const moduleRef = await Test.createTestingModule({
     imports: [
       ConfigModule.forRoot({

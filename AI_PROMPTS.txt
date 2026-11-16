@@ -202,3 +202,20 @@ How the output was used:
 Used the explanation to plan my issues. Wrote platform-currency.ts and its spec myself
 following the guidance; chose USD as a constant (not an env variable) after comparing both.
 ================================================
+================================================
+Date: 2026-11-16
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-16, HTL-18, GEN-11 (Issue 37)
+Prompt:
+I'm Amina, help me implement my tasks based on the project breakdown file.
+(Chose: build around small ports/registries for the hotels and payments modules
+that are not on develop yet; start with Issue 37.)
+
+How the output was used:
+Claude drafted the hotel reservation schema, the RoomNight lock collection
+(unique per room and night) used inside a MongoDB transaction for all-or-nothing
+10-minute holds, the HotelInventory port for Abdelrahman, the hold-expiry job,
+POST /api/hotel-bookings with HTL-16 guest/occupancy/price rules, unit tests and
+parallel-request e2e tests (replica set). Reviewed the diff, ran tests/lint/build.
+================================================
