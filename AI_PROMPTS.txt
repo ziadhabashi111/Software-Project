@@ -202,3 +202,22 @@ How the output was used:
 Used the explanation to plan my issues. Wrote platform-currency.ts and its spec myself
 following the guidance; chose USD as a constant (not an env variable) after comparing both.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-11 (issue 24)
+Prompt:
+Guide me step by step through issue 24: the shared booking-status enum with allowed transitions and
+the PaymentService, RefundService (preview, issue) and NotificationService (notify) interfaces.
+Explain new TypeScript terms (enum, interface, Promise, await, type) as we go.
+
+How the output was used:
+Wrote booking-status.ts (enum, allowed-transitions table, canTransition and assertCanTransition) and
+its spec myself following the guidance; chose UPPER_SNAKE status values and a 409 Conflict for illegal
+moves. Wrote the RefundService interface myself and the NotificationService and PaymentService
+interfaces from the provided code, using the same Symbol-token pattern as AdminNotifier. Method
+signatures for preview/issue/cancelPendingPayment are my proposal, still to be confirmed with Yahia
+and Amina. Added docs/shared-services.md as the usage note. Reviewed all code.
+================================================
