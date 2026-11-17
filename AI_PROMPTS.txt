@@ -330,3 +330,15 @@ Do my issue 14 (flight search and details): search by airports and local date, r
 How the output was used:
 One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, FLT-29
+Prompt:
+Do my issue 13 (flight cancellation and moderator booking views): cancel after confirmation with 100% refunds, bookings per flight with seats remaining, and the passenger CSV export.
+
+How the output was used:
+Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
+================================================

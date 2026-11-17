@@ -6,6 +6,7 @@ import type { AirlinesService } from './airlines.service';
 import type { AirportsService } from './airports.service';
 import { CabinClass, FlightStatus } from './flight-status';
 import { FlightBookingHooks } from './flight-booking-hooks';
+import type { FlightBookingLink } from './flight-booking-hooks';
 import { FlightsService } from './flights.service';
 import type { Flight } from './schemas/flight.schema';
 
@@ -112,6 +113,15 @@ function build(found: ReturnType<typeof flight> | null) {
     notifications,
   );
   return { service, model, hooks, notifications };
+}
+
+/** A booking link that only knows its Confirmed passengers. */
+function linkWith(userIds: string[]): FlightBookingLink {
+  return {
+    getConfirmedPassengerUserIds: jest.fn().mockResolvedValue(userIds),
+    cancelBookingsForFlight: jest.fn().mockResolvedValue({ cancelled: 0 }),
+    listBookings: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+  };
 }
 
 const createDto = {
@@ -241,9 +251,7 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
 
   it('notifies Confirmed passengers when a time changes', async () => {
     const { service, hooks, notifications } = build(flight());
-    hooks.register({
-      getConfirmedPassengerUserIds: jest.fn().mockResolvedValue(['u1', 'u2']),
-    });
+    hooks.register(linkWith(['u1', 'u2']));
     await service.update('f1', moderator, {
       departureTime: '2090-03-01T15:00',
     });
@@ -257,9 +265,7 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
 
   it('does not notify when nothing about the times changed', async () => {
     const { service, hooks, notifications } = build(flight());
-    hooks.register({
-      getConfirmedPassengerUserIds: jest.fn().mockResolvedValue(['u1']),
-    });
+    hooks.register(linkWith(['u1']));
     await service.update('f1', moderator, {
       departureTime: '2090-03-01T14:30',
     });
