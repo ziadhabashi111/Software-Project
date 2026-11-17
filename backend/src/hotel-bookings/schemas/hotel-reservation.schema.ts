@@ -37,6 +37,19 @@ export class ReservedRoom {
 }
 const ReservedRoomSchema = SchemaFactory.createForClass(ReservedRoom);
 
+/** One cancellation tier as it was when the reservation was made (HTL-10). */
+@Schema({ _id: false })
+export class ReservationCancellationTier {
+  @Prop({ type: Number, required: true, min: 0 })
+  daysBefore!: number;
+
+  @Prop({ type: Number, required: true, min: 0, max: 100 })
+  refundPercent!: number;
+}
+const ReservationCancellationTierSchema = SchemaFactory.createForClass(
+  ReservationCancellationTier,
+);
+
 /** Only the Stripe ids, amount, currency and status are stored (PAY-01). */
 @Schema({ _id: false })
 export class ReservationPayment {
@@ -66,6 +79,10 @@ export class ReservationRefund {
   @Prop({ type: Number })
   amount?: number;
 
+  @Prop({ type: String })
+  currency?: string;
+
+  /** NONE (0% refund), PENDING, REFUNDED or FAILED (PAY-03). */
   @Prop({ type: String })
   status?: string;
 }
@@ -120,6 +137,10 @@ export class HotelReservation {
 
   @Prop({ type: Number, required: true, min: 0 })
   totalPrice!: number;
+
+  /** The hotel's cancellation tiers when the reservation was made (HTL-21). */
+  @Prop({ type: [ReservationCancellationTierSchema], default: [] })
+  cancellationTiers!: ReservationCancellationTier[];
 
   /** Always the platform currency (PAY-04). */
   @Prop({ type: String, required: true })

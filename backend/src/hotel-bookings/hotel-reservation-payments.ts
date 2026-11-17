@@ -6,7 +6,9 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
+import type { RefundResult } from '../payments/refund.service.interface';
 import { newBookingReference } from './booking-reference';
+import { RefundQuote, quoteRefund } from './cancellation-rules';
 import { ReservationStatus, assertCanTransition } from './reservation-status';
 import { HotelReservationView, toReservationView } from './reservation-view';
 import {
@@ -27,6 +29,18 @@ export interface PayableReservation {
   description: string;
   /** Set when a PaymentIntent was already created for this hold (retry). */
   paymentIntentId: string | null;
+}
+
+/** What the refund service needs to refund a cancelled reservation (PAY-03). */
+export interface RefundBasis {
+  reservationId: string;
+  userId: string;
+  paymentIntentId: string;
+  amount: number;
+  percentage: number;
+  currency: string;
+  /** NONE, PENDING, REFUNDED or FAILED. */
+  status: string;
 }
 
 /** The Stripe facts the webhook verified (PAY-01). */
@@ -254,6 +268,71 @@ export class HotelReservationPayments {
         userId: doc.user.toString(),
       } as const;
     });
+  }
+
+  /**
+   * PAY-03 / HTL-21, for `RefundService.preview('hotel', id)`: the refund the
+   * hotel's tiers give on the full total if the reservation were cancelled
+   * now. `null` when there is no such reservation.
+   */
+  async refundQuote(
+    reservationId: string,
+    now: Date = new Date(),
+  ): Promise<RefundQuote | null> {
+    const doc = Types.ObjectId.isValid(reservationId)
+      ? await this.reservations.findById(reservationId)
+      : null;
+    return doc ? quoteRefund(doc, now) : null;
+  }
+
+  /**
+   * PAY-03, for `RefundService.issue('hotel', id)`: the amount fixed when the
+   * guest cancelled and the PaymentIntent to refund. `null` unless the
+   * reservation was cancelled with a refund to pay.
+   */
+  async refundBasis(reservationId: string): Promise<RefundBasis | null> {
+    const doc = Types.ObjectId.isValid(reservationId)
+      ? await this.reservations.findById(reservationId)
+      : null;
+    if (
+      !doc ||
+      doc.status !== ReservationStatus.CANCELLED ||
+      !doc.refund?.status ||
+      !doc.payment?.stripePaymentIntentId
+    ) {
+      return null;
+    }
+    return {
+      reservationId: doc.id,
+      userId: doc.user.toString(),
+      paymentIntentId: doc.payment.stripePaymentIntentId,
+      amount: doc.refund.amount ?? 0,
+      percentage: doc.refund.percentage ?? 0,
+      currency: doc.refund.currency ?? doc.currency,
+      status: doc.refund.status,
+    };
+  }
+
+  /** Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03). */
+  async recordRefundResult(
+    reservationId: string,
+    result: RefundResult,
+  ): Promise<boolean> {
+    const updated = await this.reservations.updateOne(
+      {
+        _id: new Types.ObjectId(reservationId),
+        status: ReservationStatus.CANCELLED,
+      },
+      {
+        $set: {
+          'refund.stripeRefundId': result.refundId,
+          'refund.amount': result.amount,
+          'refund.currency': result.currency,
+          'refund.status': result.status,
+        },
+      },
+    );
+    return updated.matchedCount === 1;
   }
 
   private async findOwned(

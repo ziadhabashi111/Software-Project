@@ -308,6 +308,25 @@ Airline and Airport schemas, create/get/edit airline, baggage and cancellation p
 ================================================
 
 ================================================
+Date: 2026-11-18
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-21, HTL-10, PAY-03 (Issue 40)
+Prompt:
+Continue with my next issue (Issue 40: cancel reservation with refund).
+
+How the output was used:
+Claude drafted the cancellation rules (whole reservation, Confirmed only, before
+the check-in date; refund from the hotel's tiers on the full total, reusing the
+shared FLT-09 tier rule), a snapshot of the tiers on each reservation,
+GET /api/hotel-bookings/:id/cancellation (preview), POST
+/api/hotel-bookings/:id/cancel?confirm=true (transaction, rooms released, refund
+via RefundService, notification), refundQuote/refundBasis/recordRefundResult
+for Ziad, and unit + e2e tests incl. parallel double-cancel. Reviewed the diff,
+ran tests/lint/build.
+================================================
+
+================================================
 Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code

@@ -111,6 +111,10 @@ export class HotelReservationsService {
               user: new Types.ObjectId(user.id),
               hotel: new Types.ObjectId(hotel.id),
               hotelName: hotel.name,
+              cancellationTiers: hotel.cancellationTiers.map((tier) => ({
+                daysBefore: tier.daysBefore,
+                refundPercent: tier.refundPercent,
+              })),
               rooms: priced.rooms.map((room) => ({
                 room: new Types.ObjectId(room.roomId),
                 name: room.name,

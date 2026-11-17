@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -18,11 +26,17 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { Paginated } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
+import type { RefundQuote } from './cancellation-rules';
+import { ConfirmCancelQueryDto } from './dto/confirm-cancel.dto';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import {
   ListHotelBookingsDto,
   ReservationGroup,
 } from './dto/list-hotel-bookings.dto';
+import {
+  CancellationResult,
+  HotelCancellationsService,
+} from './hotel-cancellations.service';
 import { HotelReservationsService } from './hotel-reservations.service';
 import { MyHotelReservationsService } from './my-hotel-reservations.service';
 import type { HotelReservationView } from './reservation-view';
@@ -34,6 +48,7 @@ export class HotelBookingsController {
   constructor(
     private readonly reservations: HotelReservationsService,
     private readonly mine: MyHotelReservationsService,
+    private readonly cancellations: HotelCancellationsService,
   ) {}
 
   @Post()
@@ -130,5 +145,65 @@ export class HotelBookingsController {
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<HotelReservationView> {
     return this.mine.get(user, id);
+  }
+
+  @Get(':id/cancellation')
+  @Roles(Role.USER)
+  @ApiReq(
+    ['HTL-21', 'HTL-10'],
+    'Refund preview before cancelling',
+    "What cancelling now would refund: the hotel's tier with the highest days-before-check-in threshold not above the days remaining (0% if none), applied to the full total. Uses the tiers in force when the reservation was made. Owner only.",
+  )
+  @ApiParam({ name: 'id', description: 'Reservation id' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        reservationId: '6660a1b2c3d4e5f601234567',
+        checkIn: '2027-03-01',
+        daysBeforeCheckIn: 12,
+        totalPrice: 360,
+        refundPercent: 50,
+        refundAmount: 180,
+        currency: 'USD',
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Not found, or not yours' })
+  @ApiConflictResponse({
+    description:
+      'Not Confirmed (NOT_CANCELLABLE) or the check-in date has been reached (CHECK_IN_REACHED)',
+  })
+  previewCancellation(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<RefundQuote> {
+    return this.cancellations.preview(user, id);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @Roles(Role.USER)
+  @ApiReq(
+    ['HTL-21', 'PAY-03'],
+    'Cancel my reservation (whole reservation only)',
+    'Requires ?confirm=true. Cancels your own Confirmed reservation as a whole (no partial cancellation) before the check-in date. All its rooms are released, the refund from the preview is created and sent through the payments module, and you get an in-app notification.',
+  )
+  @ApiParam({ name: 'id', description: 'Reservation id' })
+  @ApiOkResponse({
+    description: '{ reservation, refund } with the reservation now CANCELLED',
+  })
+  @ApiBadRequestResponse({ description: 'Missing ?confirm=true' })
+  @ApiNotFoundResponse({ description: 'Not found, or not yours' })
+  @ApiConflictResponse({
+    description:
+      'Not Confirmed (NOT_CANCELLABLE) or the check-in date has been reached (CHECK_IN_REACHED)',
+  })
+  cancel(
+    // Validated only: the cancellation runs once the confirmation is there.
+    @Query() _confirm: ConfirmCancelQueryDto,
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<CancellationResult> {
+    return this.cancellations.cancel(user, id);
   }
 }
