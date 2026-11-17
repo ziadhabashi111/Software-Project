@@ -221,3 +221,16 @@ interfaces from the provided code, using the same Symbol-token pattern as AdminN
 signatures for preview/issue/cancelPendingPayment are my proposal, still to be confirmed with Yahia
 and Amina. Added docs/shared-services.md as the usage note. Reviewed all code.
 ================================================
+
+================================================
+Date: 2026-11-16
+Student: Habashi
+Tool: Claude Code
+Related Requirement: PAY-04
+Prompt:
+Ziad's PR #90 said it updated the README but did not. Add the missing platform currency section.
+
+How the output was used:
+Added a short "Platform currency" section to backend/README.md (constant, no conversion of booking
+prices). Checked it against issue 29 and PAY-04. Reviewed the diff.
+================================================
