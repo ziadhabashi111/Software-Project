@@ -1,4 +1,15 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -9,16 +20,24 @@ import {
   ApiOkResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
+import { PaginationQueryDto } from '../common/pagination/pagination';
+import { CancelFlightDto } from './dto/cancel-flight.dto';
 import { CreateCabinDto } from './dto/create-cabin.dto';
 import { CreateFlightDto } from './dto/create-flight.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { UpdateFlightDto } from './dto/update-flight.dto';
+import { FlightManagementService } from './flight-management.service';
+import type {
+  FlightBookingsView,
+  FlightCancellationResult,
+} from './flight-management.service';
 import { FlightsService } from './flights.service';
 import type { FlightView } from './flight-view';
 
@@ -70,7 +89,10 @@ const FLIGHT_EXAMPLE = {
 @Roles(Role.AIRLINE_MODERATOR)
 @Controller('flights')
 export class FlightsController {
-  constructor(private readonly flights: FlightsService) {}
+  constructor(
+    private readonly flights: FlightsService,
+    private readonly management: FlightManagementService,
+  ) {}
 
   @Post()
   @ApiReq(
@@ -170,5 +192,109 @@ export class FlightsController {
     @Body() dto: UpdateCabinDto,
   ): Promise<FlightView> {
     return this.flights.updateCabin(id, cabinId, user, dto);
+  }
+
+  @Post(':id/cancel')
+  @ApiReq(
+    ['FLT-06', 'FLT-30'],
+    'Cancel a flight (own airline, after confirmation)',
+    'Send `{ "confirm": true }`. The flight becomes Cancelled and is hidden from search; every Confirmed booking becomes Cancelled with a 100% refund, pending holds are released and passengers are notified. Only Scheduled flights can be cancelled. If the refunds fail part-way the flight stays Cancelled and the same request can be sent again to finish.',
+  )
+  @ApiCreatedResponse({
+    schema: {
+      example: {
+        flight: { ...FLIGHT_EXAMPLE, status: 'Cancelled' },
+        cancelledBookings: 12,
+        notifiedPassengers: 12,
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'confirm is missing or not true' })
+  @ApiConflictResponse({
+    description: 'The flight is Departed or changed meanwhile',
+  })
+  @ApiForbiddenResponse({
+    description: 'Not the moderator of this flight’s airline',
+  })
+  @ApiNotFoundResponse({ description: 'Flight not found' })
+  cancel(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    // Declared so the ValidationPipe enforces `confirm: true` (FLT-06).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    @Body() _dto: CancelFlightDto,
+  ): Promise<FlightCancellationResult> {
+    return this.management.cancel(id, user);
+  }
+
+  @Get(':id/bookings')
+  @ApiReq(
+    'FLT-29',
+    'Bookings of a flight (own airline)',
+    'Booking reference, passenger names, cabin, seats and status (Confirmed or Cancelled), plus seats remaining per cabin. Paginated (10 per page). Only the moderator of the flight’s airline can see them.',
+  )
+  @ApiOkResponse({
+    schema: {
+      example: {
+        flight: {
+          id: '6660a1b2c3d4e5f601234567',
+          flightNumber: 'MS985',
+          status: 'Scheduled',
+        },
+        cabins: [
+          { cabinClass: 'Economy', totalSeats: 150, seatsRemaining: 142 },
+        ],
+        bookings: {
+          items: [
+            {
+              reference: 'FB-7K2M9Q',
+              passengerNames: ['Ana Hassan', 'Omar Hassan'],
+              cabinClass: 'Economy',
+              seats: 2,
+              status: 'Confirmed',
+            },
+          ],
+          total: 1,
+          page: 1,
+          limit: 10,
+        },
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'Not the moderator of this flight’s airline',
+  })
+  @ApiNotFoundResponse({ description: 'Flight not found' })
+  bookings(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginationQueryDto,
+  ): Promise<FlightBookingsView> {
+    return this.management.listBookings(id, user, query);
+  }
+
+  @Get(':id/passengers/export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @ApiReq(
+    'FLT-29',
+    'Export the passenger list as CSV (own airline)',
+    'One line per passenger: booking reference, passenger, cabin, seats, status (Confirmed or Cancelled).',
+  )
+  @ApiOkResponse({ description: 'A CSV file download' })
+  @ApiForbiddenResponse({
+    description: 'Not the moderator of this flight’s airline',
+  })
+  @ApiNotFoundResponse({ description: 'Flight not found' })
+  async exportPassengers(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const { filename, csv } = await this.management.exportPassengers(id, user);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    return new StreamableFile(Buffer.from(csv, 'utf-8'));
   }
 }

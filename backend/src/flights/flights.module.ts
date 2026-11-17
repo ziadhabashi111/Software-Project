@@ -6,6 +6,7 @@ import { AirlinesService } from './airlines.service';
 import { AirportsController } from './airports.controller';
 import { AirportsService } from './airports.service';
 import { FlightBookingHooks } from './flight-booking-hooks';
+import { FlightManagementService } from './flight-management.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
 import { FlightsController } from './flights.controller';
@@ -42,6 +43,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     AirlinesService,
     AirportsService,
     FlightsService,
+    FlightManagementService,
     FlightSearchService,
     FlightBookingHooks,
   ],
