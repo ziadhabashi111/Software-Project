@@ -6,6 +6,12 @@ export interface InventoryHotel {
   name: string;
   /** False when an admin deactivated the hotel (ACC-15): it cannot be booked. */
   active: boolean;
+  /**
+   * The hotel's cancellation tiers (HTL-10): refund percentage (0-100) from
+   * a number of whole days before check-in. Copied onto each reservation when
+   * it is made, so the refund follows the policy the guest accepted.
+   */
+  cancellationTiers: { daysBefore: number; refundPercent: number }[];
 }
 
 /** One room as it is right now, for the requested stay. */

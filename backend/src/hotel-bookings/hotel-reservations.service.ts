@@ -20,6 +20,7 @@ import {
   HotelReservationDocument,
 } from './schemas/hotel-reservation.schema';
 import { RoomNight, RoomNightDocument } from './schemas/room-night.schema';
+import { SharedServices } from './shared-services';
 import {
   HOLD_MINUTES,
   assertGuests,
@@ -27,6 +28,7 @@ import {
   nightsOf,
   parseDate,
   priceRooms,
+  startOfUtcDay,
 } from './stay-rules';
 
 /** How many due holds the expiry job handles per run. */
@@ -60,6 +62,7 @@ export class HotelReservationsService {
     @InjectModel(RoomNight.name)
     private readonly roomNights: Model<RoomNightDocument>,
     private readonly inventory: HotelInventoryRegistry,
+    private readonly shared: SharedServices,
   ) {}
 
   /** `POST /api/hotel-bookings`: hold the rooms for 10 minutes. */
@@ -92,9 +95,15 @@ export class HotelReservationsService {
     const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
     const roomObjectIds = roomIds.map((id) => new Types.ObjectId(id));
 
+    let released: Types.ObjectId[] = [];
     try {
       const reservation = await this.connection.transaction(async (session) => {
-        await this.releaseExpiredNights(roomObjectIds, nights, now, session);
+        released = await this.releaseExpiredNights(
+          roomObjectIds,
+          nights,
+          now,
+          session,
+        );
 
         const [created] = await this.reservations.create(
           [
@@ -102,6 +111,10 @@ export class HotelReservationsService {
               user: new Types.ObjectId(user.id),
               hotel: new Types.ObjectId(hotel.id),
               hotelName: hotel.name,
+              cancellationTiers: hotel.cancellationTiers.map((tier) => ({
+                daysBefore: tier.daysBefore,
+                refundPercent: tier.refundPercent,
+              })),
               rooms: priced.rooms.map((room) => ({
                 room: new Types.ObjectId(room.roomId),
                 name: room.name,
@@ -136,7 +149,8 @@ export class HotelReservationsService {
         );
         return created;
       });
-      return toReservationView(reservation);
+      await this.cancelPayments(released);
+      return toReservationView(reservation, now);
     } catch (error) {
       if (isDuplicateKey(error)) {
         throw new ConflictException({
@@ -185,7 +199,10 @@ export class HotelReservationsService {
           await this.roomNights.deleteMany({ reservation: _id }, { session });
           return true;
         });
-        if (changed) expired += 1;
+        if (changed) {
+          expired += 1;
+          await this.shared.cancelPendingPayment(_id.toString());
+        }
       } catch (error) {
         this.logger.error(
           `Could not expire hotel reservation ${_id.toString()}`,
@@ -194,6 +211,29 @@ export class HotelReservationsService {
       }
     }
     return expired;
+  }
+
+  /**
+   * GEN-11, HTL-23: a Confirmed reservation becomes Completed once its
+   * check-out date has passed. Runs every 10 minutes.
+   */
+  @Interval('hotel-stay-completion', 10 * 60_000)
+  async completeFinishedStays(now: Date = new Date()): Promise<number> {
+    const result = await this.reservations.updateMany(
+      {
+        status: ReservationStatus.CONFIRMED,
+        checkOut: { $lt: startOfUtcDay(now) },
+      },
+      { $set: { status: ReservationStatus.COMPLETED, completedAt: now } },
+    );
+    return result.modifiedCount;
+  }
+
+  /** Expired holds can no longer be paid: cancel their PaymentIntents (PAY-01). */
+  private async cancelPayments(ids: Types.ObjectId[]): Promise<void> {
+    for (const id of ids) {
+      await this.shared.cancelPendingPayment(id.toString());
+    }
   }
 
   /**
@@ -206,7 +246,7 @@ export class HotelReservationsService {
     nights: Date[],
     now: Date,
     session: ClientSession,
-  ): Promise<void> {
+  ): Promise<Types.ObjectId[]> {
     const stale = await this.roomNights
       .find(
         {
@@ -218,13 +258,21 @@ export class HotelReservationsService {
       )
       .session(session)
       .lean();
-    if (stale.length === 0) return;
+    if (stale.length === 0) return [];
 
     const ids = [
       ...new Map(
         stale.map((row) => [row.reservation.toString(), row.reservation]),
       ).values(),
     ];
+    // The holds this request expires, so their PaymentIntents get cancelled.
+    const expiring = await this.reservations
+      .find(
+        { _id: { $in: ids }, status: ReservationStatus.PENDING_PAYMENT },
+        { _id: 1 },
+      )
+      .session(session)
+      .lean();
     await this.reservations.updateMany(
       { _id: { $in: ids }, status: ReservationStatus.PENDING_PAYMENT },
       { $set: { status: ReservationStatus.EXPIRED, expiredAt: now } },
@@ -235,5 +283,6 @@ export class HotelReservationsService {
       { reservation: { $in: ids }, holdExpiresAt: { $lte: now } },
       { session },
     );
+    return expiring.map((row) => row._id);
   }
 }

@@ -267,6 +267,36 @@ stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first
 
 ================================================
 Date: 2026-11-17
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-17, HTL-20, GEN-11, PAY-01 (Issue 39)
+Prompt:
+Continue with my next issue (Issue 39: confirmation and my reservations).
+
+How the output was used:
+Claude switched the module to Ziad's shared BookingStatus enum and drafted
+HotelReservationPayments (forPayment, attachPaymentIntent, confirmPaid for the
+verified webhook: transactional, idempotent, amount/expiry checks, unique
+reference, in-app notification), GET /api/hotel-bookings grouped
+upcoming/past/cancelled, GET /api/hotel-bookings/:id with payment/refund status
+and owner/admin/hotel-moderator access, the Confirmed -> Completed job, and
+PaymentIntent cancellation on hold expiry. Reviewed the diff, ran tests/lint/build.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22, ITN-27
+Prompt:
+A new member, Noureldin, joins and takes part of Abdelrahman's hotel work. Update the team docs with the split: Abdelrahman keeps the catalogue (issues 31-33, dashboard), Noureldin takes search, available rooms, moderator reservations and ITN-27.
+
+How the output was used:
+Updated README, PROJECT_BREAKDOWN.md (team, work split, both briefs, dependencies, rendering table, test focus, HTL and ITN-27 owners) and docs/issues.md (index and owners of issues 34, 35, 36, 61). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-01, FLT-02, FLT-08, FLT-09
@@ -293,4 +323,130 @@ Wrote the Notification schema and registered it in the module myself following t
 userId with ref and index, read defaulting to false). The service, controller, query DTO and unit
 as well. markRead matches on both the notification id 
 and the owner so a user cannot mark someone else's notification (404). Ran lint, tsc and the unit tests.
+================================================
+
+================================================
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-21, HTL-10, PAY-03 (Issue 40)
+Prompt:
+Continue with my next issue (Issue 40: cancel reservation with refund).
+
+How the output was used:
+Claude drafted the cancellation rules (whole reservation, Confirmed only, before
+the check-in date; refund from the hotel's tiers on the full total, reusing the
+shared FLT-09 tier rule), a snapshot of the tiers on each reservation,
+GET /api/hotel-bookings/:id/cancellation (preview), POST
+/api/hotel-bookings/:id/cancel?confirm=true (transaction, rooms released, refund
+via RefundService, notification), refundQuote/refundBasis/recordRefundResult
+for Ziad, and unit + e2e tests incl. parallel double-cancel. Reviewed the diff,
+ran tests/lint/build.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-16
+Prompt:
+Do my issue 15 (itinerary budgets and transport costs): budget entries per day and category, transport costs between cities, edit and delete, owner only, cleanup when a day or itinerary is deleted.
+
+How the output was used:
+Two schemas, owner-only endpoints that load the itinerary with Habashi's ownership check first (404 for others), day and city validation through his PlaceCatalog, an optional currency catalog check, and cleanup methods for the ItineraryBudgets hook (wired together with the totals in the exchange-rate PR). Reviewed the diff; tests for ownership, validation and cleanup.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-18
+Prompt:
+Do my issue 16 (FX conversion and budget summary): FXRatesAPI through the backend only, one fetch per day cached in the database, last cached rates as fallback, the rate date, clear errors for invalid codes, missing rates and API failures, and the budget summary by category and by day.
+
+How the output was used:
+FxService (daily cron plus lazy refresh, one shared fetch, key sent in a header), currency math with a 400 for malformed codes and a 422 for missing rates, a summary that only fetches rates when something is in another currency, and the ItineraryBudgets hook registration so city groups get subtotals. I checked the provider's real response format with one keyless public request. Reviewed the diff; tests cover all three failure cases.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-03, FLT-04, FLT-05, FLT-30
+Prompt:
+Do my issue 12 (flights, cabins, flight status): create flights with local-time-to-UTC storage and the FLT-03 validations, cabins, editing with the booking locks, and the Scheduled/Cancelled/Departed status.
+
+How the output was used:
+Flight and cabin schemas, create/edit flight and add/edit cabin endpoints, an Intl-based local/UTC converter (no new package), atomic guards for the airport lock and seat reductions, a minute job plus computed-on-read Departed status, and optional hooks for Yahia's bookings and Ziad's notifications. Reviewed the diff; tests written for the rules and the service paths.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-11, FLT-12, FLT-15, FLT-17, GEN-06
+Prompt:
+Do my issue 14 (flight search and details): search by airports and local date, round trip, passenger types, cabin filter, price range with min > max error, sorting, pagination, and the flight details page with local times and policies.
+
+How the output was used:
+One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, FLT-29
+Prompt:
+Do my issue 13 (flight cancellation and moderator booking views): cancel after confirmation with 100% refunds, bookings per flight with seats remaining, and the passenger CSV export.
+
+How the output was used:
+Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-26, FLT-11, FLT-12
+Prompt:
+Do the itinerary flights part of my issue 16: search one-way or round-trip flights from a chosen origin to any airport in the city of the itinerary's first day, outbound defaulting to the start date and the return to the last day's date, reusing the flight search.
+
+How the output was used:
+Extracted one shared searchRoutes method from the flight search (the public search now calls it too, existing tests unchanged), then added the owner-only endpoint that finds the first day's city airports and fills in the default dates. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-23, HTL-24, GEN-10, ACC-12 (Issue 41)
+Prompt:
+Let's continue working on the next issue (Issue 41: reviews).
+
+How the output was used:
+Claude drafted the HotelReview schema (one per reservation, unique index),
+POST /api/hotel-bookings/:id/review (owner, Completed stays only),
+PATCH/DELETE /api/reviews/:id, public GET /api/hotels/:id/reviews (average,
+count, newest first, paginated; hidden only for author/admins; "Deleted user"),
+HotelRatings for the hotel details page and search, and the review
+ContentModerator for admin hide/delete. Also resolved an AI_PROMPTS.txt merge
+conflict with develop by keeping both sides. Reviewed the diff, ran tests/lint/build.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: ACC-12, ACC-17, HTL-06, HTL-08, HTL-11, HTL-22, GEN-10 (Issue 42)
+Prompt:
+Start Issue 42 (hooks and tests); finish all of Milestone 1 before Milestone 2.
+
+How the output was used:
+Claude drafted HotelBookingHooks (hasUpcomingConfirmedBookings registered with
+DeactivationBlockers; hotel BookingSource for the admin list, accepting both
+"Confirmed" and "CONFIRMED"), HotelReservationQueries for the hotels side
+(taken rooms, room activity, ever-reserved/upcoming checks, moderator
+reservation list with "Deleted user"), review unhide, a Swagger test checking
+every endpoint carries its requirement ID, and audited my M1 checklist.
+Reviewed the diff, ran tests/lint/build.
 ================================================
