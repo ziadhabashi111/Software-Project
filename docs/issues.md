@@ -4,7 +4,7 @@ One issue per work package, grouped by member. Each is small enough for one bran
 
 Day 1 = Thu 12/11, day 2 = Fri 13/11, day 3 = Sat 14/11. M1 deadline Fri 20/11. M2 deadline Fri 11/12.
 
-Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-36 | Amina 37-43 | Ahmed 44-52 | Bonus and deployment 53-65 (start only after your own mandatory issues are merged)
+Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-33 and 36 (dashboard) | Noureldin 34, 35, 36 (search UI) and 61 | Amina 37-43 | Ahmed 44-52 | Bonus and deployment 53-65 (start only after your own mandatory issues are merged)
 
 ---
 
@@ -295,22 +295,23 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 - [ ] Moderator limited to own hotel
 
 ## Issue 34: Hotel search and filters (HTL-11, 12)
-**Owner:** Abdelrahman | **Milestone:** M1 | **Due:** day 6
+**Owner:** Noureldin | **Milestone:** M1 | **Due:** day 6
 - [ ] `GET /api/hotels/search`: city or country, check-in, check-out, guests, **rooms (default 1)**; active hotels with enough rooms free for the **whole stay** and combined max occupancy >= guests
 - [ ] "Free" = no overlap with Confirmed reservations, unexpired holds or blocked ranges
 - [ ] Validate check-out after check-in, check-in not in the past
 - [ ] Filter inclusive min/max price per night (cheapest qualifying room) and min average rating 1-5 (unrated excluded when set); sort by that price or rating; pagination
 - [ ] Reusable by Habashi's `GET /api/itineraries/:id/hotels`
+- Depends on: Abdelrahman's Hotel, Room and Availability schemas (ask today) and Amina's `RoomNight` and `ROOM_HOLDING_STATUSES` (on `develop`)
 
 ## Issue 35: Available rooms and moderator reservations (HTL-15, 22)
-**Owner:** Abdelrahman | **Milestone:** M1 | **Due:** day 7
+**Owner:** Noureldin | **Milestone:** M1 | **Due:** day 7
 - [ ] `GET /api/hotels/:id/rooms/available`: free rooms for dates with type, beds, occupancy, price/night, **total stay price**
 - [ ] `GET /api/hotels/:id/reservations`: guest, dates, status (own hotel only)
 
 ## Issue 36: M2: hotel search and moderator dashboard
-**Owner:** Abdelrahman | **Milestone:** M2 | **Due:** 9/12
-- [ ] Hotel search/results (rooms count, filters, sort), hotel details page, room selection
-- [ ] Moderator dashboard: profile/photos, rooms, availability and blocked dates, per-room status view, check-in/out times, cancellation tiers, reservations
+**Owner:** Abdelrahman (dashboard), Noureldin (search UI) | **Milestone:** M2 | **Due:** 9/12
+- [ ] **Noureldin:** hotel search/results (rooms count, filters, sort), hotel details page, room selection
+- [ ] **Abdelrahman:** moderator dashboard: profile/photos, rooms, availability and blocked dates, per-room status view, check-in/out times, cancellation tiers. **Noureldin:** the moderator reservations view
 - [ ] Dynamic SSR for search and dashboards
 
 ---
@@ -319,7 +320,7 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 
 ## Issue 37: Reservation schema and concurrency-safe hold (HTL-18, GEN-11)
 **Owner:** Amina | **Milestone:** M1 | **Due:** schema day 3, hold day 6
-- [ ] **Publish reservation schema by day 3** (rooms, check-in/out, status, hold expiry): Abdelrahman depends on it
+- [ ] **Publish reservation schema by day 3** (rooms, check-in/out, status, hold expiry): Abdelrahman and Noureldin depend on it
 - [ ] Hold all selected rooms **together for 10 minutes** as one Pending Payment reservation
 - [ ] If any room overlaps Confirmed, an unexpired hold or a blocked range: **reject the whole request, hold nothing** (transaction or equivalent)
 - [ ] Unpaid -> **Expired**, rooms released; check-out after check-in, check-in not in the past
@@ -353,7 +354,7 @@ Index: Habashi 1-10 | Youssef 11-17 | Yahia 18-23 | Ziad 24-30 | Abdelrahman 31-
 ## Issue 42: Hooks and tests for hotel booking
 **Owner:** Amina | **Milestone:** M1 | **Due:** day 7
 - [ ] `hasUpcomingConfirmedBookings(userId)` for Habashi (ACC-12); booking query for admin bookings (ACC-17)
-- [ ] Reservation data for Abdelrahman's HTL-22 view
+- [ ] Reservation data for Noureldin's HTL-22 view
 - [ ] Tests: ownership, review only after completed stay, refund tiers, occupancy limits
 
 ## Issue 43: M2: hotel booking UI
@@ -483,7 +484,7 @@ Order and owners are in `PROJECT_BREAKDOWN.md` section 15. Bonus cutoff: Sat 5/1
 - [ ] Reuse `pdfkit` installed by Yahia; print-friendly download button in the UI
 
 ## Issue 61: Link bookings to itinerary days (ITN-27)
-**Owner:** Abdelrahman | **Milestone:** M2 (bonus) | **Due:** 30/11
+**Owner:** Noureldin | **Milestone:** M2 (bonus) | **Due:** 30/11
 - [ ] `POST /api/itineraries/:id/bookings`: attach the user's own Confirmed flight or hotel bookings to itinerary days
 - [ ] Linked bookings feed the budget summary (coordinate with Youssef's FX and Habashi's days)
 - [ ] Owner-only for both the itinerary and the booking

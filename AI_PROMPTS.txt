@@ -267,6 +267,36 @@ stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first
 
 ================================================
 Date: 2026-11-17
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-17, HTL-20, GEN-11, PAY-01 (Issue 39)
+Prompt:
+Continue with my next issue (Issue 39: confirmation and my reservations).
+
+How the output was used:
+Claude switched the module to Ziad's shared BookingStatus enum and drafted
+HotelReservationPayments (forPayment, attachPaymentIntent, confirmPaid for the
+verified webhook: transactional, idempotent, amount/expiry checks, unique
+reference, in-app notification), GET /api/hotel-bookings grouped
+upcoming/past/cancelled, GET /api/hotel-bookings/:id with payment/refund status
+and owner/admin/hotel-moderator access, the Confirmed -> Completed job, and
+PaymentIntent cancellation on hold expiry. Reviewed the diff, ran tests/lint/build.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22, ITN-27
+Prompt:
+A new member, Noureldin, joins and takes part of Abdelrahman's hotel work. Update the team docs with the split: Abdelrahman keeps the catalogue (issues 31-33, dashboard), Noureldin takes search, available rooms, moderator reservations and ITN-27.
+
+How the output was used:
+Updated README, PROJECT_BREAKDOWN.md (team, work split, both briefs, dependencies, rendering table, test focus, HTL and ITN-27 owners) and docs/issues.md (index and owners of issues 34, 35, 36, 61). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-01, FLT-02, FLT-08, FLT-09
@@ -287,4 +317,40 @@ Do my issue 15 (itinerary budgets and transport costs): budget entries per day a
 
 How the output was used:
 Two schemas, owner-only endpoints that load the itinerary with Habashi's ownership check first (404 for others), day and city validation through his PlaceCatalog, an optional currency catalog check, and cleanup methods for the ItineraryBudgets hook (wired together with the totals in the exchange-rate PR). Reviewed the diff; tests for ownership, validation and cleanup.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-03, FLT-04, FLT-05, FLT-30
+Prompt:
+Do my issue 12 (flights, cabins, flight status): create flights with local-time-to-UTC storage and the FLT-03 validations, cabins, editing with the booking locks, and the Scheduled/Cancelled/Departed status.
+
+How the output was used:
+Flight and cabin schemas, create/edit flight and add/edit cabin endpoints, an Intl-based local/UTC converter (no new package), atomic guards for the airport lock and seat reductions, a minute job plus computed-on-read Departed status, and optional hooks for Yahia's bookings and Ziad's notifications. Reviewed the diff; tests written for the rules and the service paths.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-11, FLT-12, FLT-15, FLT-17, GEN-06
+Prompt:
+Do my issue 14 (flight search and details): search by airports and local date, round trip, passenger types, cabin filter, price range with min > max error, sorting, pagination, and the flight details page with local times and policies.
+
+How the output was used:
+One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, FLT-29
+Prompt:
+Do my issue 13 (flight cancellation and moderator booking views): cancel after confirmation with 100% refunds, bookings per flight with seats remaining, and the passenger CSV export.
+
+How the output was used:
+Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
 ================================================
