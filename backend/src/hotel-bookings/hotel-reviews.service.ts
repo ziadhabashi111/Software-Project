@@ -172,6 +172,15 @@ export class HotelReviewsService {
     );
   }
 
+  /** GEN-10: an admin makes a hidden review visible again. */
+  unhideById(id: string): Promise<HotelReviewDocument | null> {
+    return this.reviews.findByIdAndUpdate(
+      id,
+      { isHidden: false },
+      { new: true },
+    );
+  }
+
   /** GEN-10: an admin deletes a review. */
   deleteById(id: string): Promise<HotelReviewDocument | null> {
     return this.reviews.findByIdAndDelete(id);
