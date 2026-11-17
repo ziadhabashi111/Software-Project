@@ -238,6 +238,11 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         'CHECK_OUT_NOT_AFTER_CHECK_IN',
       ],
       [
+        'a stay longer than 30 nights',
+        () => body([addRoom()], '2027-03-01', '2027-05-01'),
+        'STAY_TOO_LONG',
+      ],
+      [
         'no adult in the reservation',
         () => ({
           ...body([], '2027-03-01', '2027-03-02'),

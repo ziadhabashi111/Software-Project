@@ -251,3 +251,16 @@ How the output was used:
 Added a short "Platform currency" section to backend/README.md (constant, no conversion of booking
 prices). Checked it against issue 29 and PAY-04. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-16, HTL-18
+Prompt:
+Review Amina's PR #91 and fix the gap: nothing capped the length of a stay, so a far-away check-out would create millions of room-night rows.
+
+How the output was used:
+Added MAX_NIGHTS = 30 and a STAY_TOO_LONG 400 (checked from the dates, before any night is generated) in
+stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first and seen failing. Reviewed the diff.
+================================================

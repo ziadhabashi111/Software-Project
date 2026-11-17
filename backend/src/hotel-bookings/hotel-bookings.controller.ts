@@ -29,7 +29,7 @@ export class HotelBookingsController {
   @ApiReq(
     ['HTL-16', 'HTL-18'],
     'Reserve rooms (10-minute hold)',
-    'Holds one or more rooms of the same hotel for the same dates as one Pending Payment reservation for 10 minutes. Guests are assigned per room (adults, children aged 0-17); the reservation needs at least one adult and no room may exceed its maximum occupancy. The total is the sum over rooms of nights x the price per night at booking time. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, the whole request is rejected (409) and nothing is held. Check-out must be after check-in and check-in cannot be in the past. Unpaid holds become Expired after 10 minutes and the rooms are released.',
+    'Holds one or more rooms of the same hotel for the same dates as one Pending Payment reservation for 10 minutes. Guests are assigned per room (adults, children aged 0-17); the reservation needs at least one adult and no room may exceed its maximum occupancy. The total is the sum over rooms of nights x the price per night at booking time. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, the whole request is rejected (409) and nothing is held. Check-out must be after check-in, a stay covers at most 30 nights, and check-in cannot be in the past. Unpaid holds become Expired after 10 minutes and the rooms are released.',
   )
   @ApiCreatedResponse({
     description: 'The Pending Payment reservation and its hold expiry',
@@ -63,7 +63,7 @@ export class HotelBookingsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Invalid dates, no adult, a room over its occupancy, a room not in this hotel or not available (blocked, inactive or outside its availability)',
+      'Invalid dates (including a stay over 30 nights, STAY_TOO_LONG), no adult, a room over its occupancy, a room not in this hotel or not available (blocked, inactive or outside its availability)',
   })
   @ApiNotFoundResponse({ description: 'Hotel not found or deactivated' })
   @ApiConflictResponse({

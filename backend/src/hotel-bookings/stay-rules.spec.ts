@@ -5,6 +5,7 @@ import {
   assertGuests,
   assertValidStay,
   formatDate,
+  MAX_NIGHTS,
   nightsOf,
   parseDate,
   priceRooms,
@@ -64,6 +65,29 @@ describe('hotel stay rules (HTL-16, HTL-18)', () => {
         assertValidStay(parseDate('2027-03-05'), parseDate('2027-03-05'), now),
       ),
     ).toBe('CHECK_OUT_NOT_AFTER_CHECK_IN');
+  });
+
+  it('allows a stay of exactly the maximum number of nights', () => {
+    const checkIn = parseDate('2027-03-01');
+    const checkOut = new Date(checkIn.getTime() + MAX_NIGHTS * 86_400_000);
+    expect(
+      codeOf(() => assertValidStay(checkIn, checkOut, now)),
+    ).toBeUndefined();
+  });
+
+  it('rejects a stay longer than the maximum before any night is generated', () => {
+    const checkIn = parseDate('2027-03-01');
+    const checkOut = new Date(
+      checkIn.getTime() + (MAX_NIGHTS + 1) * 86_400_000,
+    );
+    expect(codeOf(() => assertValidStay(checkIn, checkOut, now))).toBe(
+      'STAY_TOO_LONG',
+    );
+    expect(
+      codeOf(() =>
+        assertValidStay(parseDate('2027-03-01'), parseDate('9999-12-31'), now),
+      ),
+    ).toBe('STAY_TOO_LONG');
   });
 
   it('needs at least one adult in the reservation, not in every room', () => {
