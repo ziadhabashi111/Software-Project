@@ -199,6 +199,12 @@ Admins can hide or delete any itinerary through `DELETE /api/admin/content/itine
 - **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
 - **Activity images (ITN-12):** `images` is in the schema; the upload and delete endpoints follow once Ahmed's shared upload helper (GEN-08) exists.
 
+## Platform currency (PAY-04; issue 29)
+
+All flight and hotel prices, payments and refunds use one currency: `PLATFORM_CURRENCY` (`'USD'`, a Stripe-supported currency) from `payments/platform-currency.ts`. It is a constant, not an environment variable, so it cannot differ between environments. Import it wherever you store or charge a price; never hard-code a currency code.
+
+Booking prices are **never converted**. Only itinerary budgets are converted, into the user's preferred currency, by the exchange-rate module (ITN-18). That module must not touch flight or hotel prices.
+
 ## Module ownership
 
 | Module | Owner |
