@@ -267,6 +267,36 @@ stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first
 
 ================================================
 Date: 2026-11-17
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-17, HTL-20, GEN-11, PAY-01 (Issue 39)
+Prompt:
+Continue with my next issue (Issue 39: confirmation and my reservations).
+
+How the output was used:
+Claude switched the module to Ziad's shared BookingStatus enum and drafted
+HotelReservationPayments (forPayment, attachPaymentIntent, confirmPaid for the
+verified webhook: transactional, idempotent, amount/expiry checks, unique
+reference, in-app notification), GET /api/hotel-bookings grouped
+upcoming/past/cancelled, GET /api/hotel-bookings/:id with payment/refund status
+and owner/admin/hotel-moderator access, the Confirmed -> Completed job, and
+PaymentIntent cancellation on hold expiry. Reviewed the diff, ran tests/lint/build.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22, ITN-27
+Prompt:
+A new member, Noureldin, joins and takes part of Abdelrahman's hotel work. Update the team docs with the split: Abdelrahman keeps the catalogue (issues 31-33, dashboard), Noureldin takes search, available rooms, moderator reservations and ITN-27.
+
+How the output was used:
+Updated README, PROJECT_BREAKDOWN.md (team, work split, both briefs, dependencies, rendering table, test focus, HTL and ITN-27 owners) and docs/issues.md (index and owners of issues 34, 35, 36, 61). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-01, FLT-02, FLT-08, FLT-09
@@ -275,6 +305,30 @@ Do my issue 11 (airlines, airports, baggage and cancellation policies) in the fl
 
 How the output was used:
 Airline and Airport schemas, create/get/edit airline, baggage and cancellation policy endpoints, the read-only airport list and the airline registration with the admin ProviderDirectory (ACC-13, ACC-15). Reviewed the diff; adapted to Mongoose 9 (QueryFilter), kept the logo as a URL until the upload helper (issue 45) exists, and left the airport seed to issue 44.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-16
+Prompt:
+Do my issue 15 (itinerary budgets and transport costs): budget entries per day and category, transport costs between cities, edit and delete, owner only, cleanup when a day or itinerary is deleted.
+
+How the output was used:
+Two schemas, owner-only endpoints that load the itinerary with Habashi's ownership check first (404 for others), day and city validation through his PlaceCatalog, an optional currency catalog check, and cleanup methods for the ItineraryBudgets hook (wired together with the totals in the exchange-rate PR). Reviewed the diff; tests for ownership, validation and cleanup.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-18
+Prompt:
+Do my issue 16 (FX conversion and budget summary): FXRatesAPI through the backend only, one fetch per day cached in the database, last cached rates as fallback, the rate date, clear errors for invalid codes, missing rates and API failures, and the budget summary by category and by day.
+
+How the output was used:
+FxService (daily cron plus lazy refresh, one shared fetch, key sent in a header), currency math with a 400 for malformed codes and a 422 for missing rates, a summary that only fetches rates when something is in another currency, and the ItineraryBudgets hook registration so city groups get subtotals. I checked the provider's real response format with one keyless public request. Reviewed the diff; tests cover all three failure cases.
 ================================================
 
 ================================================

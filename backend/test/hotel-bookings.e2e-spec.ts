@@ -1,3 +1,4 @@
+import { Module } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import request from 'supertest';
@@ -9,6 +10,7 @@ import {
   InventoryHotel,
   InventoryRoom,
 } from '../src/hotel-bookings/hotel-inventory';
+import { HotelReservationPayments } from '../src/hotel-bookings/hotel-reservation-payments';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
@@ -20,6 +22,8 @@ import {
   RoomNight,
   RoomNightDocument,
 } from '../src/hotel-bookings/schemas/room-night.schema';
+import { NOTIFICATION_SERVICE } from '../src/notifications/notification.service.interface';
+import { PAYMENT_SERVICE } from '../src/payments/payment.service.interface';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
@@ -31,6 +35,20 @@ interface ErrorBody {
   errors?: { field: string; messages: string[] }[];
 }
 
+/** Stand-ins for Ziad's notification and payment services. */
+const notifications = { notify: jest.fn().mockResolvedValue(undefined) };
+const paymentService = {
+  cancelPendingPayment: jest.fn().mockResolvedValue(undefined),
+};
+
+@Module({
+  providers: [
+    { provide: NOTIFICATION_SERVICE, useValue: notifications },
+    { provide: PAYMENT_SERVICE, useValue: paymentService },
+  ],
+})
+class FakeSharedServicesModule {}
+
 describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in memory)', () => {
   let ctx: TestApp;
   let users: UsersService;
@@ -38,6 +56,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
   let reservations: Model<HotelReservationDocument>;
   let nights: Model<RoomNightDocument>;
   let service: HotelReservationsService;
+  let payments: HotelReservationPayments;
   let counter = 0;
 
   /** Fake hotels module (Abdelrahman's side of HotelInventory). */
@@ -77,12 +96,13 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
 
   beforeAll(async () => {
     ctx = await createTestApp({
-      extraModules: [HotelBookingsModule],
+      extraModules: [HotelBookingsModule, FakeSharedServicesModule],
       replSet: true,
     });
     users = ctx.moduleRef.get(UsersService);
     passwords = ctx.moduleRef.get(PasswordService);
     service = ctx.moduleRef.get(HotelReservationsService);
+    payments = ctx.moduleRef.get(HotelReservationPayments);
     reservations = ctx.moduleRef.get(getModelToken(HotelReservation.name));
     nights = ctx.moduleRef.get(getModelToken(RoomNight.name));
     // Unique (room, night) index must exist before the parallel tests.
@@ -110,7 +130,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
     await ctx.close();
   });
 
-  async function loggedInAs(role: Role = Role.USER) {
+  async function loggedInAs(role: Role = Role.USER, providerId?: string) {
     counter += 1;
     const email = `guest${counter}@example.com`;
     const doc = await users.create({
@@ -118,6 +138,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       email,
       passwordHash: await passwords.hash(PASSWORD),
       role,
+      ...(providerId ? { providerId } : {}),
     });
     const client = request.agent(ctx.server);
     await client
@@ -486,6 +507,348 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(await nightsOfRoom(r2)).toBe(0);
       // Running it again changes nothing.
       expect(await service.expireDueHolds()).toBe(0);
+    });
+  });
+  /** Holds one room for the given dates and returns the reservation. */
+  async function holdOne(
+    client: Client,
+    checkIn: string,
+    checkOut: string,
+  ): Promise<HotelReservationView> {
+    const res = await hold(client, body([addRoom()], checkIn, checkOut)).expect(
+      201,
+    );
+    return res.body as HotelReservationView;
+  }
+
+  const paid = (view: HotelReservationView, intent = `pi_${view.id}`) => ({
+    paymentIntentId: intent,
+    amount: view.totalPrice,
+    currency: 'usd',
+  });
+
+  async function setDates(id: string, checkIn: string, checkOut: string) {
+    await reservations.updateOne(
+      { _id: id },
+      {
+        checkIn: new Date(`${checkIn}T00:00:00.000Z`),
+        checkOut: new Date(`${checkOut}T00:00:00.000Z`),
+      },
+    );
+  }
+
+  describe('payment confirmation (HTL-17, PAY-01)', () => {
+    beforeEach(() => {
+      notifications.notify.mockClear();
+      paymentService.cancelPendingPayment.mockClear();
+    });
+
+    it('confirms every room, assigns a unique reference and notifies the user', async () => {
+      const { id: userId, client } = await loggedInAs();
+      const r1 = addRoom();
+      const r2 = addRoom();
+      const held = (
+        await hold(client, body([r1, r2], '2027-10-01', '2027-10-03')).expect(
+          201,
+        )
+      ).body as HotelReservationView;
+
+      const result = await payments.confirmPaid(held.id, paid(held));
+      expect(result.outcome).toBe('confirmed');
+      if (result.outcome !== 'confirmed') return;
+      expect(result.reservation.status).toBe(ReservationStatus.CONFIRMED);
+      expect(result.reservation.reference).toMatch(/^HTL-[A-Z2-9]{8}$/);
+      expect(result.reservation.holdExpiresAt).toBeNull();
+      expect(result.reservation.payment).toEqual({
+        status: 'succeeded',
+        amount: held.totalPrice,
+        currency: 'USD',
+      });
+
+      // The nights no longer expire: the rooms stay taken.
+      expect(
+        await nights.countDocuments({
+          reservation: held.id,
+          holdExpiresAt: { $exists: true },
+        }),
+      ).toBe(0);
+      expect(await nights.countDocuments({ reservation: held.id })).toBe(4);
+      await service.expireDueHolds(new Date(Date.now() + 60 * 60_000));
+      expect((await reservations.findById(held.id).lean())?.status).toBe(
+        ReservationStatus.CONFIRMED,
+      );
+
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+      const [to, type, message] = notifications.notify.mock.calls[0] as [
+        string,
+        string,
+        string,
+      ];
+      expect(to).toBe(userId);
+      expect(type).toBe('HOTEL_BOOKING_CONFIRMED');
+      expect(message).toContain(result.reservation.reference as string);
+      expect(message).toContain('Nile View Hotel');
+    });
+
+    it('is idempotent for webhook retries of the same payment', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-05', '2027-10-06');
+      const first = await payments.confirmPaid(held.id, paid(held));
+      const second = await payments.confirmPaid(held.id, paid(held));
+
+      expect(second.outcome).toBe('already_confirmed');
+      if (first.outcome === 'rejected' || second.outcome === 'rejected') {
+        throw new Error('expected both to succeed');
+      }
+      expect(second.reservation.reference).toBe(first.reservation.reference);
+      expect(notifications.notify).toHaveBeenCalledTimes(1);
+
+      // A different payment for an already confirmed reservation is refused.
+      expect(
+        await payments.confirmPaid(held.id, paid(held, 'pi_other')),
+      ).toEqual({ outcome: 'rejected', reason: 'NOT_PENDING' });
+    });
+
+    it('refuses a payment for the wrong amount or currency (nothing changes)', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-07', '2027-10-08');
+      expect(
+        await payments.confirmPaid(held.id, {
+          ...paid(held),
+          amount: held.totalPrice - 1,
+        }),
+      ).toEqual({ outcome: 'rejected', reason: 'AMOUNT_MISMATCH' });
+      expect(
+        await payments.confirmPaid(held.id, { ...paid(held), currency: 'eur' }),
+      ).toEqual({ outcome: 'rejected', reason: 'AMOUNT_MISMATCH' });
+      const stored = await reservations.findById(held.id).lean();
+      expect(stored?.status).toBe(ReservationStatus.PENDING_PAYMENT);
+      expect(stored?.reference).toBeUndefined();
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+
+    it('refuses a payment that arrives after the hold expired', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-09', '2027-10-10');
+      const later = new Date(Date.now() + 11 * 60_000);
+      expect(await payments.confirmPaid(held.id, paid(held), later)).toEqual({
+        outcome: 'rejected',
+        reason: 'HOLD_EXPIRED',
+      });
+      expect((await reservations.findById(held.id).lean())?.status).toBe(
+        ReservationStatus.PENDING_PAYMENT,
+      );
+    });
+
+    it('refuses an unknown reservation', async () => {
+      const missing = { paymentIntentId: 'pi_x', amount: 1, currency: 'usd' };
+      expect(
+        await payments.confirmPaid(new Types.ObjectId().toHexString(), missing),
+      ).toEqual({ outcome: 'rejected', reason: 'NOT_FOUND' });
+      expect(await payments.confirmPaid('not-an-id', missing)).toEqual({
+        outcome: 'rejected',
+        reason: 'NOT_FOUND',
+      });
+    });
+
+    it('gives each confirmed reservation a different reference', async () => {
+      const { client } = await loggedInAs();
+      const refs = new Set<string>();
+      for (let i = 0; i < 5; i += 1) {
+        const held = await holdOne(client, '2027-10-11', '2027-10-12');
+        const result = await payments.confirmPaid(held.id, paid(held));
+        if (result.outcome !== 'confirmed') throw new Error(result.outcome);
+        refs.add(result.reservation.reference as string);
+      }
+      expect(refs.size).toBe(5);
+    });
+
+    it('tells the payments module what to charge, only for the owner and a live hold', async () => {
+      const owner = await loggedInAs();
+      const stranger = await loggedInAs();
+      const held = await holdOne(owner.client, '2027-10-13', '2027-10-15');
+
+      const payable = await payments.forPayment(held.id, owner.id);
+      expect(payable).toMatchObject({
+        reservationId: held.id,
+        userId: owner.id,
+        amount: held.totalPrice,
+        currency: 'USD',
+        paymentIntentId: null,
+      });
+      await expect(payments.forPayment(held.id, stranger.id)).rejects.toThrow(
+        'Reservation not found',
+      );
+
+      expect(
+        await payments.attachPaymentIntent(
+          held.id,
+          'pi_123',
+          'requires_payment_method',
+        ),
+      ).toBe(true);
+      expect(
+        (await payments.forPayment(held.id, owner.id)).paymentIntentId,
+      ).toBe('pi_123');
+
+      await expect(
+        payments.forPayment(
+          held.id,
+          owner.id,
+          new Date(Date.now() + 11 * 60_000),
+        ),
+      ).rejects.toThrow('hold has expired');
+    });
+
+    it('cancels the PaymentIntent of a hold that expires', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-16', '2027-10-17');
+      await service.expireDueHolds(new Date(Date.now() + 11 * 60_000));
+      expect(paymentService.cancelPendingPayment).toHaveBeenCalledWith(
+        'hotel',
+        held.id,
+      );
+    });
+  });
+
+  describe('my reservations (HTL-20) and details', () => {
+    type Page = {
+      group: string;
+      items: HotelReservationView[];
+      total: number;
+      page: number;
+      limit: number;
+    };
+    let owner: Awaited<ReturnType<typeof loggedInAs>>;
+    let confirmed: HotelReservationView;
+    let pendingLive: HotelReservationView;
+    let pendingExpired: HotelReservationView;
+    let cancelled: HotelReservationView;
+    let stayedOver: HotelReservationView;
+
+    beforeAll(async () => {
+      owner = await loggedInAs();
+      const c = owner.client;
+      confirmed = await holdOne(c, '2027-11-10', '2027-11-12');
+      await payments.confirmPaid(confirmed.id, paid(confirmed));
+      pendingLive = await holdOne(c, '2027-11-01', '2027-11-02');
+      pendingExpired = await holdOne(c, '2027-11-20', '2027-11-21');
+      await reservations.updateOne(
+        { _id: pendingExpired.id },
+        { holdExpiresAt: new Date(Date.now() - 1_000) },
+      );
+      cancelled = await holdOne(c, '2027-11-25', '2027-11-26');
+      await payments.confirmPaid(cancelled.id, paid(cancelled));
+      await reservations.updateOne(
+        { _id: cancelled.id },
+        { status: ReservationStatus.CANCELLED, cancelledAt: new Date() },
+      );
+      // A confirmed stay whose check-out date has passed (job not run yet).
+      stayedOver = await holdOne(c, '2027-11-27', '2027-11-28');
+      await payments.confirmPaid(stayedOver.id, paid(stayedOver));
+      await setDates(stayedOver.id, '2020-01-01', '2020-01-03');
+    });
+
+    const list = async (client: Client, query: string) =>
+      (await client.get(`/api/hotel-bookings${query}`).expect(200))
+        .body as Page;
+
+    it('upcoming (the default): live holds and Confirmed stays, soonest first', async () => {
+      const page = await list(owner.client, '');
+      expect(page.group).toBe('upcoming');
+      expect(page.items.map((r) => r.id)).toEqual([
+        pendingLive.id,
+        confirmed.id,
+      ]);
+      expect(page.items[1].reference).toMatch(/^HTL-/);
+      expect(page.items[1].guests).toEqual({ adults: 1, children: 0 });
+    });
+
+    it('past: completed stays and expired holds, shown with their real status', async () => {
+      const page = await list(owner.client, '?group=past');
+      const byId = new Map(page.items.map((r) => [r.id, r.status]));
+      expect(page.total).toBe(2);
+      expect(byId.get(stayedOver.id)).toBe(ReservationStatus.COMPLETED);
+      expect(byId.get(pendingExpired.id)).toBe(ReservationStatus.EXPIRED);
+    });
+
+    it('cancelled', async () => {
+      const page = await list(owner.client, '?group=cancelled');
+      expect(page.items.map((r) => r.id)).toEqual([cancelled.id]);
+      expect(page.items[0].cancelledAt).not.toBeNull();
+    });
+
+    it('is paginated (GEN-05)', async () => {
+      const page = await list(owner.client, '?group=upcoming&limit=1&page=2');
+      expect(page).toMatchObject({ total: 2, page: 2, limit: 1 });
+      expect(page.items.map((r) => r.id)).toEqual([confirmed.id]);
+    });
+
+    it('shows only my own reservations', async () => {
+      const other = await loggedInAs();
+      const page = await list(other.client, '?group=upcoming');
+      expect(page.total).toBe(0);
+    });
+
+    it('rejects an unknown group and non-users', async () => {
+      await owner.client.get('/api/hotel-bookings?group=soon').expect(400);
+      const admin = await loggedInAs(Role.ADMIN);
+      await admin.client.get('/api/hotel-bookings').expect(403);
+    });
+
+    it('details: the owner sees payment status (confirmation page)', async () => {
+      const res = await owner.client
+        .get(`/api/hotel-bookings/${confirmed.id}`)
+        .expect(200);
+      const view = res.body as HotelReservationView;
+      expect(view.status).toBe(ReservationStatus.CONFIRMED);
+      expect(view.payment?.status).toBe('succeeded');
+      expect(view.refund).toBeNull();
+      expect(view.rooms).toHaveLength(1);
+    });
+
+    it('details: admins and the hotel moderator may look, nobody else (ACC-11)', async () => {
+      const url = `/api/hotel-bookings/${confirmed.id}`;
+      await (await loggedInAs()).client.get(url).expect(404);
+      await (await loggedInAs(Role.ADMIN)).client.get(url).expect(200);
+      await (
+        await loggedInAs(Role.HOTEL_MODERATOR, activeHotel.id)
+      ).client
+        .get(url)
+        .expect(200);
+      await (
+        await loggedInAs(Role.HOTEL_MODERATOR, otherHotel.id)
+      ).client
+        .get(url)
+        .expect(404);
+      await (
+        await loggedInAs(Role.AIRLINE_MODERATOR)
+      ).client
+        .get(url)
+        .expect(403);
+      await owner.client.get('/api/hotel-bookings/not-an-id').expect(404);
+      await owner.client
+        .get(`/api/hotel-bookings/${new Types.ObjectId().toHexString()}`)
+        .expect(404);
+    });
+  });
+
+  describe('Confirmed -> Completed after check-out (GEN-11, HTL-23)', () => {
+    it('completes only stays whose check-out date has passed', async () => {
+      const { client } = await loggedInAs();
+      const done = await holdOne(client, '2027-12-01', '2027-12-02');
+      const future = await holdOne(client, '2027-12-03', '2027-12-04');
+      await payments.confirmPaid(done.id, paid(done));
+      await payments.confirmPaid(future.id, paid(future));
+      await setDates(done.id, '2021-05-01', '2021-05-03');
+
+      expect(await service.completeFinishedStays()).toBeGreaterThanOrEqual(1);
+      const doneNow = await reservations.findById(done.id).lean();
+      expect(doneNow?.status).toBe(ReservationStatus.COMPLETED);
+      expect(doneNow?.completedAt).toBeInstanceOf(Date);
+      expect((await reservations.findById(future.id).lean())?.status).toBe(
+        ReservationStatus.CONFIRMED,
+      );
     });
   });
 });
