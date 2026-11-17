@@ -34,6 +34,15 @@ export class ReviewModerator implements ContentModerator, OnModuleInit {
     return review ? describe(review) : null;
   }
 
+  /**
+   * Restores a hidden review. Not part of the admin `ContentModerator`
+   * interface yet; ready for an "unhide" action in the admin module.
+   */
+  async unhide(id: string): Promise<ModeratedContent | null> {
+    const review = await this.reviews.unhideById(id);
+    return review ? describe(review) : null;
+  }
+
   async delete(id: string): Promise<ModeratedContent | null> {
     const review = await this.reviews.deleteById(id);
     return review ? describe(review) : null;

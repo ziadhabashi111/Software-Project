@@ -3,9 +3,11 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { UsersModule } from '../users/users.module';
 import { HotelBookingsController } from './hotel-bookings.controller';
+import { HotelBookingHooks } from './hotel-booking-hooks';
 import { HotelCancellationsService } from './hotel-cancellations.service';
 import { HotelInventoryRegistry } from './hotel-inventory';
 import { HotelReservationPayments } from './hotel-reservation-payments';
+import { HotelReservationQueries } from './hotel-reservation-queries';
 import { HotelRatings } from './hotel-ratings';
 import { HotelReservationsService } from './hotel-reservations.service';
 import { HotelReviewsController } from './hotel-reviews.controller';
@@ -37,6 +39,10 @@ import { SharedServices } from './shared-services';
  * Reviews (HTL-23, HTL-24): `HotelRatings` gives the average rating and
  * count per hotel for the details page (HTL-02) and search (HTL-12); reviews
  * are registered with the admin `ContentModerators` for hide/delete (GEN-10).
+ * `HotelReservationQueries` gives the hotels side taken rooms (HTL-11, 15),
+ * room activity (HTL-08), deletion/deactivation checks (HTL-06) and the
+ * moderator reservation list (HTL-22). `HotelBookingHooks` registers with
+ * `DeactivationBlockers` (ACC-12) and `BookingSources` (ACC-17).
  * Notifications, payment cancellation and refunds are found by Ziad's tokens
  * through `SharedServices`, so there is no import cycle.
  */
@@ -61,11 +67,14 @@ import { SharedServices } from './shared-services';
     HotelReviewsService,
     HotelRatings,
     ReviewModerator,
+    HotelBookingHooks,
+    HotelReservationQueries,
   ],
   exports: [
     HotelInventoryRegistry,
     HotelReservationPayments,
     HotelRatings,
+    HotelReservationQueries,
     MongooseModule,
   ],
 })

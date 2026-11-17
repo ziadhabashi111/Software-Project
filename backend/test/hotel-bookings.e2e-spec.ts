@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { Role } from '../src/auth/auth.types';
@@ -13,6 +14,8 @@ import {
   InventoryRoom,
 } from '../src/hotel-bookings/hotel-inventory';
 import { HotelReservationPayments } from '../src/hotel-bookings/hotel-reservation-payments';
+import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation-queries';
+import { ReviewModerator } from '../src/hotel-bookings/review-moderator';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
@@ -1349,6 +1352,12 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         (await reviewsOf(hotel.id, admin.client)).items.map((r) => r.id),
       ).toContain(rude.id);
 
+      // Unhide restores it for everyone (GEN-10).
+      await ctx.moduleRef.get(ReviewModerator).unhide(rude.id);
+      expect((await reviewsOf(hotel.id)).items.map((r) => r.id)).toContain(
+        rude.id,
+      );
+
       await admin.client
         .delete(`/api/admin/content/review/${rude.id}?mode=delete`)
         .expect(200);
@@ -1368,6 +1377,315 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(page.items[0].author).toEqual({ id: null, name: 'Deleted user' });
       // It still counts towards the average.
       expect(page.ratingCount).toBe(1);
+    });
+  });
+  describe('hooks for other modules (ACC-12, ACC-17, HTL-06, 08, 11, 22)', () => {
+    let queries: HotelReservationQueries;
+    beforeAll(() => {
+      queries = ctx.moduleRef.get(HotelReservationQueries);
+    });
+
+    const day = (d: string) => new Date(`${d}T00:00:00.000Z`);
+
+    async function confirmedAt(
+      client: Client,
+      roomIds: string[],
+      checkIn: string,
+      checkOut: string,
+    ): Promise<HotelReservationView> {
+      const held = (
+        await hold(client, body(roomIds, checkIn, checkOut)).expect(201)
+      ).body as HotelReservationView;
+      const result = await payments.confirmPaid(held.id, paid(held));
+      if (result.outcome !== 'confirmed') throw new Error(result.outcome);
+      return result.reservation;
+    }
+
+    describe('ACC-12: deactivation is blocked by an upcoming Confirmed stay', () => {
+      it('blocks with a future stay, allows once it is cancelled', async () => {
+        const guest = await loggedInAs();
+        const stay = await confirmedAt(
+          guest.client,
+          [addRoom()],
+          '2028-03-01',
+          '2028-03-03',
+        );
+        const res = await guest.client
+          .delete('/api/users/me?confirm=true')
+          .expect(409);
+        expect((res.body as ErrorBody).code).toBe('UPCOMING_BOOKINGS');
+
+        await guest.client
+          .post(`/api/hotel-bookings/${stay.id}/cancel?confirm=true`)
+          .expect(200);
+        await guest.client.delete('/api/users/me?confirm=true').expect(204);
+      });
+
+      it('counts a stay in progress, not a finished one or an unpaid hold', async () => {
+        const guest = await loggedInAs();
+        const stay = await confirmedAt(
+          guest.client,
+          [addRoom()],
+          '2028-03-05',
+          '2028-03-07',
+        );
+        const today = new Date().toISOString().slice(0, 10);
+        await setDates(stay.id, '2020-01-01', today);
+        await guest.client.delete('/api/users/me?confirm=true').expect(409);
+
+        await setDates(stay.id, '2020-01-01', '2020-01-02');
+        await hold(
+          guest.client,
+          body([addRoom()], '2028-03-09', '2028-03-10'),
+        ).expect(201);
+        await guest.client.delete('/api/users/me?confirm=true').expect(204);
+      });
+    });
+
+    describe('ACC-17: hotel reservations in the admin booking list', () => {
+      type Row = {
+        id: string;
+        reference: string;
+        type: string;
+        provider: { id: string; name: string };
+        status: string;
+        amount: number;
+        user: { id: string; name?: string };
+      };
+
+      it('lists them with user, hotel, dates, amount and status, and filters', async () => {
+        const guest = await loggedInAs();
+        const confirmed = await confirmedAt(
+          guest.client,
+          [addRoom()],
+          '2029-05-01',
+          '2029-05-03',
+        );
+        const pending = (
+          await hold(
+            guest.client,
+            body([addRoom()], '2029-05-10', '2029-05-11'),
+          ).expect(201)
+        ).body as HotelReservationView;
+        const admin = await loggedInAs(Role.ADMIN);
+        const list = async (query: string) =>
+          (
+            await admin.client
+              .get(`/api/admin/bookings?type=hotel&limit=100${query}`)
+              .expect(200)
+          ).body as { items: Row[]; total: number };
+
+        const all = await list('&from=2029-05-01&to=2029-05-31');
+        const row = all.items.find((r) => r.id === confirmed.id);
+        expect(row).toMatchObject({
+          reference: confirmed.reference,
+          type: 'hotel',
+          provider: { id: activeHotel.id, name: 'Nile View Hotel' },
+          status: ReservationStatus.CONFIRMED,
+          amount: confirmed.totalPrice,
+          user: { id: guest.id },
+        });
+        expect(all.items.find((r) => r.id === pending.id)?.reference).toBe('');
+
+        for (const status of ['Confirmed', 'CONFIRMED']) {
+          const ids = (
+            await list(`&status=${status}&from=2029-05-01&to=2029-05-31`)
+          ).items.map((r) => r.id);
+          expect(ids).toContain(confirmed.id);
+          expect(ids).not.toContain(pending.id);
+        }
+        const pendingIds = (
+          await list('&status=Pending%20Payment&from=2029-05-01&to=2029-05-31')
+        ).items.map((r) => r.id);
+        expect(pendingIds).toEqual([pending.id]);
+        expect((await list('&status=Booked')).total).toBe(0);
+        expect(
+          (await list('&from=2029-05-02&to=2029-05-31')).items.map((r) => r.id),
+        ).toEqual([pending.id]);
+      });
+    });
+
+    describe('reservation queries for the hotels module', () => {
+      it('takenRoomIds: Confirmed and live holds only, for the asked nights', async () => {
+        const guest = await loggedInAs();
+        const [confirmedRoom, heldRoom, expiredRoom, cancelledRoom, freeRoom] =
+          [addRoom(), addRoom(), addRoom(), addRoom(), addRoom()];
+        await confirmedAt(
+          guest.client,
+          [confirmedRoom],
+          '2029-06-01',
+          '2029-06-03',
+        );
+        await hold(
+          guest.client,
+          body([heldRoom], '2029-06-01', '2029-06-03'),
+        ).expect(201);
+        const expired = (
+          await hold(
+            guest.client,
+            body([expiredRoom], '2029-06-01', '2029-06-03'),
+          ).expect(201)
+        ).body as HotelReservationView;
+        await nights.updateMany(
+          { reservation: expired.id },
+          { holdExpiresAt: new Date(Date.now() - 1_000) },
+        );
+        const toCancel = await confirmedAt(
+          guest.client,
+          [cancelledRoom],
+          '2029-06-01',
+          '2029-06-03',
+        );
+        await guest.client
+          .post(`/api/hotel-bookings/${toCancel.id}/cancel?confirm=true`)
+          .expect(200);
+
+        const all = [
+          confirmedRoom,
+          heldRoom,
+          expiredRoom,
+          cancelledRoom,
+          freeRoom,
+        ];
+        expect(
+          [
+            ...(await queries.takenRoomIds(
+              all,
+              day('2029-06-02'),
+              day('2029-06-05'),
+            )),
+          ].sort(),
+        ).toEqual([confirmedRoom, heldRoom].sort());
+        // The check-out day itself is free.
+        expect(
+          (
+            await queries.takenRoomIds(
+              all,
+              day('2029-06-03'),
+              day('2029-06-04'),
+            )
+          ).size,
+        ).toBe(0);
+      });
+
+      it('roomActivity, wasEverReserved and hasUpcomingReservations', async () => {
+        const guest = await loggedInAs();
+        const room = addRoom();
+        const never = addRoom();
+        const stay = await confirmedAt(
+          guest.client,
+          [room],
+          '2029-07-01',
+          '2029-07-03',
+        );
+
+        expect(
+          await queries.roomActivity(
+            [room],
+            day('2029-06-30'),
+            day('2029-07-10'),
+          ),
+        ).toEqual([
+          {
+            roomId: room,
+            night: '2029-07-01',
+            reservationId: stay.id,
+            reference: stay.reference,
+            status: ReservationStatus.CONFIRMED,
+          },
+          expect.objectContaining({ night: '2029-07-02' }),
+        ]);
+        expect(await queries.wasEverReserved(room)).toBe(true);
+        expect(await queries.wasEverReserved(never)).toBe(false);
+        expect(await queries.hasUpcomingReservations(room)).toBe(true);
+        expect(await queries.hasUpcomingReservations(never)).toBe(false);
+
+        await guest.client
+          .post(`/api/hotel-bookings/${stay.id}/cancel?confirm=true`)
+          .expect(200);
+        expect(await queries.hasUpcomingReservations(room)).toBe(false);
+        // Deletion stays forbidden: it was reserved once (HTL-06).
+        expect(await queries.wasEverReserved(room)).toBe(true);
+      });
+
+      it('forHotel: guest, dates and status for the moderator view (HTL-22)', async () => {
+        const hotel: InventoryHotel = {
+          id: new Types.ObjectId().toHexString(),
+          name: 'Moderated Hotel',
+          active: true,
+          cancellationTiers: TIERS,
+        };
+        hotels.set(hotel.id, hotel);
+        const a = await loggedInAs();
+        const b = await loggedInAs();
+        const room = (n: number) =>
+          Array.from({ length: n }, () => addRoom({ hotelId: hotel.id }));
+        const first = (
+          await hold(
+            a.client,
+            body(room(2), '2029-08-01', '2029-08-02', { hotelId: hotel.id }),
+          ).expect(201)
+        ).body as HotelReservationView;
+        await payments.confirmPaid(first.id, paid(first));
+        const second = (
+          await hold(
+            b.client,
+            body(room(1), '2029-08-05', '2029-08-06', { hotelId: hotel.id }),
+          ).expect(201)
+        ).body as HotelReservationView;
+        await users.setStatus(b.id, UserStatus.DEACTIVATED);
+
+        const page = await queries.forHotel(hotel.id, { page: 1, limit: 10 });
+        expect(page.total).toBe(2);
+        expect(page.items.map((r) => r.id)).toEqual([second.id, first.id]);
+        expect(page.items[0].guest).toEqual({ id: null, name: 'Deleted user' });
+        expect(page.items[1]).toMatchObject({
+          guest: { id: a.id },
+          checkIn: '2029-08-01',
+          checkOut: '2029-08-02',
+          status: ReservationStatus.CONFIRMED,
+        });
+        expect(page.items[1].rooms).toHaveLength(2);
+
+        const confirmedOnly = await queries.forHotel(hotel.id, {
+          page: 1,
+          limit: 10,
+          status: ReservationStatus.CONFIRMED,
+        });
+        expect(confirmedOnly.items.map((r) => r.id)).toEqual([first.id]);
+        expect(
+          (
+            await queries.forHotel(activeHotel.id, { page: 1, limit: 10 })
+          ).items.map((r) => r.id),
+        ).not.toContain(first.id);
+      });
+    });
+  });
+  describe('Swagger (Milestone 1 is evaluated through it)', () => {
+    it('documents every hotel booking and review endpoint with its requirement IDs', () => {
+      const doc = SwaggerModule.createDocument(
+        ctx.app,
+        new DocumentBuilder().build(),
+      );
+      const expected: [string, string, string][] = [
+        ['/api/hotel-bookings', 'post', 'HTL-16'],
+        ['/api/hotel-bookings', 'get', 'HTL-20'],
+        ['/api/hotel-bookings/{id}', 'get', 'HTL-17'],
+        ['/api/hotel-bookings/{id}/cancellation', 'get', 'HTL-21'],
+        ['/api/hotel-bookings/{id}/cancel', 'post', 'HTL-21'],
+        ['/api/hotel-bookings/{id}/review', 'post', 'HTL-23'],
+        ['/api/reviews/{id}', 'patch', 'HTL-23'],
+        ['/api/reviews/{id}', 'delete', 'HTL-23'],
+        ['/api/hotels/{id}/reviews', 'get', 'HTL-24'],
+      ];
+      for (const [path, method, id] of expected) {
+        const operation = (
+          doc.paths[path] as Record<string, { summary?: string }> | undefined
+        )?.[method];
+        expect(operation?.summary ?? `missing: ${method} ${path}`).toContain(
+          id,
+        );
+      }
     });
   });
 });
