@@ -267,6 +267,18 @@ stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first
 
 ================================================
 Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22, ITN-27
+Prompt:
+A new member, Noureldin, joins and takes part of Abdelrahman's hotel work. Update the team docs with the split: Abdelrahman keeps the catalogue (issues 31-33, dashboard), Noureldin takes search, available rooms, moderator reservations and ITN-27.
+
+How the output was used:
+Updated README, PROJECT_BREAKDOWN.md (team, work split, both briefs, dependencies, rendering table, test focus, HTL and ITN-27 owners) and docs/issues.md (index and owners of issues 34, 35, 36, 61). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-01, FLT-02, FLT-08, FLT-09
