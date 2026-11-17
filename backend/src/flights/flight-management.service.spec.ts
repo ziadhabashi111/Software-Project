@@ -189,6 +189,7 @@ describe('FlightManagementService.cancel (FLT-06)', () => {
   });
 
   it('keeps notifying the others when one notification fails', async () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { service, notifications } = build(flight());
     notifications.notify
       .mockRejectedValueOnce(new Error('boom'))
