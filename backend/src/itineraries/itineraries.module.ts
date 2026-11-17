@@ -2,6 +2,16 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { ActivitiesController } from './activities.controller';
+import { BudgetController } from './budget/budget.controller';
+import { BudgetService } from './budget/budget.service';
+import {
+  BudgetEntry,
+  BudgetEntrySchema,
+} from './budget/schemas/budget-entry.schema';
+import {
+  TransportCost,
+  TransportCostSchema,
+} from './budget/schemas/transport-cost.schema';
 import { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
@@ -26,18 +36,21 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
   imports: [
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
+      { name: BudgetEntry.name, schema: BudgetEntrySchema },
+      { name: TransportCost.name, schema: TransportCostSchema },
     ]),
     AdminModule,
   ],
-  controllers: [ItinerariesController, ActivitiesController],
+  controllers: [ItinerariesController, ActivitiesController, BudgetController],
   providers: [
     ItinerariesService,
     ActivitiesService,
+    BudgetService,
     ItineraryRepository,
     ItineraryModerator,
     PlaceCatalog,
     ItineraryBudgets,
   ],
-  exports: [PlaceCatalog, ItineraryBudgets, ItineraryRepository],
+  exports: [PlaceCatalog, ItineraryBudgets, ItineraryRepository, BudgetService],
 })
 export class ItinerariesModule {}
