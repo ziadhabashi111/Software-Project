@@ -4,6 +4,8 @@ import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
+import { AdminModule } from '../src/admin/admin.module';
+import { AuditModule } from '../src/audit/audit.module';
 import { HotelBookingsModule } from '../src/hotel-bookings/hotel-bookings.module';
 import {
   HotelInventoryRegistry,
@@ -14,6 +16,8 @@ import { HotelReservationPayments } from '../src/hotel-bookings/hotel-reservatio
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
+import type { HotelReviewView } from '../src/hotel-bookings/review-view';
+import { UserStatus } from '../src/users/user-status';
 import {
   HotelReservation,
   HotelReservationDocument,
@@ -120,7 +124,12 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
 
   beforeAll(async () => {
     ctx = await createTestApp({
-      extraModules: [HotelBookingsModule, FakeSharedServicesModule],
+      extraModules: [
+        AuditModule,
+        AdminModule,
+        HotelBookingsModule,
+        FakeSharedServicesModule,
+      ],
       replSet: true,
     });
     users = ctx.moduleRef.get(UsersService);
@@ -1100,6 +1109,265 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       ]);
       expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409]);
       expect(refundService.issue).toHaveBeenCalledTimes(1);
+    });
+  });
+  describe('reviews (HTL-23, HTL-24, GEN-10, ACC-12)', () => {
+    interface ReviewsPage {
+      averageRating: number | null;
+      ratingCount: number;
+      items: HotelReviewView[];
+      total: number;
+      page: number;
+      limit: number;
+    }
+
+    /** A fresh hotel, so its average only reflects the reviews of one test. */
+    function newHotel(): InventoryHotel {
+      const hotel: InventoryHotel = {
+        id: new Types.ObjectId().toHexString(),
+        name: `Review Hotel ${hotels.size + 1}`,
+        active: true,
+        cancellationTiers: TIERS,
+      };
+      hotels.set(hotel.id, hotel);
+      return hotel;
+    }
+
+    /** A paid stay at `hotel` whose check-out date has passed. */
+    async function completedStay(
+      client: Client,
+      hotel: InventoryHotel,
+      roomCount = 1,
+    ): Promise<HotelReservationView> {
+      const roomIds = Array.from({ length: roomCount }, () =>
+        addRoom({ hotelId: hotel.id }),
+      );
+      const held = (
+        await hold(
+          client,
+          body(roomIds, '2028-01-10', '2028-01-12', { hotelId: hotel.id }),
+        ).expect(201)
+      ).body as HotelReservationView;
+      await payments.confirmPaid(held.id, paid(held));
+      await setDates(held.id, '2021-01-10', '2021-01-12');
+      return held;
+    }
+
+    const review = (client: Client, reservationId: string, payload: object) =>
+      client.post(`/api/hotel-bookings/${reservationId}/review`).send(payload);
+
+    const reviewsOf = async (hotelId: string, client?: Client, query = '') =>
+      (
+        await (client ?? request(ctx.server))
+          .get(`/api/hotels/${hotelId}/reviews${query}`)
+          .expect(200)
+      ).body as ReviewsPage;
+
+    it('reviews a completed stay once, whatever the number of rooms', async () => {
+      const guest = await loggedInAs();
+      const hotel = newHotel();
+      const stay = await completedStay(guest.client, hotel, 3);
+
+      const res = await review(guest.client, stay.id, {
+        rating: 4,
+        text: '  Great pool.  ',
+      }).expect(201);
+      const created = res.body as HotelReviewView;
+      expect(created).toMatchObject({
+        reservationId: stay.id,
+        hotelId: hotel.id,
+        rating: 4,
+        text: 'Great pool.',
+        isHidden: false,
+        author: { id: guest.id },
+      });
+
+      const again = await review(guest.client, stay.id, { rating: 5 }).expect(
+        409,
+      );
+      expect((again.body as ErrorBody).code).toBe('REVIEW_EXISTS');
+      expect((await reviewsOf(hotel.id)).ratingCount).toBe(1);
+    });
+
+    it('two reviews of one stay at once: exactly one is stored', async () => {
+      const guest = await loggedInAs();
+      const stay = await completedStay(guest.client, newHotel());
+      const results = await Promise.all([
+        review(guest.client, stay.id, { rating: 5 }),
+        review(guest.client, stay.id, { rating: 1 }),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    });
+
+    it('only after the stay is completed, and only my own reservation', async () => {
+      const guest = await loggedInAs();
+      const hotel = newHotel();
+      const pending = (
+        await hold(
+          guest.client,
+          body([addRoom({ hotelId: hotel.id })], '2028-02-01', '2028-02-02', {
+            hotelId: hotel.id,
+          }),
+        ).expect(201)
+      ).body as HotelReservationView;
+      const notYet = await review(guest.client, pending.id, {
+        rating: 5,
+      }).expect(409);
+      expect((notYet.body as ErrorBody).code).toBe('STAY_NOT_COMPLETED');
+
+      await payments.confirmPaid(pending.id, paid(pending));
+      await review(guest.client, pending.id, { rating: 5 }).expect(409);
+
+      const done = await completedStay(guest.client, hotel);
+      const stranger = await loggedInAs();
+      await review(stranger.client, done.id, { rating: 1 }).expect(404);
+      const admin = await loggedInAs(Role.ADMIN);
+      await review(admin.client, done.id, { rating: 1 }).expect(403);
+      await request(ctx.server)
+        .post(`/api/hotel-bookings/${done.id}/review`)
+        .send({ rating: 1 })
+        .expect(401);
+    });
+
+    it.each([
+      ['a rating of 0', { rating: 0 }],
+      ['a rating of 6', { rating: 6 }],
+      ['a fractional rating', { rating: 4.5 }],
+      ['no rating', { text: 'Nice' }],
+      ['a text over 1000 characters', { rating: 3, text: 'x'.repeat(1001) }],
+      ['an unknown property', { rating: 3, stars: 3 }],
+    ])('rejects %s (400)', async (_name, payload) => {
+      const guest = await loggedInAs();
+      const stay = await completedStay(guest.client, newHotel());
+      await review(guest.client, stay.id, payload).expect(400);
+    });
+
+    it('lists reviews newest first with the average and count, open to guests', async () => {
+      const hotel = newHotel();
+      const ratings = [5, 4, 4];
+      const ids: string[] = [];
+      for (const rating of ratings) {
+        const guest = await loggedInAs();
+        const stay = await completedStay(guest.client, hotel);
+        ids.push(
+          (
+            (await review(guest.client, stay.id, { rating }).expect(201))
+              .body as HotelReviewView
+          ).id,
+        );
+      }
+
+      const page = await reviewsOf(hotel.id);
+      expect(page.averageRating).toBe(4.3);
+      expect(page.ratingCount).toBe(3);
+      expect(page.items.map((r) => r.id)).toEqual([...ids].reverse());
+      expect(page.items[0].author.name).toMatch(/^Guest \d+$/);
+
+      const second = await reviewsOf(hotel.id, undefined, '?limit=2&page=2');
+      expect(second).toMatchObject({ total: 3, page: 2, limit: 2 });
+      expect(second.items.map((r) => r.id)).toEqual([ids[0]]);
+
+      const empty = await reviewsOf(newHotel().id);
+      expect(empty).toMatchObject({
+        averageRating: null,
+        ratingCount: 0,
+        total: 0,
+      });
+      await request(ctx.server)
+        .get(`/api/hotels/${new Types.ObjectId().toHexString()}/reviews`)
+        .expect(404);
+    });
+
+    it('edits and deletes my review; the average follows', async () => {
+      const guest = await loggedInAs();
+      const other = await loggedInAs();
+      const hotel = newHotel();
+      const stay = await completedStay(guest.client, hotel);
+      const otherStay = await completedStay(other.client, hotel);
+      await review(other.client, otherStay.id, { rating: 5 }).expect(201);
+      const mine = (
+        await review(guest.client, stay.id, {
+          rating: 1,
+          text: 'Noisy',
+        }).expect(201)
+      ).body as HotelReviewView;
+      expect((await reviewsOf(hotel.id)).averageRating).toBe(3);
+
+      const edited = (
+        await guest.client
+          .patch(`/api/reviews/${mine.id}`)
+          .send({ rating: 4, text: null })
+          .expect(200)
+      ).body as HotelReviewView;
+      expect(edited).toMatchObject({ rating: 4, text: null });
+      expect((await reviewsOf(hotel.id)).averageRating).toBe(4.5);
+
+      await guest.client.patch(`/api/reviews/${mine.id}`).send({}).expect(400);
+      await other.client
+        .patch(`/api/reviews/${mine.id}`)
+        .send({ rating: 1 })
+        .expect(404);
+      await other.client.delete(`/api/reviews/${mine.id}`).expect(404);
+
+      await guest.client.delete(`/api/reviews/${mine.id}`).expect(204);
+      expect(await reviewsOf(hotel.id)).toMatchObject({
+        averageRating: 5,
+        ratingCount: 1,
+      });
+      // The stay can be reviewed again after deleting.
+      await review(guest.client, stay.id, { rating: 3 }).expect(201);
+    });
+
+    it('a hidden review is shown only to its author and admins, and leaves the average', async () => {
+      const author = await loggedInAs();
+      const other = await loggedInAs();
+      const hotel = newHotel();
+      const kept = await completedStay(other.client, hotel);
+      await review(other.client, kept.id, { rating: 5 }).expect(201);
+      const stay = await completedStay(author.client, hotel);
+      const rude = (
+        await review(author.client, stay.id, { rating: 1 }).expect(201)
+      ).body as HotelReviewView;
+
+      const admin = await loggedInAs(Role.ADMIN);
+      await admin.client
+        .delete(`/api/admin/content/review/${rude.id}?mode=hide`)
+        .expect(200);
+
+      const guestView = await reviewsOf(hotel.id);
+      expect(guestView.items.map((r) => r.id)).not.toContain(rude.id);
+      expect(guestView).toMatchObject({ averageRating: 5, ratingCount: 1 });
+
+      const authorView = await reviewsOf(hotel.id, author.client);
+      expect(authorView.items.find((r) => r.id === rude.id)?.isHidden).toBe(
+        true,
+      );
+      expect(
+        (await reviewsOf(hotel.id, other.client)).items.map((r) => r.id),
+      ).not.toContain(rude.id);
+      expect(
+        (await reviewsOf(hotel.id, admin.client)).items.map((r) => r.id),
+      ).toContain(rude.id);
+
+      await admin.client
+        .delete(`/api/admin/content/review/${rude.id}?mode=delete`)
+        .expect(200);
+      expect(
+        (await reviewsOf(hotel.id, admin.client)).items.map((r) => r.id),
+      ).not.toContain(rude.id);
+    });
+
+    it('reviews of a deactivated account show "Deleted user" (ACC-12)', async () => {
+      const guest = await loggedInAs();
+      const hotel = newHotel();
+      const stay = await completedStay(guest.client, hotel);
+      await review(guest.client, stay.id, { rating: 2 }).expect(201);
+      await users.setStatus(guest.id, UserStatus.DEACTIVATED);
+
+      const page = await reviewsOf(hotel.id);
+      expect(page.items[0].author).toEqual({ id: null, name: 'Deleted user' });
+      // It still counts towards the average.
+      expect(page.ratingCount).toBe(1);
     });
   });
 });

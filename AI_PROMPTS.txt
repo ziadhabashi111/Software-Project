@@ -397,3 +397,21 @@ Do the itinerary flights part of my issue 16: search one-way or round-trip fligh
 How the output was used:
 Extracted one shared searchRoutes method from the flight search (the public search now calls it too, existing tests unchanged), then added the owner-only endpoint that finds the first day's city airports and fills in the default dates. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-23, HTL-24, GEN-10, ACC-12 (Issue 41)
+Prompt:
+Let's continue working on the next issue (Issue 41: reviews).
+
+How the output was used:
+Claude drafted the HotelReview schema (one per reservation, unique index),
+POST /api/hotel-bookings/:id/review (owner, Completed stays only),
+PATCH/DELETE /api/reviews/:id, public GET /api/hotels/:id/reviews (average,
+count, newest first, paginated; hidden only for author/admins; "Deleted user"),
+HotelRatings for the hotel details page and search, and the review
+ContentModerator for admin hide/delete. Also resolved an AI_PROMPTS.txt merge
+conflict with develop by keeping both sides. Reviewed the diff, ran tests/lint/build.
+================================================
