@@ -323,6 +323,18 @@ Two schemas, owner-only endpoints that load the itinerary with Habashi's ownersh
 Date: 2026-11-17
 Student: Youssef Wahby
 Tool: Claude Code
+Related Requirement: ITN-14, ITN-18
+Prompt:
+Do my issue 16 (FX conversion and budget summary): FXRatesAPI through the backend only, one fetch per day cached in the database, last cached rates as fallback, the rate date, clear errors for invalid codes, missing rates and API failures, and the budget summary by category and by day.
+
+How the output was used:
+FxService (daily cron plus lazy refresh, one shared fetch, key sent in a header), currency math with a 400 for malformed codes and a 422 for missing rates, a summary that only fetches rates when something is in another currency, and the ItineraryBudgets hook registration so city groups get subtotals. I checked the provider's real response format with one keyless public request. Reviewed the diff; tests cover all three failure cases.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
 Related Requirement: FLT-03, FLT-04, FLT-05, FLT-30
 Prompt:
 Do my issue 12 (flights, cabins, flight status): create flights with local-time-to-UTC storage and the FLT-03 validations, cabins, editing with the booking locks, and the Scheduled/Cancelled/Departed status.

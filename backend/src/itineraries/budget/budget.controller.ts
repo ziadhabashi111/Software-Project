@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -17,6 +18,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Role } from '../../auth/auth.types';
@@ -25,7 +27,10 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { ParseObjectIdPipe } from '../../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../../common/swagger/api-req.decorator';
+import { BudgetSummaryService } from './budget-summary.service';
+import type { BudgetSummaryView } from './budget-summary.service';
 import { BudgetService } from './budget.service';
+import { BudgetSummaryQueryDto } from './dto/budget-summary-query.dto';
 import type {
   BudgetEntryView,
   BudgetListView,
@@ -64,7 +69,10 @@ const TRANSPORT_EXAMPLE = {
 @ApiForbiddenResponse({ description: 'Only regular users plan itineraries' })
 @Controller()
 export class BudgetController {
-  constructor(private readonly budget: BudgetService) {}
+  constructor(
+    private readonly budget: BudgetService,
+    private readonly summary: BudgetSummaryService,
+  ) {}
 
   @Get('itineraries/:id/budgets')
   @ApiReq(
@@ -197,5 +205,63 @@ export class BudgetController {
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<void> {
     return this.budget.deleteTransport(user, id);
+  }
+
+  @Get('itineraries/:id/budget-summary')
+  @ApiReq(
+    ['ITN-14', 'ITN-18'],
+    'Budget summary by category and by day',
+    'Totals include budget entries, activity costs (counted under activities) and intercity transport, converted to your preferred currency (or `?currency=`). Exchange rates are fetched once a day from FXRatesAPI and cached; `rateDate` shows which day the rates are from. If the rate provider is down the last cached rates are used (`ratesStale: true`). Booking prices are never converted.',
+  )
+  @ApiParam({ name: 'id', description: 'Itinerary id' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        currency: 'EUR',
+        rateDate: '2026-11-17',
+        ratesStale: false,
+        totals: {
+          food: 120,
+          accommodation: 300,
+          in_city_transport: 40,
+          activities: 85.5,
+          intercity_transport: 32.1,
+          total: 577.6,
+        },
+        byDay: [
+          {
+            dayId: '665f1c2a9b1e8a0012345671',
+            number: 1,
+            date: '2027-03-01',
+            city: 'cairo',
+            food: 40,
+            accommodation: 100,
+            in_city_transport: 10,
+            activities: 25.5,
+            intercity_transport: 0,
+            total: 175.5,
+          },
+        ],
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid currency code' })
+  @ApiNotFoundResponse({ description: 'Itinerary not found' })
+  @ApiResponse({
+    status: 422,
+    description:
+      'A currency in the itinerary has no exchange rate (RATE_UNAVAILABLE, names the currency)',
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'Rates needed but the provider is down and nothing is cached yet (RATES_UNAVAILABLE)',
+  })
+  budgetSummary(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Query() query: BudgetSummaryQueryDto,
+  ): Promise<BudgetSummaryView> {
+    return this.summary.summary(user, id, query.currency);
   }
 }
