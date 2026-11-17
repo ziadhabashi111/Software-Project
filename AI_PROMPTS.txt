@@ -264,3 +264,15 @@ How the output was used:
 Added MAX_NIGHTS = 30 and a STAY_TOO_LONG 400 (checked from the dates, before any night is generated) in
 stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first and seen failing. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-16
+Prompt:
+Do my issue 15 (itinerary budgets and transport costs): budget entries per day and category, transport costs between cities, edit and delete, owner only, cleanup when a day or itinerary is deleted.
+
+How the output was used:
+Two schemas, owner-only endpoints that load the itinerary with Habashi's ownership check first (404 for others), day and city validation through his PlaceCatalog, an optional currency catalog check, and cleanup methods for the ItineraryBudgets hook (wired together with the totals in the exchange-rate PR). Reviewed the diff; tests for ownership, validation and cleanup.
+================================================
