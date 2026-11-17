@@ -325,3 +325,75 @@ via RefundService, notification), refundQuote/refundBasis/recordRefundResult
 for Ziad, and unit + e2e tests incl. parallel double-cancel. Reviewed the diff,
 ran tests/lint/build.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-16
+Prompt:
+Do my issue 15 (itinerary budgets and transport costs): budget entries per day and category, transport costs between cities, edit and delete, owner only, cleanup when a day or itinerary is deleted.
+
+How the output was used:
+Two schemas, owner-only endpoints that load the itinerary with Habashi's ownership check first (404 for others), day and city validation through his PlaceCatalog, an optional currency catalog check, and cleanup methods for the ItineraryBudgets hook (wired together with the totals in the exchange-rate PR). Reviewed the diff; tests for ownership, validation and cleanup.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-14, ITN-18
+Prompt:
+Do my issue 16 (FX conversion and budget summary): FXRatesAPI through the backend only, one fetch per day cached in the database, last cached rates as fallback, the rate date, clear errors for invalid codes, missing rates and API failures, and the budget summary by category and by day.
+
+How the output was used:
+FxService (daily cron plus lazy refresh, one shared fetch, key sent in a header), currency math with a 400 for malformed codes and a 422 for missing rates, a summary that only fetches rates when something is in another currency, and the ItineraryBudgets hook registration so city groups get subtotals. I checked the provider's real response format with one keyless public request. Reviewed the diff; tests cover all three failure cases.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-03, FLT-04, FLT-05, FLT-30
+Prompt:
+Do my issue 12 (flights, cabins, flight status): create flights with local-time-to-UTC storage and the FLT-03 validations, cabins, editing with the booking locks, and the Scheduled/Cancelled/Departed status.
+
+How the output was used:
+Flight and cabin schemas, create/edit flight and add/edit cabin endpoints, an Intl-based local/UTC converter (no new package), atomic guards for the airport lock and seat reductions, a minute job plus computed-on-read Departed status, and optional hooks for Yahia's bookings and Ziad's notifications. Reviewed the diff; tests written for the rules and the service paths.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-11, FLT-12, FLT-15, FLT-17, GEN-06
+Prompt:
+Do my issue 14 (flight search and details): search by airports and local date, round trip, passenger types, cabin filter, price range with min > max error, sorting, pagination, and the flight details page with local times and policies.
+
+How the output was used:
+One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, FLT-29
+Prompt:
+Do my issue 13 (flight cancellation and moderator booking views): cancel after confirmation with 100% refunds, bookings per flight with seats remaining, and the passenger CSV export.
+
+How the output was used:
+Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-26, FLT-11, FLT-12
+Prompt:
+Do the itinerary flights part of my issue 16: search one-way or round-trip flights from a chosen origin to any airport in the city of the itinerary's first day, outbound defaulting to the start date and the return to the last day's date, reusing the flight search.
+
+How the output was used:
+Extracted one shared searchRoutes method from the flight search (the public search now calls it too, existing tests unchanged), then added the owner-only endpoint that finds the first day's city airports and fills in the default dates. Reviewed the diff.
+================================================
