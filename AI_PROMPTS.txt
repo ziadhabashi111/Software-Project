@@ -366,3 +366,15 @@ Do my issue 13 (flight cancellation and moderator booking views): cancel after c
 How the output was used:
 Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: ITN-26, FLT-11, FLT-12
+Prompt:
+Do the itinerary flights part of my issue 16: search one-way or round-trip flights from a chosen origin to any airport in the city of the itinerary's first day, outbound defaulting to the start date and the return to the last day's date, reusing the flight search.
+
+How the output was used:
+Extracted one shared searchRoutes method from the flight search (the public search now calls it too, existing tests unchanged), then added the owner-only endpoint that finds the first day's city airports and fills in the default dates. Reviewed the diff.
+================================================

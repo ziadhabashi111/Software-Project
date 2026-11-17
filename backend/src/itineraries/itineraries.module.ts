@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
+import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { BudgetController } from './budget/budget.controller';
@@ -23,6 +24,8 @@ import {
 import { ActivitiesService } from './activities.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { ItineraryFlightsController } from './itinerary-flights.controller';
+import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryBudgets } from './itinerary-budgets';
 import { ItineraryModerator } from './itinerary-moderator';
 import { ItineraryRepository } from './itinerary.repository';
@@ -49,9 +52,15 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
       { name: ExchangeRates.name, schema: ExchangeRatesSchema },
     ]),
     AdminModule,
+    FlightsModule,
     UsersModule,
   ],
-  controllers: [ItinerariesController, ActivitiesController, BudgetController],
+  controllers: [
+    ItinerariesController,
+    ActivitiesController,
+    BudgetController,
+    ItineraryFlightsController,
+  ],
   providers: [
     ItinerariesService,
     ActivitiesService,
@@ -59,6 +68,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     BudgetSummaryService,
     BudgetProvider,
     FxService,
+    ItineraryFlightsService,
     ItineraryRepository,
     ItineraryModerator,
     PlaceCatalog,
