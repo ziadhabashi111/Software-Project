@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HotelBookingsController } from './hotel-bookings.controller';
+import { HotelCancellationsService } from './hotel-cancellations.service';
 import { HotelInventoryRegistry } from './hotel-inventory';
 import { HotelReservationPayments } from './hotel-reservation-payments';
 import { HotelReservationsService } from './hotel-reservations.service';
@@ -23,7 +24,8 @@ import { SharedServices } from './shared-services';
  *
  * The payments module (Ziad) imports this module and uses the exported
  * `HotelReservationPayments`: `forPayment` / `attachPaymentIntent` to start a
- * payment and `confirmPaid` from the verified webhook (PAY-01, HTL-17).
+ * payment and `confirmPaid` from the verified webhook (PAY-01, HTL-17); `refundQuote`,
+ * `refundBasis` and `recordRefundResult` for its RefundService (PAY-03, HTL-21).
  * Notifications, payment cancellation and refunds are found by Ziad's tokens
  * through `SharedServices`, so there is no import cycle.
  */
@@ -39,6 +41,7 @@ import { SharedServices } from './shared-services';
     HotelReservationsService,
     MyHotelReservationsService,
     HotelReservationPayments,
+    HotelCancellationsService,
     HotelInventoryRegistry,
     SharedServices,
   ],

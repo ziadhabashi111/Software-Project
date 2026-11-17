@@ -24,10 +24,18 @@ import {
 } from '../src/hotel-bookings/schemas/room-night.schema';
 import { NOTIFICATION_SERVICE } from '../src/notifications/notification.service.interface';
 import { PAYMENT_SERVICE } from '../src/payments/payment.service.interface';
+import { REFUND_SERVICE } from '../src/payments/refund.service.interface';
+import type { RefundQuote } from '../src/hotel-bookings/cancellation-rules';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
 const PASSWORD = 'Passw0rdOk';
+
+/** Nile View's policy: 100% from 30 days, 50% from 7 days, 0% after. */
+const TIERS = [
+  { daysBefore: 30, refundPercent: 100 },
+  { daysBefore: 7, refundPercent: 50 },
+];
 
 interface ErrorBody {
   statusCode: number;
@@ -41,10 +49,23 @@ const paymentService = {
   cancelPendingPayment: jest.fn().mockResolvedValue(undefined),
 };
 
+const refundService = {
+  preview: jest.fn(),
+  issue: jest.fn((_type: string, id: string) =>
+    Promise.resolve({
+      refundId: `re_${id}`,
+      amount: 0,
+      status: 'REFUNDED' as const,
+      currency: 'USD',
+    }),
+  ),
+};
+
 @Module({
   providers: [
     { provide: NOTIFICATION_SERVICE, useValue: notifications },
     { provide: PAYMENT_SERVICE, useValue: paymentService },
+    { provide: REFUND_SERVICE, useValue: refundService },
   ],
 })
 class FakeSharedServicesModule {}
@@ -67,16 +88,19 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
     id: new Types.ObjectId().toHexString(),
     name: 'Nile View Hotel',
     active: true,
+    cancellationTiers: TIERS,
   };
   const otherHotel: InventoryHotel = {
     id: new Types.ObjectId().toHexString(),
     name: 'Other Hotel',
     active: true,
+    cancellationTiers: TIERS,
   };
   const inactiveHotel: InventoryHotel = {
     id: new Types.ObjectId().toHexString(),
     name: 'Closed Hotel',
     active: false,
+    cancellationTiers: TIERS,
   };
 
   function addRoom(overrides: Partial<InventoryRoom> = {}): string {
@@ -849,6 +873,233 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect((await reservations.findById(future.id).lean())?.status).toBe(
         ReservationStatus.CONFIRMED,
       );
+    });
+  });
+  describe('cancellation with refund (HTL-21, PAY-03)', () => {
+    /** A calendar date `n` days from today (UTC), as YYYY-MM-DD. */
+    const inDays = (n: number) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+
+    beforeEach(() => {
+      notifications.notify.mockClear();
+      refundService.issue.mockClear();
+    });
+
+    /** A Confirmed one-room, two-night reservation (total 200) and its room. */
+    async function confirmedStay(client: Client, checkInIn: number) {
+      const room = addRoom();
+      const held = (
+        await hold(
+          client,
+          body([room], inDays(checkInIn), inDays(checkInIn + 2)),
+        ).expect(201)
+      ).body as HotelReservationView;
+      const result = await payments.confirmPaid(held.id, paid(held));
+      if (result.outcome !== 'confirmed') throw new Error(result.outcome);
+      return { room, reservation: result.reservation };
+    }
+
+    const cancelUrl = (id: string) =>
+      `/api/hotel-bookings/${id}/cancel?confirm=true`;
+
+    it('previews the refund from the tiers, on the full total', async () => {
+      const { client } = await loggedInAs();
+      const far = await confirmedStay(client, 40);
+      const near = await confirmedStay(client, 10);
+      const late = await confirmedStay(client, 3);
+
+      const quote = async (id: string) =>
+        (await client.get(`/api/hotel-bookings/${id}/cancellation`).expect(200))
+          .body as RefundQuote;
+      expect(await quote(far.reservation.id)).toMatchObject({
+        daysBeforeCheckIn: 40,
+        totalPrice: 200,
+        refundPercent: 100,
+        refundAmount: 200,
+        currency: 'USD',
+      });
+      expect(await quote(near.reservation.id)).toMatchObject({
+        refundPercent: 50,
+        refundAmount: 100,
+      });
+      expect(await quote(late.reservation.id)).toMatchObject({
+        refundPercent: 0,
+        refundAmount: 0,
+      });
+    });
+
+    it('cancels the whole reservation, releases every room, refunds and notifies', async () => {
+      const owner = await loggedInAs();
+      const r1 = addRoom();
+      const r2 = addRoom();
+      const held = (
+        await hold(owner.client, body([r1, r2], inDays(10), inDays(12))).expect(
+          201,
+        )
+      ).body as HotelReservationView;
+      await payments.confirmPaid(held.id, paid(held));
+      refundService.issue.mockImplementationOnce((_type, id) =>
+        Promise.resolve({
+          refundId: `re_${id}`,
+          amount: 200,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
+      );
+
+      // The backend insists on the confirmation (GEN-03).
+      await owner.client
+        .post(`/api/hotel-bookings/${held.id}/cancel`)
+        .expect(400);
+
+      const res = await owner.client.post(cancelUrl(held.id)).expect(200);
+      const { reservation, refund } = res.body as {
+        reservation: HotelReservationView;
+        refund: RefundQuote;
+      };
+      expect(reservation.status).toBe(ReservationStatus.CANCELLED);
+      expect(reservation.cancelledAt).not.toBeNull();
+      expect(refund).toMatchObject({ refundPercent: 50, refundAmount: 200 });
+      expect(reservation.refund).toEqual({
+        status: 'REFUNDED',
+        amount: 200,
+        percentage: 50,
+        currency: 'USD',
+      });
+      expect(refundService.issue).toHaveBeenCalledWith('hotel', held.id);
+
+      // Both rooms are free again for those dates.
+      expect(await nights.countDocuments({ reservation: held.id })).toBe(0);
+      const next = await loggedInAs();
+      await hold(next.client, body([r1, r2], inDays(10), inDays(12))).expect(
+        201,
+      );
+
+      expect(notifications.notify).toHaveBeenCalledWith(
+        owner.id,
+        'HOTEL_BOOKING_CANCELLED',
+        expect.stringContaining('Refund: 200 USD (50%'),
+      );
+      // It now shows under Cancelled.
+      const page = (
+        await owner.client
+          .get('/api/hotel-bookings?group=cancelled')
+          .expect(200)
+      ).body as { items: HotelReservationView[] };
+      expect(page.items.map((r) => r.id)).toEqual([held.id]);
+    });
+
+    it('a 0% cancellation creates no Stripe refund', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 2);
+      const res = await client.post(cancelUrl(reservation.id)).expect(200);
+      const body = res.body as { reservation: HotelReservationView };
+      expect(body.reservation.refund).toEqual({
+        status: 'NONE',
+        amount: 0,
+        percentage: 0,
+        currency: 'USD',
+      });
+      expect(refundService.issue).not.toHaveBeenCalled();
+    });
+
+    it('keeps the refund PENDING when Stripe fails; the cancellation stands', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 45);
+      refundService.issue.mockRejectedValueOnce(new Error('Stripe is down'));
+      const res = await client.post(cancelUrl(reservation.id)).expect(200);
+      const body = res.body as { reservation: HotelReservationView };
+      expect(body.reservation.status).toBe(ReservationStatus.CANCELLED);
+      expect(body.reservation.refund?.status).toBe('PENDING');
+
+      // The refund service can read what to refund and record the outcome.
+      const basis = await payments.refundBasis(reservation.id);
+      expect(basis).toMatchObject({
+        paymentIntentId: `pi_${reservation.id}`,
+        amount: 200,
+        percentage: 100,
+        status: 'PENDING',
+      });
+      expect(
+        await payments.recordRefundResult(reservation.id, {
+          refundId: 're_retry',
+          amount: 200,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
+      ).toBe(true);
+      expect((await payments.refundBasis(reservation.id))?.status).toBe(
+        'REFUNDED',
+      );
+    });
+
+    it('uses the tiers in force when the reservation was made', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 40);
+      activeHotel.cancellationTiers = [];
+      try {
+        const quote = (
+          await client
+            .get(`/api/hotel-bookings/${reservation.id}/cancellation`)
+            .expect(200)
+        ).body as RefundQuote;
+        expect(quote.refundPercent).toBe(100);
+      } finally {
+        activeHotel.cancellationTiers = TIERS;
+      }
+    });
+
+    it('refuses what cannot be cancelled', async () => {
+      const { client } = await loggedInAs();
+      const pending = await holdOne(client, inDays(20), inDays(21));
+      const res = await client.post(cancelUrl(pending.id)).expect(409);
+      expect((res.body as ErrorBody).code).toBe('NOT_CANCELLABLE');
+
+      const { reservation } = await confirmedStay(client, 20);
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      await client.post(cancelUrl(reservation.id)).expect(409);
+
+      // On or after the check-in date.
+      const started = await confirmedStay(client, 30);
+      await setDates(started.reservation.id, inDays(0), inDays(2));
+      const late = await client
+        .post(cancelUrl(started.reservation.id))
+        .expect(409);
+      expect((late.body as ErrorBody).code).toBe('CHECK_IN_REACHED');
+      await client
+        .get(`/api/hotel-bookings/${started.reservation.id}/cancellation`)
+        .expect(409);
+    });
+
+    it('only the owner can cancel or preview (others get 404, other roles 403)', async () => {
+      const owner = await loggedInAs();
+      const { reservation } = await confirmedStay(owner.client, 25);
+      const stranger = await loggedInAs();
+      await stranger.client.post(cancelUrl(reservation.id)).expect(404);
+      await stranger.client
+        .get(`/api/hotel-bookings/${reservation.id}/cancellation`)
+        .expect(404);
+      const admin = await loggedInAs(Role.ADMIN);
+      await admin.client.post(cancelUrl(reservation.id)).expect(403);
+      await request(ctx.server).post(cancelUrl(reservation.id)).expect(401);
+      expect((await reservations.findById(reservation.id).lean())?.status).toBe(
+        ReservationStatus.CONFIRMED,
+      );
+    });
+
+    it('two cancellations at once: one wins, one refund', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 35);
+      const results = await Promise.all([
+        client.post(cancelUrl(reservation.id)),
+        client.post(cancelUrl(reservation.id)),
+        client.post(cancelUrl(reservation.id)),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409]);
+      expect(refundService.issue).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -37,6 +37,7 @@ export interface HotelReservationView {
     status: string;
     amount?: number;
     percentage?: number;
+    currency?: string;
   } | null;
   createdAt: string;
 }
@@ -122,6 +123,7 @@ export function toReservationView(
           ...(doc.refund.percentage !== undefined
             ? { percentage: doc.refund.percentage }
             : {}),
+          ...(doc.refund.currency ? { currency: doc.refund.currency } : {}),
         }
       : null,
     createdAt: doc.createdAt.toISOString(),
