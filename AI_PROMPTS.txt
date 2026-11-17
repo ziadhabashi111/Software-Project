@@ -264,3 +264,15 @@ How the output was used:
 Added MAX_NIGHTS = 30 and a STAY_TOO_LONG 400 (checked from the dates, before any night is generated) in
 stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first and seen failing. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-01, FLT-02, FLT-08, FLT-09
+Prompt:
+Do my issue 11 (airlines, airports, baggage and cancellation policies) in the flights module, following the project rules: schemas, DTOs with validation, services, controllers with Swagger, moderator-only-own-airline checks and tests.
+
+How the output was used:
+Airline and Airport schemas, create/get/edit airline, baggage and cancellation policy endpoints, the read-only airport list and the airline registration with the admin ProviderDirectory (ACC-13, ACC-15). Reviewed the diff; adapted to Mongoose 9 (QueryFilter), kept the logo as a URL until the upload helper (issue 45) exists, and left the airport seed to issue 44.
+================================================
