@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Model } from 'mongoose';
+import type { Model, Types } from 'mongoose';
 import { ProviderDirectory, ProviderType } from '../admin/provider-directory';
 import type {
   ProviderChange,
@@ -119,6 +119,17 @@ export class AirlinesService implements OnModuleInit, ProviderHandler {
     if (!airline) return null;
     if (!airline.isActive && !options.includeInactive) return null;
     return airline;
+  }
+
+  /** Airlines by id, for building flight results in one query. */
+  findByIds(ids: string[]): Promise<AirlineDocument[]> {
+    return this.airlines.find({ _id: { $in: ids } });
+  }
+
+  /** Ids of airlines that are not deactivated: only their flights are searchable (ACC-15). */
+  async findActiveIds(): Promise<Types.ObjectId[]> {
+    const rows = await this.airlines.find({ isActive: true }).select('_id');
+    return rows.map((row) => row._id);
   }
 
   // ProviderHandler (ACC-13, ACC-15) -----------------------------------
