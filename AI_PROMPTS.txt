@@ -308,6 +308,42 @@ Airline and Airport schemas, create/get/edit airline, baggage and cancellation p
 ================================================
 
 ================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-03, FLT-04, FLT-05, FLT-30
+Prompt:
+Do my issue 12 (flights, cabins, flight status): create flights with local-time-to-UTC storage and the FLT-03 validations, cabins, editing with the booking locks, and the Scheduled/Cancelled/Departed status.
+
+How the output was used:
+Flight and cabin schemas, create/edit flight and add/edit cabin endpoints, an Intl-based local/UTC converter (no new package), atomic guards for the airport lock and seat reductions, a minute job plus computed-on-read Departed status, and optional hooks for Yahia's bookings and Ziad's notifications. Reviewed the diff; tests written for the rules and the service paths.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-11, FLT-12, FLT-15, FLT-17, GEN-06
+Prompt:
+Do my issue 14 (flight search and details): search by airports and local date, round trip, passenger types, cabin filter, price range with min > max error, sorting, pagination, and the flight details page with local times and policies.
+
+How the output was used:
+One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, FLT-29
+Prompt:
+Do my issue 13 (flight cancellation and moderator booking views): cancel after confirmation with 100% refunds, bookings per flight with seats remaining, and the passenger CSV export.
+
+How the output was used:
+Cancel sets the flight to Cancelled first (hidden from search, no new holds), then calls Yahia's booking hook for the 100% refunds and notifies passengers; the same request finishes the refunds if they failed part-way. Bookings view and CSV export with formula protection, limited to the airline's own moderator. Extended FlightBookingHooks with cancelBookingsForFlight and listBookings for Yahia. Reviewed the diff.
+================================================
+
+================================================
 Date: 2026-11-18
 Student: Amina
 Tool: Claude (Claude Code)
