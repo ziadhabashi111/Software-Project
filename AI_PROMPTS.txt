@@ -433,3 +433,15 @@ reservation list with "Deleted user"), review unhide, a Swagger test checking
 every endpoint carries its requirement ID, and audited my M1 checklist.
 Reviewed the diff, ran tests/lint/build.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-09
+Prompt:
+After merging Youssef's budget module, a full e2e run showed one failing itinerary-core test that still expected null group subtotals.
+
+How the output was used:
+Updated the stale assertion in itineraries.e2e-spec.ts: with the budget module now connected, a city group with no budget entries has a computed subtotal of 0 (not null), matching the adjacent test. CI does not run e2e, so this only surfaced on the integrated develop. Reviewed the diff.
+================================================

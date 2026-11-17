@@ -764,8 +764,9 @@ describe('Itineraries: structure, days and activities (ITN-01..10, 20; real Mong
           startDate: '2027-03-01',
           endDate: '2027-03-02',
         });
-        // Until the budget module is connected there is no subtotal.
-        expect(groups.every((g) => g.subtotal === null)).toBe(true);
+        // The budget module is connected in the full app, so each group has a
+        // computed subtotal — zero here because no budget entries were added.
+        expect(groups.every((g) => g.subtotal?.amount === 0)).toBe(true);
       });
 
       it("adds up the budget module's day totals per group", async () => {
