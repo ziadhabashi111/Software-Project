@@ -52,33 +52,21 @@ export class FlightSearchService {
 
   /** The public search: one-way, or round trip when `returnDate` is given. */
   async search(query: SearchFlightsQueryDto): Promise<FlightSearchResult> {
-    assertPassengerMix(query.adults, query.infants);
-    if (
-      query.minPrice !== undefined &&
-      query.maxPrice !== undefined &&
-      query.minPrice > query.maxPrice
-    ) {
-      throw fieldError(
-        'minPrice',
-        'The minimum price cannot be above the maximum price',
-      );
-    }
     if (query.from === query.to) {
       throw fieldError(
         'to',
         'Departure and arrival airports must be different',
       );
     }
-    if (query.returnDate && query.returnDate < query.date) {
-      throw fieldError(
-        'returnDate',
-        'The return date cannot be before the departure date',
-      );
-    }
     await this.requireListed({ from: query.from, to: query.to });
-
-    const base = {
-      seats: seatsNeeded(query.adults, query.children),
+    return this.searchRoutes({
+      departureAirports: [query.from],
+      arrivalAirports: [query.to],
+      date: query.date,
+      ...(query.returnDate ? { returnDate: query.returnDate } : {}),
+      adults: query.adults,
+      children: query.children,
+      infants: query.infants,
       ...(query.cabinClass ? { cabinClass: query.cabinClass } : {}),
       ...(query.minPrice !== undefined ? { minPrice: query.minPrice } : {}),
       ...(query.maxPrice !== undefined ? { maxPrice: query.maxPrice } : {}),
@@ -86,19 +74,72 @@ export class FlightSearchService {
       order: query.order,
       page: query.page,
       limit: query.limit,
+    });
+  }
+
+  /**
+   * One-way or round trip between two sets of airports, with the passenger
+   * and price rules of FLT-12 and FLT-15. The public search uses one airport
+   * on each side; an itinerary searches "any airport in the city" (ITN-26).
+   */
+  async searchRoutes(params: {
+    departureAirports: string[];
+    arrivalAirports: string[];
+    /** Local departure date, `YYYY-MM-DD`. */
+    date: string;
+    /** Makes it a round trip: the local date of the return flight. */
+    returnDate?: string;
+    adults: number;
+    children: number;
+    infants: number;
+    cabinClass?: FlightCriteria['cabinClass'];
+    minPrice?: number;
+    maxPrice?: number;
+    sortBy: FlightCriteria['sortBy'];
+    order: FlightCriteria['order'];
+    page: number;
+    limit: number;
+  }): Promise<FlightSearchResult> {
+    assertPassengerMix(params.adults, params.infants);
+    if (
+      params.minPrice !== undefined &&
+      params.maxPrice !== undefined &&
+      params.minPrice > params.maxPrice
+    ) {
+      throw fieldError(
+        'minPrice',
+        'The minimum price cannot be above the maximum price',
+      );
+    }
+    if (params.returnDate && params.returnDate < params.date) {
+      throw fieldError(
+        'returnDate',
+        'The return date cannot be before the departure date',
+      );
+    }
+
+    const base = {
+      seats: seatsNeeded(params.adults, params.children),
+      ...(params.cabinClass ? { cabinClass: params.cabinClass } : {}),
+      ...(params.minPrice !== undefined ? { minPrice: params.minPrice } : {}),
+      ...(params.maxPrice !== undefined ? { maxPrice: params.maxPrice } : {}),
+      sortBy: params.sortBy,
+      order: params.order,
+      page: params.page,
+      limit: params.limit,
     };
     const outbound = await this.searchLeg({
       ...base,
-      departureAirports: [query.from],
-      arrivalAirports: [query.to],
-      date: query.date,
+      departureAirports: params.departureAirports,
+      arrivalAirports: params.arrivalAirports,
+      date: params.date,
     });
-    const back = query.returnDate
+    const back = params.returnDate
       ? await this.searchLeg({
           ...base,
-          departureAirports: [query.to],
-          arrivalAirports: [query.from],
-          date: query.returnDate,
+          departureAirports: params.arrivalAirports,
+          arrivalAirports: params.departureAirports,
+          date: params.returnDate,
         })
       : null;
 
