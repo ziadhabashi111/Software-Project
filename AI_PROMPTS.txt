@@ -288,3 +288,15 @@ Do my issue 12 (flights, cabins, flight status): create flights with local-time-
 How the output was used:
 Flight and cabin schemas, create/edit flight and add/edit cabin endpoints, an Intl-based local/UTC converter (no new package), atomic guards for the airport lock and seat reductions, a minute job plus computed-on-read Departed status, and optional hooks for Yahia's bookings and Ziad's notifications. Reviewed the diff; tests written for the rules and the service paths.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-11, FLT-12, FLT-15, FLT-17, GEN-06
+Prompt:
+Do my issue 14 (flight search and details): search by airports and local date, round trip, passenger types, cabin filter, price range with min > max error, sorting, pagination, and the flight details page with local times and policies.
+
+How the output was used:
+One aggregation pipeline (seats = total - booked - held, only matching cabins listed), a service reused for the itinerary search (arrays of airports), passenger-type rules shared with Yahia, and the details endpoint with baggage and cancellation policies. A test caught a wrong "no flights found" message for one-way searches, which I fixed. Reviewed the diff.
+================================================

@@ -6,6 +6,8 @@ import { AirlinesService } from './airlines.service';
 import { AirportsController } from './airports.controller';
 import { AirportsService } from './airports.service';
 import { FlightBookingHooks } from './flight-booking-hooks';
+import { FlightSearchController } from './flight-search.controller';
+import { FlightSearchService } from './flight-search.service';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
 import { Airline, AirlineSchema } from './schemas/airline.schema';
@@ -30,11 +32,17 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
       { name: Flight.name, schema: FlightSchema },
     ]),
   ],
-  controllers: [AirlinesController, AirportsController, FlightsController],
+  controllers: [
+    AirlinesController,
+    AirportsController,
+    FlightSearchController,
+    FlightsController,
+  ],
   providers: [
     AirlinesService,
     AirportsService,
     FlightsService,
+    FlightSearchService,
     FlightBookingHooks,
   ],
   exports: [
@@ -42,6 +50,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     AirlinesService,
     AirportsService,
     FlightsService,
+    FlightSearchService,
     FlightBookingHooks,
   ],
 })
