@@ -264,3 +264,21 @@ How the output was used:
 Added MAX_NIGHTS = 30 and a STAY_TOO_LONG 400 (checked from the dates, before any night is generated) in
 stay-rules.ts, unit tests, one e2e case and the Swagger text. Test written first and seen failing. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-17
+Student: Amina
+Tool: Claude (Claude Code)
+Related Requirement: HTL-17, HTL-20, GEN-11, PAY-01 (Issue 39)
+Prompt:
+Continue with my next issue (Issue 39: confirmation and my reservations).
+
+How the output was used:
+Claude switched the module to Ziad's shared BookingStatus enum and drafted
+HotelReservationPayments (forPayment, attachPaymentIntent, confirmPaid for the
+verified webhook: transactional, idempotent, amount/expiry checks, unique
+reference, in-app notification), GET /api/hotel-bookings grouped
+upcoming/past/cancelled, GET /api/hotel-bookings/:id with payment/refund status
+and owner/admin/hotel-moderator access, the Confirmed -> Completed job, and
+PaymentIntent cancellation on hold expiry. Reviewed the diff, ran tests/lint/build.
+================================================
