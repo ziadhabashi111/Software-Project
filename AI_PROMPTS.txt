@@ -469,3 +469,15 @@ I'm Yahia Tarek, member 3. Analyze the project description and do my part (fligh
 How the output was used:
 Reviewed the merged flights, payments-interface, hotel-bookings and admin code first (review findings sent to Youssef and Ahmed). Wrote a design doc and plan (docs/design/), then built backend/src/flight-bookings/ test-first: booking summary, concurrency-safe 10-minute hold on the flight's cabin counters inside a transaction, expiry/completion job, payment/refund hooks for Ziad mirroring the hotel API, grouped list and details, tier-based cancellation and the airline flight-cancel cascade, PDF e-ticket in local times, and the ACC-12/ACC-17 registrations. 41 e2e tests (incl. 5 parallel holds for the last seat) and 48 unit tests. Reviewed every diff; ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
+Prompt:
+Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
+
+How the output was used:
+Claude built backend/src/uploads/. The limits are in one file (JPG/PNG detected from the file bytes, 5 MB each, 5 per post/activity/hotel, 1 airline logo). UploadsService validates every file before writing anything, stores files under random names in UPLOAD_DIR, returns URLs from UPLOAD_PUBLIC_URL, and has a path-safe remove and isUploadedUrl. It added an @ImageUpload() decorator that keeps files in memory and turns Multer errors into clear field errors, an authenticated POST /api/uploads/images for the airline-logo flow, and read-only static serving at /uploads. It also wrote unit and e2e tests, a usage note in docs/api/uploads.md, and the .env.example and README variables. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
