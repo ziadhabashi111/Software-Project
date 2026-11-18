@@ -24,6 +24,10 @@ export class Comment {
   @Prop({ type: Boolean, default: false })
   isHidden!: boolean;
 
+  /** Set when the author edits the comment (BLG-07). */
+  @Prop({ type: Date })
+  editedAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
