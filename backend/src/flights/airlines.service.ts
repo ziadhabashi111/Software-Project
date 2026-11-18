@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model, Types } from 'mongoose';
 import { ProviderDirectory, ProviderType } from '../admin/provider-directory';
@@ -13,6 +18,7 @@ import { assertOwnAirline, isOwnAirlineModerator } from './airline-access';
 import { normalizeTiers } from './airline-policies';
 import { toAirlineView } from './airline-view';
 import type { AirlineView } from './airline-view';
+import { FlightBookingHooks } from './flight-booking-hooks';
 import { BaggagePolicyDto } from './dto/baggage-policy.dto';
 import { CancellationPolicyDto } from './dto/cancellation-policy.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
@@ -34,9 +40,12 @@ const codeTaken = () =>
 /** FLT-01, FLT-08, FLT-09 and the provider switch used by the admin (ACC-15). */
 @Injectable()
 export class AirlinesService implements OnModuleInit, ProviderHandler {
+  private readonly logger = new Logger(AirlinesService.name);
+
   constructor(
     @InjectModel(Airline.name) private readonly airlines: Model<Airline>,
     private readonly directory: ProviderDirectory,
+    private readonly bookings: FlightBookingHooks,
   ) {}
 
   onModuleInit(): void {
@@ -146,8 +155,29 @@ export class AirlinesService implements OnModuleInit, ProviderHandler {
       airline.isActive = active;
       await airline.save();
     }
-    // Travellers with Confirmed bookings are added once flight bookings exist.
-    return { name: airline.name, changed, affectedUserIds: [] };
+    // Deactivating: tell the travellers with an upcoming Confirmed booking
+    // (their bookings stay valid). The admin module sends the notices (ACC-15).
+    const affectedUserIds =
+      changed && !active ? await this.travellersOf(id) : [];
+    return { name: airline.name, changed, affectedUserIds };
+  }
+
+  /**
+   * Best effort: the airline is already deactivated, so a failure here is
+   * logged and the deactivation still succeeds.
+   */
+  private async travellersOf(airlineId: string): Promise<string[]> {
+    const link = this.bookings.get();
+    if (!link?.getConfirmedUserIdsForAirline) return [];
+    try {
+      return await link.getConfirmedUserIdsForAirline(airlineId);
+    } catch (error) {
+      this.logger.error(
+        `Could not find the travellers of airline ${airlineId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return [];
+    }
   }
 
   private async apply(
