@@ -13,6 +13,7 @@ import {
   FlightBooking,
   FlightBookingDocument,
 } from '../src/flight-bookings/schemas/flight-booking.schema';
+import { FlightBookingHooks } from '../src/flights/flight-booking-hooks';
 import { CabinClass, FlightStatus } from '../src/flights/flight-status';
 import { FlightsModule } from '../src/flights/flights.module';
 import {
@@ -770,6 +771,181 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       const mod = await moderator();
       await mod.client.get(`/api/flight-bookings/${booking.id}`).expect(403);
       await stranger.client.get('/api/flight-bookings/not-an-id').expect(404);
+    });
+  });
+  describe('cancellation and the airline cancelling a flight (FLT-26, FLT-06, FLT-29, PAY-03)', () => {
+    /** A Confirmed booking through the real payment path. */
+    async function confirmedBooking(
+      flight: FlightDocument,
+      passengers: object[] = [adult()],
+      extra: Record<string, unknown> = {},
+    ) {
+      const held = await heldBooking(flight, passengers, extra);
+      const result = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .confirmPaid(held.booking.id, {
+          paymentIntentId: `pi_${held.booking.id}`,
+          amount: held.booking.price.total,
+          currency: 'USD',
+        });
+      expect(result.outcome).toBe('confirmed');
+      return held;
+    }
+    const cancel = (client: Client, id: string, body: object = {}) =>
+      client.post(`/api/flight-bookings/${id}/cancel`).send(body);
+
+    it('shows the refund without cancelling when not confirmed', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const res = await cancel(user.client, booking.id).expect(200);
+      expect(res.body).toMatchObject({
+        cancelled: false,
+        preview: { refundPercent: 100, refundAmount: booking.price.total },
+      });
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'CONFIRMED',
+      );
+    });
+
+    it('cancels by the airline tier, returns the seats and issues the refund', async () => {
+      const flight = await makeFlight({ departInDays: 10.5, price: 200 });
+      const { user, booking } = await confirmedBooking(flight);
+      const res = await cancel(user.client, booking.id, {
+        confirm: true,
+      }).expect(200);
+      const body = res.body as { cancelled: boolean; booking: BookingBody };
+      expect(body.cancelled).toBe(true);
+      expect(body.booking.status).toBe('CANCELLED');
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        percent: 50,
+        amount: 100,
+        status: 'REFUNDED',
+        refundId: `re_${booking.id}`,
+      });
+      expect(doc!.cancelledBy).toBe('user');
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
+      expect(refundService.issue).toHaveBeenCalledWith('flight', booking.id);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        user.id,
+        'FLIGHT_BOOKING_CANCELLED',
+        expect.any(String),
+      );
+    });
+
+    it('keeps the refund Pending when the refund service fails', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(new Error('Stripe down'));
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('CANCELLED');
+      expect(doc!.refund).toMatchObject({ percent: 100, status: 'PENDING' });
+    });
+
+    it('blocks cancellation after departure', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await confirmedBooking(flight);
+      await flights.updateOne(
+        { _id: flight._id },
+        { $set: { departureUtc: new Date(Date.now() - 60_000) } },
+      );
+      const res = await cancel(user.client, booking.id, {
+        confirm: true,
+      }).expect(409);
+      expect((res.body as ErrorBody).code).toBe('ALREADY_DEPARTED');
+    });
+
+    it("cannot cancel someone else's booking", async () => {
+      const flight = await makeFlight();
+      const { booking } = await confirmedBooking(flight);
+      const stranger = await loggedInAs();
+      await cancel(stranger.client, booking.id, { confirm: true }).expect(404);
+    });
+
+    it('cancels and refunds every booking when the airline cancels the flight', async () => {
+      const flight = await makeFlight();
+      const confirmed = await confirmedBooking(flight);
+      const pending = await heldBooking(flight);
+      const { client } = await moderator();
+      const res = await client
+        .post(`/api/flights/${flight.id}/cancel`)
+        .send({ confirm: true })
+        .expect(201);
+      expect(
+        (res.body as { cancelledBookings: number }).cancelledBookings,
+      ).toBe(1);
+
+      const cancelledDoc = await bookings.findById(confirmed.booking.id).lean();
+      expect(cancelledDoc!.status).toBe('CANCELLED');
+      expect(cancelledDoc!.cancelledBy).toBe('airline');
+      expect(cancelledDoc!.refund).toMatchObject({
+        percent: 100,
+        amount: confirmed.booking.price.total,
+      });
+      expect((await bookings.findById(pending.booking.id).lean())!.status).toBe(
+        'EXPIRED',
+      );
+      const cabin = await cabinOf(flight);
+      expect(cabin.bookedSeats).toBe(0);
+      expect(cabin.heldSeats).toBe(0);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        confirmed.user.id,
+        'FLIGHT_CANCELLED',
+        expect.any(String),
+      );
+
+      const link = ctx.moduleRef.get(FlightBookingHooks).get()!;
+      expect(await link.cancelBookingsForFlight(flight.id)).toEqual({
+        cancelled: 0,
+        notifiedUserIds: [],
+      });
+    });
+
+    it("lists the flight's bookings for its airline (FLT-29)", async () => {
+      const flight = await makeFlight();
+      const { booking } = await confirmedBooking(flight, [
+        adult({ fullName: 'Layla Hassan' }),
+      ]);
+      const { client } = await moderator();
+      const res = await client
+        .get(`/api/flights/${flight.id}/bookings`)
+        .expect(200);
+      const items = (
+        res.body as {
+          bookings: {
+            items: {
+              reference: string;
+              passengerNames: string[];
+              status: string;
+              seats: number;
+            }[];
+          };
+        }
+      ).bookings.items;
+      const doc = await bookings.findById(booking.id).lean();
+      expect(items).toEqual([
+        expect.objectContaining({
+          reference: doc!.reference,
+          passengerNames: ['Layla Hassan'],
+          status: 'Confirmed',
+          seats: 1,
+        }),
+      ]);
+      const csv = await client
+        .get(`/api/flights/${flight.id}/passengers/export`)
+        .expect(200);
+      expect(csv.text).toContain('Layla Hassan');
+    });
+
+    it('tells the flights module who to notify about a schedule change (FLT-05)', async () => {
+      const flight = await makeFlight();
+      const { user } = await confirmedBooking(flight);
+      await heldBooking(flight);
+      const link = ctx.moduleRef.get(FlightBookingHooks).get()!;
+      expect(await link.getConfirmedPassengerUserIds(flight.id)).toEqual([
+        user.id,
+      ]);
     });
   });
 });

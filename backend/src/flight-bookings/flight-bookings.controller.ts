@@ -26,7 +26,12 @@ import type { Paginated } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { BookingRequestDto } from './dto/booking-request.dto';
+import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
 import { ListFlightBookingsDto } from './dto/list-flight-bookings.dto';
+import {
+  CancellationResult,
+  FlightBookingCancellationsService,
+} from './flight-booking-cancellations.service';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import {
   BookingQuoteView,
@@ -44,6 +49,7 @@ export class FlightBookingsController {
     private readonly quotes: FlightBookingQuotesService,
     private readonly holds: FlightBookingHoldsService,
     private readonly mine: MyFlightBookingsService,
+    private readonly cancellations: FlightBookingCancellationsService,
   ) {}
 
   @Post()
@@ -116,5 +122,27 @@ export class FlightBookingsController {
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<FlightBookingView> {
     return this.mine.get(id, user);
+  }
+
+  @Post(':id/cancel')
+  @Roles(Role.USER)
+  @HttpCode(200)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    ['FLT-26', 'PAY-03', 'FLT-12'],
+    'Cancel my booking (see the refund first)',
+    "Cancel your own Confirmed booking any time before the outbound flight departs; a round trip is cancelled as a whole. Without `confirm: true` nothing changes and you get the refund you would receive now: the outbound airline's tier with the highest days-before threshold not above the whole days left, applied to the total (0% if no tier applies). With `confirm: true` the booking becomes Cancelled, its seats return to inventory and a refund is created (status Pending, then Refunded or Failed), and you get an in-app notification. 409 ALREADY_DEPARTED after departure, NOT_CANCELLABLE if the booking is not Confirmed.",
+  )
+  @ApiOkResponse({
+    description: '{ cancelled, preview, booking?, message }',
+  })
+  @ApiConflictResponse({ description: 'ALREADY_DEPARTED or NOT_CANCELLABLE' })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  cancel(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: CancelFlightBookingDto,
+  ): Promise<CancellationResult> {
+    return this.cancellations.cancel(id, user, dto.confirm === true);
   }
 }

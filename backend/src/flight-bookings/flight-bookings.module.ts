@@ -4,6 +4,8 @@ import { AdminModule } from '../admin/admin.module';
 import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
+import { FlightBookingCancellationsService } from './flight-booking-cancellations.service';
+import { FlightBookingLinkAdapter } from './flight-booking-link';
 import { FlightBookingPayments } from './flight-booking-payments';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import { FlightBookingQuotesService } from './flight-booking-quotes.service';
@@ -46,6 +48,8 @@ import { SharedServices } from './shared-services';
     FlightBookingExpiryService,
     FlightBookingPayments,
     MyFlightBookingsService,
+    FlightBookingCancellationsService,
+    FlightBookingLinkAdapter,
   ],
   exports: [FlightBookingPayments],
 })
