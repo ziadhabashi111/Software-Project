@@ -56,7 +56,7 @@ describe('NotificationsService (GEN-01)', () => {
     expect(model.find).toHaveBeenCalledWith({
       userId: new Types.ObjectId(userId),
     });
-    expect(q.sort).toHaveBeenCalledWith({ createdAt: -1 });
+    expect(q.sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
     expect(q.skip).toHaveBeenCalledWith(20);
     expect(q.limit).toHaveBeenCalledWith(10);
     expect(result).toMatchObject({ total: 45, page: 3, limit: 10 });
