@@ -48,7 +48,7 @@
   - from `flights/airline-policies.ts`: `refundPercentFor`;
   - from `flights/time-zones.ts`: `utcToLocal`;
   - from `flights/flight-status.ts`: `effectiveStatus`, `FlightStatus`, `CabinClass`.
-- **Commits:** Conventional Commits with requirement IDs, ending with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Commits:** Conventional Commits with requirement IDs, authored by Yahia Tarek.
 - **Verification per task:**
   - `cd backend && npx jest src/flight-bookings` (unit);
   - `npx jest --config test/jest-e2e.json test/flight-bookings.e2e-spec.ts --runInBand` (e2e);
@@ -484,4 +484,4 @@
 - [ ] **Step 3:** Run `git pull origin develop`, resolve any conflicts on this branch (keep both sides of `AI_PROMPTS.txt`), and re-run Step 2.
 - [ ] **Step 4:** Read the full diff (`git diff origin/develop...HEAD`).
 - [ ] **Step 5:** Commit `docs(flight-bookings): README section, design and AI log (FLT-22)`.
-- [ ] **Step 6:** Ask Yahia before pushing and opening the PR to `develop`. The PR body uses the repo template, lists the requirement IDs and the verification output, and ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- [ ] **Step 6:** Ask Yahia before pushing and opening the PR to `develop`. The PR body uses the repo template and lists the requirement IDs and the verification output.
