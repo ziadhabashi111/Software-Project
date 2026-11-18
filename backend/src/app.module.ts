@@ -17,6 +17,7 @@ import { HotelsModule } from './hotels/hotels.module';
 import { ItinerariesModule } from './itineraries/itineraries.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReferenceDataModule } from './reference-data/reference-data.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { UsersModule } from './users/users.module';
 
@@ -55,6 +56,7 @@ import { UsersModule } from './users/users.module';
     ItinerariesModule,
     BlogModule,
     UploadsModule,
+    ReferenceDataModule,
   ],
 })
 export class AppModule {}
