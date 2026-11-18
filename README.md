@@ -54,7 +54,8 @@ cd backend
 cp ../.env.example .env           # then fill in the values below (never commit .env)
 npm install
 npm run start:dev                 # http://localhost:3000, Swagger at /api/docs
-npm run seed                      # once the seed script is merged: countries, cities, airports, attractions, currencies
+npm run seed                      # reference data: countries, cities, airports, attractions, currencies (see Seeding)
+npm run seed:admin                # the administrator from ADMIN_EMAIL / ADMIN_PASSWORD
 
 # Frontend (second terminal)
 cd frontend
@@ -84,6 +85,23 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |
 
 The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned additions: a platform-currency variable (PAY-04, Ziad) and, if the team wants a separate value, a hotel hold duration.
+
+## Seeding (GEN-12)
+
+`npm run seed` (in `backend/`) loads the **official reference datasets** (PDF section 5.1, "Mock Data" sheet) from `docs/requirements/reference-data/` into the database in `MONGODB_URI`:
+
+| File | Collection | Id kept unchanged | Read endpoint |
+|---|---|---|---|
+| `countries.csv` | `countries` | `code` (e.g. `EG`) | `GET /api/countries?search=` |
+| `cities.csv` | `cities` | `city_id` (e.g. `new_york`) | `GET /api/cities?countryCode=&search=` |
+| `airports.csv` | `airports` | `iata_code` (e.g. `CAI`), with its IANA `time_zone` | `GET /api/airports` (FLT-02) |
+| `attractions.csv` | `attractions` | `attraction_id` (e.g. `att-1`) | none yet |
+| (derived) | `currencies` | distinct `currency` codes of `countries.csv` | `GET /api/currencies` |
+
+- **Idempotent:** every record is upserted by its dataset id, so running the seed again never creates duplicates and resets any edited reference record to the dataset values. Nothing is deleted.
+- **Checked before writing:** every row needs all its columns. Ids must be unique, and every city, airport and attraction must point to a listed country or city. Each airport's country must match its city's country, and every time zone must be a valid IANA zone. Any error stops the seed and names the file and line.
+- **Using the lists in your module:** import `ReferenceDataModule` and inject `ReferenceDataService` (`isCountry`, `isCity`, `isCurrency`). Itinerary countries and day cities (ITN-01, ITN-05) are already checked against them through `PlaceCatalog`.
+- If the course publishes new datasets, replace the four CSVs and run `npm run seed` again.
 
 ## MongoDB Atlas Access
 

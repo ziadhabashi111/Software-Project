@@ -474,6 +474,18 @@ Reviewed the merged flights, payments-interface, hotel-bookings and admin code f
 Date: 2026-11-18
 Student: Ahmed Ismail
 Tool: Claude Code
+Related Requirement: GEN-12 (reference lists for FLT-02, HTL-01, ITN-01, ITN-05)
+Prompt:
+I am Ahmed Ismail. Read the README; the workflow is: create a branch for the issue, then open a PR and ask Habashi to review it. Start issue 44 (seed script and reference data, GEN-12).
+
+How the output was used:
+Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
 Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
 Prompt:
 Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
