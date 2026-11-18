@@ -17,6 +17,8 @@ import { Attraction } from '../src/reference-data/schemas/attraction.schema';
 import { City } from '../src/reference-data/schemas/city.schema';
 import { Country } from '../src/reference-data/schemas/country.schema';
 import { Currency } from '../src/reference-data/schemas/currency.schema';
+import { PasswordService } from '../src/auth/password.service';
+import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
 describe('Reference data seed and lists (GEN-12, real MongoDB in memory)', () => {
@@ -138,5 +140,38 @@ describe('Reference data seed and lists (GEN-12, real MongoDB in memory)', () =>
     const service = ctx.moduleRef.get(ReferenceDataService);
     expect(await service.isCurrency('JPY')).toBe(true);
     expect(await service.isCurrency('XYZ')).toBe(false);
+  });
+
+  it('ACC-09: the profile accepts only supported currencies (CURRENCY_CATALOG)', async () => {
+    const users = ctx.moduleRef.get(UsersService);
+    const passwords = ctx.moduleRef.get(PasswordService);
+    await users.create({
+      name: 'Currency User',
+      email: 'currency@example.com',
+      passwordHash: await passwords.hash('Passw0rd!'),
+    });
+    const client = request.agent(ctx.server);
+    await client
+      .post('/api/auth/login')
+      .send({ email: 'currency@example.com', password: 'Passw0rd!' })
+      .expect(200);
+
+    // Looks like a currency code but is not in the countries dataset.
+    const bad = await client
+      .patch('/api/users/me')
+      .send({ preferredCurrency: 'XYZ' })
+      .expect(400);
+    const fields = (
+      (bad.body as { errors?: { field: string }[] }).errors ?? []
+    ).map((e) => e.field);
+    expect(fields).toEqual(['preferredCurrency']);
+
+    const ok = await client
+      .patch('/api/users/me')
+      .send({ preferredCurrency: 'eur' })
+      .expect(200);
+    expect((ok.body as { preferredCurrency: string }).preferredCurrency).toBe(
+      'EUR',
+    );
   });
 });
