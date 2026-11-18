@@ -481,3 +481,15 @@ Apply the review fixes to my flights module only: list an airline's flights for 
 How the output was used:
 Added GET /api/airlines/:id/flights, the airport-time rule, the notifiedUserIds contract and the optional getConfirmedUserIdsForAirline hook, and the departureUtc guard on the edit filters. Wrote test/flights.e2e-spec.ts against the in-memory MongoDB (24 tests). I checked the new tests can fail by temporarily breaking the seat-floor and airport-lock guards: exactly the expected three tests went red, then I restored the code. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, PAY-03
+Prompt:
+Add one e2e test that loads the real FlightBookingsModule (no fake hook) and checks that cancelling a flight refunds its Confirmed bookings at 100%, expires pending holds, frees bookedSeats and heldSeats, and notifies the affected passengers.
+
+How the output was used:
+New test/flights-cancel-cascade.e2e-spec.ts (3 tests, MongoDB replica set in memory). The first run showed a traveller with two bookings gets two notices; I checked Yahia's code, saw each notice names its own booking, so I changed my expectation to one notice per cancelled booking and each traveller listed once in notifiedUserIds. Reviewed the diff.
+================================================
