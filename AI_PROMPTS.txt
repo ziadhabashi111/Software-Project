@@ -591,6 +591,35 @@ main was ahead of develop. Find out who merged what to main and bring develop up
 How the output was used:
 Found 4 commits only on main: the #88 release merge (merged by Yahia in the GitHub UI), a direct README edit by Ziad (no PR), and the merges of docs PRs #66 and #68 which targeted main. Merged main into develop on a branch (no conflicts), so develop now contains everything main has. Reviewed the diff.
 ================================================
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+Guide me step by step through issue 28 (in-app notifications): the Notification schema, the module,
+the service (notify, list, unread count, mark read, mark all read), and the controller with its query
+DTO, plus unit tests. Explain new NestJS and TypeScript terms (decorators, modules, dependency
+injection, ObjectId, index, DTO) as we go.
+
+How the output was used:
+Wrote the Notification schema and registered it in the module myself following the guidance (ObjectId
+userId with ref and index, read defaulting to false). The service, controller, query DTO and unit
+as well. markRead matches on both the notification id 
+and the owner so a user cannot mark someone else's notification (404). Ran lint, tsc and the unit tests.
+================================================
+
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-05
+Prompt:
+Review Ziad's PR #112 (in-app notifications) and fix the gaps before merging.
+
+How the output was used:
+Reviewed the module (user-scoped queries, ownership inside the update filter, 404 for others) and found it correct. Fixed two gaps on his branch: the list used its own DTO with page size 20 instead of the shared GEN-05 pagination (10 by default), and the API returned raw Mongo documents. Added a NotificationView, switched to PaginationQueryDto/toPage, removed the now-unused DTO, and added an e2e spec (401 without login, per-user isolation, page size 10, no database internals, cross-user mark-read returns 404). Reviewed the diff.
+================================================
 
 ================================================
 Date: 2026-11-18
