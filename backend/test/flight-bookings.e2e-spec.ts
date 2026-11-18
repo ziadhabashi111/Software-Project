@@ -948,4 +948,47 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       ]);
     });
   });
+  describe('e-ticket (FLT-23, GEN-06)', () => {
+    it('downloads a PDF e-ticket for a confirmed booking', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      await ctx.moduleRef.get(FlightBookingPayments).confirmPaid(booking.id, {
+        paymentIntentId: `pi_${booking.id}`,
+        amount: booking.price.total,
+        currency: 'USD',
+      });
+      const res = await user.client
+        .get(`/api/flight-bookings/${booking.id}/e-ticket`)
+        .buffer(true)
+        .parse((response, done) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (c: Buffer) => chunks.push(c));
+          response.on('end', () => done(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(res.headers['content-type']).toContain('application/pdf');
+      expect(res.headers['content-disposition']).toMatch(
+        /attachment; filename="FB-[A-HJ-NP-Z2-9]{8}\.pdf"/,
+      );
+      expect((res.body as Buffer).subarray(0, 4).toString()).toBe('%PDF');
+    });
+
+    it('has no e-ticket before payment', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      const res = await user.client
+        .get(`/api/flight-bookings/${booking.id}/e-ticket`)
+        .expect(409);
+      expect((res.body as ErrorBody).code).toBe('TICKET_NOT_AVAILABLE');
+    });
+
+    it("cannot download someone else's e-ticket", async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const stranger = await loggedInAs();
+      await stranger.client
+        .get(`/api/flight-bookings/${booking.id}/e-ticket`)
+        .expect(404);
+    });
+  });
 });

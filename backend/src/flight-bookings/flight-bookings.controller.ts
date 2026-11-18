@@ -6,6 +6,8 @@ import {
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -16,8 +18,10 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -144,5 +148,31 @@ export class FlightBookingsController {
     @Body() dto: CancelFlightBookingDto,
   ): Promise<CancellationResult> {
     return this.cancellations.cancel(id, user, dto.confirm === true);
+  }
+
+  @Get(':id/e-ticket')
+  @Roles(Role.USER)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiProduces('application/pdf')
+  @ApiReq(
+    ['FLT-23', 'GEN-06'],
+    'Download my e-ticket (PDF)',
+    "The e-ticket of your own Confirmed (or Completed) booking: booking reference, passengers with their document numbers and extra bags, and each flight with departure and arrival in the airports' local time (with UTC offset and time zone), cabin and baggage allowance. 409 TICKET_NOT_AVAILABLE before the booking is Confirmed.",
+  )
+  @ApiOkResponse({ description: 'A PDF file download' })
+  @ApiConflictResponse({ description: 'TICKET_NOT_AVAILABLE' })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  async eTicket(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const { filename, pdf } = await this.mine.eTicket(id, user);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    return new StreamableFile(pdf);
   }
 }

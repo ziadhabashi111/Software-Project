@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { Role } from '../auth/auth.types';
@@ -10,6 +14,7 @@ import {
   BookingGroup,
   ListFlightBookingsDto,
 } from './dto/list-flight-bookings.dto';
+import { renderETicket } from './e-ticket/e-ticket.renderer';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingView, FlightBookingViews } from './flight-booking-view';
 import { quoteUserRefund } from './rules/cancellation-rules';
@@ -81,6 +86,28 @@ export class MyFlightBookingsService {
 
     const view = await this.views.bookingView(doc);
     return { ...view, cancellation: cancellationPreview(doc, view, now) };
+  }
+  /** FLT-23: the e-ticket PDF of a Confirmed or Completed booking. */
+  async eTicket(
+    id: string,
+    user: AuthUser,
+  ): Promise<{ filename: string; pdf: Buffer }> {
+    const view = await this.get(id, user);
+    if (
+      view.status !== BookingStatus.CONFIRMED &&
+      view.status !== BookingStatus.COMPLETED
+    ) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 'The e-ticket is available once the booking is Confirmed',
+        code: 'TICKET_NOT_AVAILABLE',
+      });
+    }
+    return {
+      filename: `${view.reference ?? view.id}.pdf`,
+      pdf: await renderETicket(view),
+    };
   }
 }
 
