@@ -34,7 +34,7 @@ function setup() {
       retrieve: jest.fn(),
       cancel: jest.fn().mockResolvedValue({}),
     },
-    refunds: { create: jest.fn().mockResolvedValue({}) },
+    refunds: { create: jest.fn().mockResolvedValue({ id: 're_1' }) },
     webhooks: { constructEvent: jest.fn() },
   };
   const paymentDoc = {
@@ -71,18 +71,65 @@ function setup() {
   const config = {
     get: jest.fn().mockReturnValue('whsec_test'),
   } as unknown as ConfigService;
+  // Behaves like the unique index on eventId.
+  const seenEvents = new Set<string>();
+  const processedEvents = {
+    create: jest.fn((doc: { eventId: string }) => {
+      if (seenEvents.has(doc.eventId)) {
+        return Promise.reject(
+          Object.assign(new Error('E11000 duplicate key'), { code: 11000 }),
+        );
+      }
+      seenEvents.add(doc.eventId);
+      return Promise.resolve(doc);
+    }),
+    deleteOne: jest.fn((filter: { eventId: string }) => {
+      seenEvents.delete(filter.eventId);
+      return Promise.resolve({});
+    }),
+  };
   const service = new PaymentsService(
     stripe as unknown as Stripe,
     config,
     payments as never,
     gateway as unknown as BookingPaymentGateway,
     policies as unknown as PolicyAcceptanceService,
+    processedEvents as never,
   );
-  return { service, stripe, payments, gateway, policies };
+  return {
+    service,
+    stripe,
+    payments,
+    gateway,
+    policies,
+    processedEvents,
+    paymentDoc,
+  };
 }
 
-function event(type: string, object: Stripe.PaymentIntent): Stripe.Event {
-  return { type, data: { object } } as unknown as Stripe.Event;
+function event(
+  type: string,
+  object: Stripe.PaymentIntent,
+  id = 'evt_1',
+): Stripe.Event {
+  return { id, type, data: { object } } as unknown as Stripe.Event;
+}
+
+/** Minimal evaluator for the `updateOne` filters used by setStatus. */
+interface StatusFilter {
+  stripePaymentIntentId: string;
+  status?: { $nin?: string[]; $ne?: string };
+}
+function fakeUpdateOne(doc: { status: string }, intentId = 'pi_1') {
+  return (filter: StatusFilter, update: { $set: { status: string } }) => {
+    const s = filter.status;
+    const matches =
+      filter.stripePaymentIntentId === intentId &&
+      !(s?.$nin && s.$nin.includes(doc.status)) &&
+      !(s?.$ne !== undefined && s.$ne === doc.status);
+    if (matches) doc.status = update.$set.status;
+    return Promise.resolve({ matchedCount: matches ? 1 : 0 });
+  };
 }
 
 describe('toMinorUnits', () => {
@@ -168,6 +215,37 @@ describe('PaymentsService.start (PAY-01)', () => {
       ConflictException,
     );
   });
+
+  it('answers two parallel first requests with the same payment (no 500 on E11000)', async () => {
+    const { service, payments, paymentDoc } = setup();
+    let stored = false;
+    payments.findOne.mockImplementation(() =>
+      Promise.resolve(stored ? paymentDoc : null),
+    );
+    payments.findOneAndUpdate.mockImplementation(() => {
+      if (stored) {
+        return Promise.reject(
+          Object.assign(new Error('E11000 duplicate key'), { code: 11000 }),
+        );
+      }
+      stored = true;
+      return Promise.resolve(paymentDoc);
+    });
+    const [a, b] = await Promise.all([
+      service.start(USER, 'flight', BOOKING),
+      service.start(USER, 'flight', BOOKING),
+    ]);
+    expect(a.paymentId).toBe('pay_1');
+    expect(b).toEqual(a);
+  });
+
+  it('still surfaces database errors other than a duplicate key', async () => {
+    const { service, payments } = setup();
+    payments.findOneAndUpdate.mockRejectedValue(new Error('db down'));
+    await expect(service.start(USER, 'flight', BOOKING)).rejects.toThrow(
+      'db down',
+    );
+  });
 });
 
 describe('PaymentsService.get / retry ownership', () => {
@@ -240,6 +318,117 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
     expect(stripe.refunds.create).not.toHaveBeenCalled();
   });
 
+  it('does not refund a replay after cancellation (already_processed)', async () => {
+    const { service, stripe, gateway } = setup();
+    gateway.confirm.mockResolvedValue('already_processed');
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(gateway.confirm).toHaveBeenCalledTimes(1);
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a duplicate event id without processing it again', async () => {
+    const { service, stripe, gateway } = setup();
+    gateway.confirm.mockResolvedValue('rejected');
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    await expect(
+      service.handleWebhook(Buffer.from('{}'), 'sig'),
+    ).resolves.toEqual({ received: true });
+    expect(gateway.confirm).toHaveBeenCalledTimes(1);
+    expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the event claim when processing fails, so a Stripe retry is processed', async () => {
+    const { service, stripe, gateway } = setup();
+    gateway.confirm.mockRejectedValueOnce(new Error('db down'));
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await expect(
+      service.handleWebhook(Buffer.from('{}'), 'sig'),
+    ).rejects.toThrow('db down');
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(gateway.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('never refunds a payment that is already refunded (beyond the 24h idempotency window)', async () => {
+    const { service, stripe, gateway, payments } = setup();
+    gateway.confirm.mockResolvedValue('rejected');
+    payments.findOne.mockResolvedValue({
+      stripePaymentIntentId: 'pi_1',
+      status: 'refunded',
+      stripeRefundId: 're_1',
+    });
+    // A different event id for the same intent (e.g. a manual resend).
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event(
+        'payment_intent.succeeded',
+        intent({ status: 'succeeded' }),
+        'evt_2',
+      ),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('stores the refund id when it refunds a rejected payment', async () => {
+    const { service, stripe, gateway, payments } = setup();
+    gateway.confirm.mockResolvedValue('rejected');
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(payments.updateOne).toHaveBeenCalledWith(
+      { stripePaymentIntentId: 'pi_1', status: { $ne: 'refunded' } },
+      { $set: { status: 'refunded', stripeRefundId: 're_1' } },
+    );
+  });
+
+  it('keeps a succeeded payment succeeded when a late payment_failed arrives', async () => {
+    const { service, stripe, payments } = setup();
+    const doc = { status: 'succeeded' };
+    payments.updateOne.mockImplementation(fakeUpdateOne(doc));
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.payment_failed', intent(), 'evt_late_fail'),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(doc.status).toBe('succeeded');
+
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.canceled', intent(), 'evt_late_cancel'),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(doc.status).toBe('succeeded');
+  });
+
+  it('still moves a pending payment to failed, and a refunded one never back', async () => {
+    const { service, stripe, payments } = setup();
+    const pending = { status: 'processing' };
+    payments.updateOne.mockImplementation(fakeUpdateOne(pending));
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.payment_failed', intent(), 'evt_fail'),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(pending.status).toBe('requires_payment_method');
+
+    const refunded = { status: 'refunded' };
+    payments.updateOne.mockImplementation(fakeUpdateOne(refunded));
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event(
+        'payment_intent.succeeded',
+        intent({ status: 'succeeded' }),
+        'evt_ok',
+      ),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(refunded.status).toBe('refunded');
+  });
+
   it('records a failed payment and leaves the booking unconfirmed', async () => {
     const { service, stripe, gateway } = setup();
     stripe.webhooks.constructEvent.mockReturnValue(
@@ -298,5 +487,32 @@ describe('PaymentsService.cancelPendingPayment', () => {
     await expect(
       service.cancelPendingPayment('flight', BOOKING),
     ).resolves.toBeUndefined();
+  });
+
+  it('warns (not errors) when the intent already succeeded and cannot be cancelled', async () => {
+    const { service, stripe, payments } = setup();
+    payments.findOne.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      stripePaymentIntentId: 'pi_1',
+      status: 'requires_payment_method',
+    });
+    stripe.paymentIntents.cancel.mockRejectedValue(
+      Object.assign(new Error('unexpected state'), {
+        code: 'payment_intent_unexpected_state',
+      }),
+    );
+    const logger = (
+      service as unknown as {
+        logger: { warn: jest.Mock; error: jest.Mock };
+      }
+    ).logger;
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const error = jest
+      .spyOn(logger, 'error')
+      .mockImplementation(() => undefined);
+    await service.cancelPendingPayment('flight', BOOKING);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
+    expect(payments.updateOne).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,10 @@ import { PaymentsService } from './payments.service';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
 import {
+  ProcessedStripeEvent,
+  ProcessedStripeEventSchema,
+} from './schemas/processed-stripe-event.schema';
+import {
   PolicyAcceptance,
   PolicyAcceptanceSchema,
 } from './schemas/policy-acceptance.schema';
@@ -26,6 +30,7 @@ import { stripeProvider } from './stripe.provider';
     MongooseModule.forFeature([
       { name: Payment.name, schema: PaymentSchema },
       { name: PolicyAcceptance.name, schema: PolicyAcceptanceSchema },
+      { name: ProcessedStripeEvent.name, schema: ProcessedStripeEventSchema },
     ]),
     FlightBookingsModule,
     HotelBookingsModule,

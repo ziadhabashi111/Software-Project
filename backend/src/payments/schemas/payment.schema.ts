@@ -27,6 +27,10 @@ export class Payment {
 
   @Prop({ type: Number, default: 0 })
   attempts!: number;
+
+  /** Set once a rejected payment was refunded, so it is never refunded twice. */
+  @Prop({ type: String })
+  stripeRefundId?: string;
 }
 
 export type PaymentDocument = HydratedDocument<Payment>;
