@@ -1,0 +1,36 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
+import { IMAGE_LIMITS, type ImageOwnerKind } from './image-rules';
+
+export type UploadDocument = HydratedDocument<Upload>;
+
+/**
+ * GEN-08: who stored each uploaded file. The helper only lets that user reuse
+ * the URL (`assertOwnedUpload`) or delete the file (`remove`), so one
+ * provider cannot claim or delete another provider's image.
+ */
+@Schema({ timestamps: { createdAt: true, updatedAt: false } })
+export class Upload {
+  /** The stored file name (`<uuid>.<jpg|png>`); also the image id. */
+  @Prop({ type: String, required: true, unique: true })
+  filename!: string;
+
+  @Prop({ type: String, required: true })
+  url!: string;
+
+  /** The signed-in user who uploaded the file. */
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  })
+  ownerId!: Types.ObjectId;
+
+  @Prop({ type: String, required: true, enum: Object.keys(IMAGE_LIMITS) })
+  kind!: ImageOwnerKind;
+
+  createdAt?: Date;
+}
+
+export const UploadSchema = SchemaFactory.createForClass(Upload);
