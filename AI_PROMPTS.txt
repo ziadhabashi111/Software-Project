@@ -517,3 +517,27 @@ Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete
 How the output was used:
 Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
+Prompt:
+Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
+
+How the output was used:
+Claude built backend/src/uploads/. The limits are in one file (JPG/PNG detected from the file bytes, 5 MB each, 5 per post/activity/hotel, 1 airline logo). UploadsService validates every file before writing anything, stores files under random names in UPLOAD_DIR, returns URLs from UPLOAD_PUBLIC_URL, and has a path-safe remove and isUploadedUrl. It added an @ImageUpload() decorator that keeps files in memory and turns Multer errors into clear field errors, an authenticated POST /api/uploads/images for the airline-logo flow, and read-only static serving at /uploads. It also wrote unit and e2e tests, a usage note in docs/api/uploads.md, and the .env.example and README variables. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-03, BLG-04, BLG-08, BLG-10 (GEN-08)
+Prompt:
+Yes, start 46 (blog posts, drafts, tags, images).
+
+How the output was used:
+Claude built the author side of the blog on the Post schema from #118 and the upload helper from #114. It added POST /api/posts (title and body required, draft by default, up to 5 normalised tags of 30 chars, image URLs only from the upload helper), GET /api/posts/mine (drafts included, counts, status filter), GET /api/posts/mine/:id, and author-only PATCH and DELETE (403 for others' published posts, 404 for drafts; delete removes comments and image files). It also added POST/DELETE /api/posts/:id/images with an atomic 5-image limit and the public GET /api/tags/:tag/posts. It wrote 11 e2e tests, including parallel uploads. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
