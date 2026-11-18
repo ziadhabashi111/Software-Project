@@ -95,7 +95,26 @@ export interface FlightRefundBasis {
   amount: number;
   percentage: number;
   currency: string;
+  /** PENDING, REFUNDED or FAILED. */
   status: string;
+  /**
+   * The Stripe refund already created for this cancellation, or `null` if
+   * none went out yet. A retrying caller must not create another one when
+   * this is set.
+   */
+  stripeRefundId: string | null;
+  /**
+   * Stable per booking: pass it as Stripe's `Idempotency-Key` when creating
+   * the refund so a retry after a timeout cannot refund twice.
+   */
+  idempotencyKey: string;
+  /** Why the last attempt failed (a short code, no secrets), when FAILED. */
+  failureReason: string | null;
+}
+
+/** The Stripe idempotency key for the refund of one flight booking (PAY-03). */
+export function flightRefundIdempotencyKey(bookingId: string): string {
+  return `flight-booking-refund-${bookingId}`;
 }
 
 type ConfirmAttempt =
@@ -333,6 +352,9 @@ export class FlightBookingPayments {
       percentage: doc.refund.percent,
       currency: doc.refund.currency,
       status: doc.refund.status,
+      stripeRefundId: doc.refund.refundId ?? null,
+      idempotencyKey: flightRefundIdempotencyKey(doc.id),
+      failureReason: doc.refund.failureReason ?? null,
     };
   }
 
@@ -353,6 +375,7 @@ export class FlightBookingPayments {
           'refund.refundId': result.refundId,
           'refund.status': result.status,
         },
+        $unset: { 'refund.failureReason': 1 },
       },
     );
     return updated.matchedCount === 1;
