@@ -1,25 +1,39 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import type { Paginated } from '../common/pagination/pagination';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { BookingRequestDto } from './dto/booking-request.dto';
+import { ListFlightBookingsDto } from './dto/list-flight-bookings.dto';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import {
   BookingQuoteView,
   FlightBookingQuotesService,
 } from './flight-booking-quotes.service';
 import type { FlightBookingView } from './flight-booking-view';
+import { MyFlightBookingsService } from './my-flight-bookings.service';
 
 /** Routes of PDF section 8.4 (Flight Booking). HTTP only; logic lives in the services. */
 @ApiTags('flight-bookings')
@@ -29,6 +43,7 @@ export class FlightBookingsController {
   constructor(
     private readonly quotes: FlightBookingQuotesService,
     private readonly holds: FlightBookingHoldsService,
+    private readonly mine: MyFlightBookingsService,
   ) {}
 
   @Post()
@@ -69,5 +84,37 @@ export class FlightBookingsController {
     @Body() dto: BookingRequestDto,
   ): Promise<FlightBookingView> {
     return this.holds.hold(user, dto);
+  }
+
+  @Get()
+  @Roles(Role.USER)
+  @ApiReq(
+    'FLT-25',
+    'My flight bookings (Upcoming, Past, Cancelled)',
+    'Your own flight bookings in one group, newest first, 10 per page by default. Each item shows the reference (once Confirmed), the flights with local dates and times, passengers, cabin and status. Upcoming: unpaid holds still running and Confirmed bookings. Past: Completed and Expired. Cancelled: Cancelled.',
+  )
+  @ApiOkResponse({ description: 'One page: { items, total, page, limit }' })
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query() query: ListFlightBookingsDto,
+  ): Promise<Paginated<FlightBookingView>> {
+    return this.mine.list(user, query);
+  }
+
+  @Get(':id')
+  @Roles(Role.USER, Role.ADMIN)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    ['FLT-25', 'PAY-01', 'PAY-03', 'GEN-06'],
+    'Flight booking details',
+    "Full details of your own booking (admins can open any): flights in each airport's local time, passengers and baggage, price, accepted policies, payment status and refund status (Pending, Refunded, Failed). While the booking can be cancelled, `cancellation` shows the refund you would get now (FLT-26). Another user's booking answers 404.",
+  )
+  @ApiOkResponse({ description: 'The booking' })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  get(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<FlightBookingView> {
+    return this.mine.get(id, user);
   }
 }

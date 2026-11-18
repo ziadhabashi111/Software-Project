@@ -679,4 +679,97 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       });
     });
   });
+  describe('my bookings and details (FLT-25)', () => {
+    const setStatus = (id: string, status: string) =>
+      bookings.updateOne({ _id: new Types.ObjectId(id) }, { $set: { status } });
+
+    it('groups my bookings as upcoming, past and cancelled', async () => {
+      const flight = await makeFlight();
+      const user = await loggedInAs();
+      const ids: string[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        const res = await hold(user.client, bookingBody(flight)).expect(201);
+        ids.push((res.body as BookingBody).id);
+      }
+      await setStatus(ids[1], 'CONFIRMED');
+      await setStatus(ids[2], 'EXPIRED');
+      await setStatus(ids[3], 'CANCELLED');
+      // Someone else's booking never shows up.
+      await heldBooking(flight);
+
+      const list = async (group: string) =>
+        (
+          await user.client
+            .get('/api/flight-bookings')
+            .query({ group })
+            .expect(200)
+        ).body as {
+          items: BookingBody[];
+          total: number;
+          page: number;
+          limit: number;
+        };
+
+      const upcoming = await list('upcoming');
+      expect(upcoming).toMatchObject({ total: 2, page: 1, limit: 10 });
+      expect(upcoming.items.map((b) => b.id).sort()).toEqual(
+        [ids[0], ids[1]].sort(),
+      );
+      expect((await list('past')).items.map((b) => b.id)).toEqual([ids[2]]);
+      expect((await list('cancelled')).items.map((b) => b.id)).toEqual([
+        ids[3],
+      ]);
+    });
+
+    it('moves a hold that ran out to past when listing', async () => {
+      const flight = await makeFlight();
+      const user = await loggedInAs();
+      const res = await hold(user.client, bookingBody(flight)).expect(201);
+      const id = (res.body as BookingBody).id;
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 1_000) } },
+      );
+      const past = await user.client
+        .get('/api/flight-bookings')
+        .query({ group: 'past' })
+        .expect(200);
+      expect((past.body as { items: BookingBody[] }).items[0]).toMatchObject({
+        id,
+        status: 'EXPIRED',
+      });
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('shows details in local time with the refund preview', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await heldBooking(flight);
+      await setStatus(booking.id, 'CONFIRMED');
+      const res = await user.client
+        .get(`/api/flight-bookings/${booking.id}`)
+        .expect(200);
+      const body = res.body as BookingBody;
+      expect(body.segments[0].departure.localTime).toBe(
+        utcToLocal(flight.departureUtc, 'Africa/Cairo').time,
+      );
+      expect(body.cancellation).toMatchObject({
+        refundPercent: 100,
+        refundAmount: booking.price.total,
+      });
+    });
+
+    it('hides a booking from other users and moderators but not admins', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const stranger = await loggedInAs();
+      await stranger.client
+        .get(`/api/flight-bookings/${booking.id}`)
+        .expect(404);
+      const admin = await loggedInAs(Role.ADMIN);
+      await admin.client.get(`/api/flight-bookings/${booking.id}`).expect(200);
+      const mod = await moderator();
+      await mod.client.get(`/api/flight-bookings/${booking.id}`).expect(403);
+      await stranger.client.get('/api/flight-bookings/not-an-id').expect(404);
+    });
+  });
 });

@@ -13,6 +13,7 @@ import {
   FlightBooking,
   FlightBookingSchema,
 } from './schemas/flight-booking.schema';
+import { MyFlightBookingsService } from './my-flight-bookings.service';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -44,6 +45,7 @@ import { SharedServices } from './shared-services';
     FlightBookingHoldsService,
     FlightBookingExpiryService,
     FlightBookingPayments,
+    MyFlightBookingsService,
   ],
   exports: [FlightBookingPayments],
 })
