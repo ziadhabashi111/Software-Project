@@ -165,6 +165,21 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
       const post = await createPost(client, { imageUrls: [image.url] });
       expect(post.images.map((i) => i.url)).toEqual([image.url]);
     });
+
+    it("rejects another author's uploaded image: only the uploader can attach it (GEN-08)", async () => {
+      const owner = await author();
+      const other = await author();
+      const uploaded = await owner.client
+        .post('/api/uploads/images')
+        .attach('images', PNG, 'a.png')
+        .expect(201);
+      const [image] = (uploaded.body as { images: { url: string }[] }).images;
+      const res = await other.client
+        .post('/api/posts')
+        .send({ title: 'Reusing it', body: 'b', imageUrls: [image.url] })
+        .expect(400);
+      expect(fieldsOf(res)).toContain('imageUrls');
+    });
   });
 
   describe('GET /api/posts/mine (BLG-03)', () => {

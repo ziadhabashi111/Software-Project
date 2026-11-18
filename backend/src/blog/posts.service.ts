@@ -56,7 +56,7 @@ export class PostsService {
   /** BLG-01: title and body required; tags and images optional; draft by default. */
   async create(author: AuthUser, dto: CreatePostDto): Promise<PostView> {
     const imageUrls = dto.imageUrls ?? [];
-    this.assertOwnImageUrls(imageUrls);
+    await this.assertOwnImageUrls(author.id, imageUrls);
     const status = dto.status ?? PostStatus.DRAFT;
     const post = await this.posts.create({
       author: new Types.ObjectId(author.id),
@@ -129,7 +129,7 @@ export class PostsService {
     const post = await this.loadOwn(author, id);
     await this.moderation.deletePost(post.id);
     await Promise.all(
-      post.images.map((image) => this.uploads.remove(image.url)),
+      post.images.map((image) => this.uploads.remove(image.url, author.id)),
     );
   }
 
@@ -146,6 +146,7 @@ export class PostsService {
     const stored = await this.uploads.saveImages(
       files,
       'post',
+      author.id,
       post.images.length,
     );
     const room = IMAGES_MAX - stored.length; // index that must still be free
@@ -160,7 +161,9 @@ export class PostsService {
     );
     if (!updated) {
       // Another upload filled the post first (or it was deleted meanwhile).
-      await Promise.all(stored.map((image) => this.uploads.remove(image.url)));
+      await Promise.all(
+        stored.map((image) => this.uploads.remove(image.url, author.id)),
+      );
       const current = await this.posts.findById(post._id);
       if (!current) throw new NotFoundException('Post not found');
       this.uploads.assertCanAdd('post', current.images.length, stored.length);
@@ -186,7 +189,7 @@ export class PostsService {
       { $pull: { images: { _id: image._id } } },
       { returnDocument: 'after' },
     );
-    await this.uploads.remove(image.url);
+    await this.uploads.remove(image.url, author.id);
     if (!updated) throw new NotFoundException('Post not found');
     return toPostView(updated);
   }
@@ -241,12 +244,15 @@ export class PostsService {
     return post;
   }
 
-  private assertOwnImageUrls(urls: string[]): void {
-    if (urls.some((url) => !this.uploads.isUploadedUrl(url))) {
-      throw fieldError(
-        'imageUrls',
-        'Each image must be a URL returned by POST /api/uploads/images',
-      );
-    }
+  /** GEN-08: only images this author uploaded can be attached to their post. */
+  private async assertOwnImageUrls(
+    ownerId: string,
+    urls: string[],
+  ): Promise<void> {
+    await Promise.all(
+      urls.map((url) =>
+        this.uploads.assertOwnedUpload(url, ownerId, 'imageUrls'),
+      ),
+    );
   }
 }
