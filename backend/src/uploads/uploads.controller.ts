@@ -8,6 +8,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { IsIn, IsOptional } from 'class-validator';
+import type { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { ImageUpload } from './image-upload.decorator';
 import { IMAGE_LIMITS, type ImageOwnerKind } from './image-rules';
@@ -43,7 +45,7 @@ export class UploadsController {
   @ApiReq(
     'GEN-08',
     'Upload images',
-    'Signed-in users upload JPG or PNG images (up to 5 MB each; up to 5, or 1 for kind=airlineLogo). The real file format is checked, not just the name. Returns the URLs to save on the post, activity, hotel or airline. Anything outside the limits is rejected and nothing is stored.',
+    'Signed-in users upload JPG or PNG images (up to 5 MB each; up to 5, or 1 for kind=airlineLogo). The real file format is checked, not just the name. Returns the URLs to save on the post, activity, hotel or airline. Each file is recorded as uploaded by the caller; only the caller can later reuse its URL or delete it. Anything outside the limits is rejected and nothing is stored.',
   )
   @ApiCreatedResponse({
     schema: {
@@ -65,7 +67,10 @@ export class UploadsController {
   async upload(
     @Query() query: UploadImagesQueryDto,
     @UploadedFiles() files: Express.Multer.File[] | undefined,
+    @CurrentUser() user: AuthUser,
   ): Promise<{ images: StoredImage[] }> {
-    return { images: await this.uploads.saveImages(files, query.kind) };
+    return {
+      images: await this.uploads.saveImages(files, query.kind, user.id),
+    };
   }
 }

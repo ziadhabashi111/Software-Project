@@ -1,7 +1,10 @@
 import { mkdirSync } from 'node:fs';
+import type { ServerResponse } from 'node:http';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import express from 'express';
+import { MongooseModule } from '@nestjs/mongoose';
+import { ExpressAdapter } from '@nestjs/platform-express';
+import { Upload, UploadSchema } from './upload.schema';
 import { UploadsController } from './uploads.controller';
 import { UPLOADS_ROUTE, UploadsService } from './uploads.service';
 
@@ -11,9 +14,13 @@ import { UPLOADS_ROUTE, UploadsService } from './uploads.service';
  *
  * The shared image-upload helper. Import UploadsModule and inject
  * `UploadsService`; see `docs/api/uploads.md` for usage. Stored files are
- * served read-only at `/uploads/<name>` (outside the `/api` prefix).
+ * served read-only at `/uploads/<name>` (outside the `/api` prefix), and each
+ * file's uploader is recorded in the `uploads` collection.
  */
 @Module({
+  imports: [
+    MongooseModule.forFeature([{ name: Upload.name, schema: UploadSchema }]),
+  ],
   controllers: [UploadsController],
   providers: [UploadsService],
   exports: [UploadsService],
@@ -26,19 +33,19 @@ export class UploadsModule implements OnModuleInit {
 
   onModuleInit(): void {
     const adapter = this.adapterHost.httpAdapter;
-    if (!adapter) return; // no HTTP server (e.g. the seed scripts)
+    // No HTTP server (e.g. the seed scripts) or not the Express platform.
+    if (!(adapter instanceof ExpressAdapter)) return;
     mkdirSync(this.uploads.directory, { recursive: true });
-    adapter.use(
-      UPLOADS_ROUTE,
-      express.static(this.uploads.directory, {
-        dotfiles: 'deny',
-        index: false,
-        fallthrough: true,
-        setHeaders: (res) => {
-          res.setHeader('X-Content-Type-Options', 'nosniff');
-          res.setHeader('Cache-Control', 'public, max-age=86400');
-        },
-      }),
-    );
+    // Nest's own Express static serving, so `express` need not be imported.
+    adapter.useStaticAssets(this.uploads.directory, {
+      prefix: UPLOADS_ROUTE,
+      dotfiles: 'deny',
+      index: false,
+      fallthrough: true,
+      setHeaders: (res: ServerResponse) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      },
+    });
   }
 }
