@@ -620,6 +620,18 @@ Review Ziad's PR #112 (in-app notifications) and fix the gaps before merging.
 How the output was used:
 Reviewed the module (user-scoped queries, ownership inside the update filter, 404 for others) and found it correct. Fixed two gaps on his branch: the list used its own DTO with page size 20 instead of the shared GEN-05 pagination (10 by default), and the API returned raw Mongo documents. Added a NotificationView, switched to PaginationQueryDto/toPage, removed the now-unused DTO, and added an e2e spec (401 without login, per-user isolation, page size 10, no database internals, cross-user mark-read returns 404). Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-12, ACC-09
+Prompt:
+What was the problem in GEN-12? Yes, fix it.
+
+How the output was used:
+Claude explained that ProfileService (ACC-09) asks for an optional CURRENCY_CATALOG hook that my GEN-12 module never provided. Without it, any three-letter code was accepted as a preferred currency. ReferenceDataModule now provides CURRENCY_CATALOG, backed by ReferenceDataService.isCurrency, and is @Global, which avoids a circular import with UsersModule. Claude added an e2e test (XYZ rejected, EUR accepted). I reviewed the diff and ran build, lint, unit and e2e.
+================================================
 Date: 2026-11-18
 
 ================================================
