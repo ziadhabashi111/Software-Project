@@ -16,6 +16,7 @@ import {
   FlightBookingSchema,
 } from './schemas/flight-booking.schema';
 import { MyFlightBookingsService } from './my-flight-bookings.service';
+import { FlightBookingRegistrations } from './registrations/flight-booking-registrations';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -50,6 +51,7 @@ import { SharedServices } from './shared-services';
     MyFlightBookingsService,
     FlightBookingCancellationsService,
     FlightBookingLinkAdapter,
+    FlightBookingRegistrations,
   ],
   exports: [FlightBookingPayments],
 })

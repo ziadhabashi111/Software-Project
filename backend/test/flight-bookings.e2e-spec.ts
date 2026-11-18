@@ -991,4 +991,66 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .expect(404);
     });
   });
+  describe('account and admin hooks (ACC-12, ACC-17)', () => {
+    async function confirmed(flight: FlightDocument) {
+      const held = await heldBooking(flight);
+      await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .confirmPaid(held.booking.id, {
+          paymentIntentId: `pi_${held.booking.id}`,
+          amount: held.booking.price.total,
+          currency: 'USD',
+        });
+      return held;
+    }
+
+    it('blocks deactivation while a confirmed flight is upcoming', async () => {
+      const flight = await makeFlight();
+      const { user } = await confirmed(flight);
+      await user.client
+        .delete('/api/users/me')
+        .query({ confirm: 'true' })
+        .expect(409);
+    });
+
+    it('allows deactivation with only an unpaid hold', async () => {
+      const flight = await makeFlight();
+      const { user } = await heldBooking(flight);
+      const res = await user.client
+        .delete('/api/users/me')
+        .query({ confirm: 'true' });
+      expect(res.status).toBeLessThan(300);
+    });
+
+    it('shows flight bookings in the admin bookings list', async () => {
+      const flight = await makeFlight();
+      const { booking } = await confirmed(flight);
+      const admin = await loggedInAs(Role.ADMIN);
+      const res = await admin.client
+        .get('/api/admin/bookings')
+        .query({ type: 'flight', status: 'Confirmed', limit: 100 })
+        .expect(200);
+      const items = (
+        res.body as {
+          items: {
+            id: string;
+            type: string;
+            reference: string;
+            provider: { name: string };
+            amount: number;
+            status: string;
+          }[];
+        }
+      ).items;
+      const row = items.find((i) => i.id === booking.id);
+      expect(row).toMatchObject({
+        type: 'flight',
+        provider: { name: 'Nile Air' },
+        amount: booking.price.total,
+        status: 'CONFIRMED',
+      });
+      expect(row!.reference).toMatch(/^FB-/);
+      expect(items.every((i) => i.status === 'CONFIRMED')).toBe(true);
+    });
+  });
 });
