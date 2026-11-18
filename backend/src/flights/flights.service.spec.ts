@@ -515,3 +515,51 @@ describe('statusFilter (FLT-30)', () => {
     expect(statusFilter(undefined, now)).toEqual({});
   });
 });
+
+describe('edits stop at departure (FLT-30)', () => {
+  it('only matches flights that have not departed, even before the minute job runs', async () => {
+    const economy = cabin();
+    const { service, model } = build(flight({ cabins: [economy] }));
+
+    await service.update('f1', moderator, {
+      departureTime: '2090-03-01T15:00',
+    });
+    await service.addCabin('f1', moderator, {
+      cabinClass: CabinClass.BUSINESS,
+      seats: 10,
+      price: 900,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    });
+    await service.updateCabin('f1', economy._id.toString(), moderator, {
+      price: 450,
+    });
+
+    expect(model.findOneAndUpdate).toHaveBeenCalledTimes(3);
+    for (const call of model.findOneAndUpdate.mock.calls as unknown[][]) {
+      const filter = call[0] as {
+        status: FlightStatus;
+        departureUtc: { $gt: Date };
+      };
+      expect(filter.status).toBe(FlightStatus.SCHEDULED);
+      expect(filter.departureUtc.$gt).toBeInstanceOf(Date);
+      expect(
+        Math.abs(filter.departureUtc.$gt.getTime() - Date.now()),
+      ).toBeLessThan(5000);
+    }
+  });
+
+  it('answers 409 when the flight departs between loading and saving', async () => {
+    const economy = cabin();
+    const { service, model } = build(flight({ cabins: [economy] }));
+    model.findOneAndUpdate.mockResolvedValue(null);
+    await expect(
+      service.update('f1', moderator, { departureTime: '2090-03-01T15:00' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      service.updateCabin('f1', economy._id.toString(), moderator, {
+        price: 1,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});

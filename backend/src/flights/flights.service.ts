@@ -209,6 +209,8 @@ export class FlightsService {
     const filter: QueryFilter<Flight> = {
       _id: flight._id,
       status: FlightStatus.SCHEDULED,
+      // Not after departure, even if the minute job has not marked it Departed yet (FLT-30).
+      departureUtc: { $gt: new Date() },
     };
     if (airportsChanged) {
       // A hold or booking may have arrived since we loaded the flight.
@@ -245,7 +247,7 @@ export class FlightsService {
     if (!updated) {
       throw conflict(
         'FLIGHT_CHANGED',
-        'The flight changed while you were editing it (a booking was made or its status changed). Reload it and try again.',
+        'The flight changed while you were editing it (a booking was made, it was cancelled or it has departed). Reload it and try again.',
       );
     }
 
@@ -269,6 +271,7 @@ export class FlightsService {
       {
         _id: flight._id,
         status: FlightStatus.SCHEDULED,
+        departureUtc: { $gt: new Date() },
         'cabins.cabinClass': { $ne: dto.cabinClass },
       },
       {
@@ -328,6 +331,8 @@ export class FlightsService {
     const filter: QueryFilter<Flight> = {
       _id: flight._id,
       status: FlightStatus.SCHEDULED,
+      // Not after departure, even if the minute job has not marked it Departed yet (FLT-30).
+      departureUtc: { $gt: new Date() },
     };
     if (dto.seats !== undefined) {
       // Atomic with booking holds: the new total must cover booked + held.
