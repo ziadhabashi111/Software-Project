@@ -198,7 +198,7 @@ export class FlightsController {
   @ApiReq(
     ['FLT-06', 'FLT-30'],
     'Cancel a flight (own airline, after confirmation)',
-    'Send `{ "confirm": true }`. The flight becomes Cancelled and is hidden from search; every Confirmed booking becomes Cancelled with a 100% refund, pending holds are released and passengers are notified. Only Scheduled flights can be cancelled. If the refunds fail part-way the flight stays Cancelled and the same request can be sent again to finish.',
+    'Send `{ "confirm": true }`. The flight becomes Cancelled and is hidden from search; every Confirmed booking becomes Cancelled with a 100% refund, pending holds are released, and the booking module notifies each passenger (FLIGHT_CANCELLED) right after their booking is cancelled, so a retry never skips anyone. Only Scheduled flights can be cancelled. If the refunds fail part-way the flight stays Cancelled and the same request can be sent again to finish.',
   )
   @ApiCreatedResponse({
     schema: {
