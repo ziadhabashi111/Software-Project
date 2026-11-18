@@ -481,3 +481,15 @@ I am Ahmed Ismail. Read the README; the workflow is: create a branch for the iss
 How the output was used:
 Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-09 (report submission), GEN-10 hooks for posts and comments
+Prompt:
+Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete on posts and comments for Habashi).
+
+How the output was used:
+Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
