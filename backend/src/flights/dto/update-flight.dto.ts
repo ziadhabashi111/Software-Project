@@ -12,7 +12,8 @@ import {
 export class UpdateFlightDto {
   @ApiPropertyOptional({
     example: 'CAI',
-    description: 'Only until the flight has any booking or hold',
+    description:
+      'Only until the flight has any booking or hold. Send departureTime too: the local time at the new airport.',
   })
   @IsOptional()
   @Transform(upper)
@@ -22,7 +23,8 @@ export class UpdateFlightDto {
 
   @ApiPropertyOptional({
     example: 'JFK',
-    description: 'Only until the flight has any booking or hold',
+    description:
+      'Only until the flight has any booking or hold. Send arrivalTime too: the local time at the new airport.',
   })
   @IsOptional()
   @Transform(upper)

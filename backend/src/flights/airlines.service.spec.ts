@@ -1,8 +1,10 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import type { Model } from 'mongoose';
 import { ProviderDirectory, ProviderType } from '../admin/provider-directory';
 import { Role } from '../auth/auth.types';
 import { AirlinesService } from './airlines.service';
+import { FlightBookingHooks } from './flight-booking-hooks';
+import type { FlightBookingLink } from './flight-booking-hooks';
 import type { Airline } from './schemas/airline.schema';
 
 interface FakeAirline {
@@ -24,11 +26,13 @@ function build(airline: FakeAirline | null, createError?: Error) {
     }),
   };
   const directory = new ProviderDirectory();
+  const hooks = new FlightBookingHooks();
   const service = new AirlinesService(
     model as unknown as Model<Airline>,
     directory,
+    hooks,
   );
-  return { service, directory, model };
+  return { service, directory, model, hooks };
 }
 
 const airline = (overrides: Partial<FakeAirline> = {}): FakeAirline => ({
@@ -104,5 +108,72 @@ describe('AirlinesService', () => {
     await expect(
       service.create({ name: 'Other', code: 'MS' }),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  describe('affected travellers on deactivation (ACC-15)', () => {
+    const linkWith = (
+      ids: Promise<string[]>,
+    ): { link: FlightBookingLink; ask: jest.Mock } => {
+      const ask = jest.fn().mockReturnValue(ids);
+      return {
+        ask,
+        link: {
+          getConfirmedPassengerUserIds: jest.fn(),
+          cancelBookingsForFlight: jest.fn(),
+          listBookings: jest.fn(),
+          getConfirmedUserIdsForAirline: ask,
+        },
+      };
+    };
+
+    it('returns the users with an upcoming Confirmed booking when the airline becomes inactive', async () => {
+      const { service, hooks } = build(airline());
+      const { link, ask } = linkWith(Promise.resolve(['u1', 'u2']));
+      hooks.register(link);
+      const change = await service.setActive('a1', false);
+      expect(ask).toHaveBeenCalledWith('a1');
+      expect(change?.affectedUserIds).toEqual(['u1', 'u2']);
+    });
+
+    it('does not ask when nothing changes or when the airline is reactivated', async () => {
+      const { service, hooks } = build(airline({ isActive: false }));
+      const { link, ask } = linkWith(Promise.resolve(['u1']));
+      hooks.register(link);
+      expect((await service.setActive('a1', false))?.affectedUserIds).toEqual(
+        [],
+      );
+      expect((await service.setActive('a1', true))?.affectedUserIds).toEqual(
+        [],
+      );
+      expect(ask).not.toHaveBeenCalled();
+    });
+
+    it('is empty when no booking module is connected or it lacks the method', async () => {
+      const none = build(airline());
+      expect(
+        (await none.service.setActive('a1', false))?.affectedUserIds,
+      ).toEqual([]);
+
+      const old = build(airline());
+      old.hooks.register({
+        getConfirmedPassengerUserIds: jest.fn(),
+        cancelBookingsForFlight: jest.fn(),
+        listBookings: jest.fn(),
+      });
+      expect(
+        (await old.service.setActive('a1', false))?.affectedUserIds,
+      ).toEqual([]);
+    });
+
+    it('still deactivates when the lookup fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const doc = airline();
+      const { service, hooks } = build(doc);
+      hooks.register(linkWith(Promise.reject(new Error('boom'))).link);
+      const change = await service.setActive('a1', false);
+      expect(doc.isActive).toBe(false);
+      expect(change).toMatchObject({ changed: true, affectedUserIds: [] });
+      jest.restoreAllMocks();
+    });
   });
 });

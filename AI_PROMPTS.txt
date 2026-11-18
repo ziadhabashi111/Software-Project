@@ -472,6 +472,30 @@ Reviewed the merged flights, payments-interface, hotel-bookings and admin code f
 
 ================================================
 Date: 2026-11-18
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-05, FLT-06, FLT-03, FLT-29, FLT-30, GEN-06, ACC-15
+Prompt:
+Apply the review fixes to my flights module only: list an airline's flights for its moderator; require the local time when an airport changes; make flight cancel rely on the booking module to notify (contract change agreed with Yahia); return the affected travellers when an airline is deactivated; block edits after departure; and add real-database e2e tests for the queries that were only mocked.
+
+How the output was used:
+Added GET /api/airlines/:id/flights, the airport-time rule, the notifiedUserIds contract and the optional getConfirmedUserIdsForAirline hook, and the departureUtc guard on the edit filters. Wrote test/flights.e2e-spec.ts against the in-memory MongoDB (24 tests). I checked the new tests can fail by temporarily breaking the seat-floor and airport-lock guards: exactly the expected three tests went red, then I restored the code. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, PAY-03
+Prompt:
+Add one e2e test that loads the real FlightBookingsModule (no fake hook) and checks that cancelling a flight refunds its Confirmed bookings at 100%, expires pending holds, frees bookedSeats and heldSeats, and notifies the affected passengers.
+
+How the output was used:
+New test/flights-cancel-cascade.e2e-spec.ts (3 tests, MongoDB replica set in memory). The first run showed a traveller with two bookings gets two notices; I checked Yahia's code, saw each notice names its own booking, so I changed my expectation to one notice per cancelled booking and each traveller listed once in notifiedUserIds. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
 Student: Ahmed Ismail
 Tool: Claude Code
 Related Requirement: GEN-12 (reference lists for FLT-02, HTL-01, ITN-01, ITN-05)
@@ -480,6 +504,42 @@ I am Ahmed Ismail. Read the README; the workflow is: create a branch for the iss
 
 How the output was used:
 Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-09 (report submission), GEN-10 hooks for posts and comments
+Prompt:
+Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete on posts and comments for Habashi).
+
+How the output was used:
+Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
+Prompt:
+Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
+
+How the output was used:
+Claude built backend/src/uploads/. The limits are in one file (JPG/PNG detected from the file bytes, 5 MB each, 5 per post/activity/hotel, 1 airline logo). UploadsService validates every file before writing anything, stores files under random names in UPLOAD_DIR, returns URLs from UPLOAD_PUBLIC_URL, and has a path-safe remove and isUploadedUrl. It added an @ImageUpload() decorator that keeps files in memory and turns Multer errors into clear field errors, an authenticated POST /api/uploads/images for the airline-logo flow, and read-only static serving at /uploads. It also wrote unit and e2e tests, a usage note in docs/api/uploads.md, and the .env.example and README variables. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-03, BLG-04, BLG-08, BLG-10 (GEN-08)
+Prompt:
+Yes, start 46 (blog posts, drafts, tags, images).
+
+How the output was used:
+Claude built the author side of the blog on the Post schema from #118 and the upload helper from #114. It added POST /api/posts (title and body required, draft by default, up to 5 normalised tags of 30 chars, image URLs only from the upload helper), GET /api/posts/mine (drafts included, counts, status filter), GET /api/posts/mine/:id, and author-only PATCH and DELETE (403 for others' published posts, 404 for drafts; delete removes comments and image files). It also added POST/DELETE /api/posts/:id/images with an atomic 5-image limit and the public GET /api/tags/:tag/posts. It wrote 11 e2e tests, including parallel uploads. I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
 
 ================================================
