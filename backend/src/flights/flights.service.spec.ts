@@ -7,7 +7,7 @@ import type { AirportsService } from './airports.service';
 import { CabinClass, FlightStatus } from './flight-status';
 import { FlightBookingHooks } from './flight-booking-hooks';
 import type { FlightBookingLink } from './flight-booking-hooks';
-import { FlightsService } from './flights.service';
+import { FlightsService, statusFilter } from './flights.service';
 import type { Flight } from './schemas/flight.schema';
 
 /** Arguments of one recorded call to a jest mock. */
@@ -112,7 +112,7 @@ function build(found: ReturnType<typeof flight> | null) {
     hooks,
     notifications,
   );
-  return { service, model, hooks, notifications };
+  return { service, model, hooks, notifications, airlinesService };
 }
 
 /** A booking link that only knows its Confirmed passengers. */
@@ -366,5 +366,103 @@ describe('FlightsService.markDeparted (FLT-30)', () => {
     ];
     expect(filter.status).toBe(FlightStatus.SCHEDULED);
     expect(update.$set.status).toBe(FlightStatus.DEPARTED);
+  });
+});
+
+describe('FlightsService.listForAirline (FLT-05)', () => {
+  const admin: AuthUser = { id: 'ad', role: Role.ADMIN };
+  const page = { page: 2, limit: 10 };
+
+  function withFlights(items: unknown[], total = items.length) {
+    const built = build(null);
+    const query = {
+      sort: jest.fn(),
+      skip: jest.fn(),
+      limit: jest.fn().mockResolvedValue(items),
+    };
+    query.sort.mockReturnValue(query);
+    query.skip.mockReturnValue(query);
+    const find = jest.fn().mockReturnValue(query);
+    const countDocuments = jest.fn().mockResolvedValue(total);
+    Object.assign(built.model, { find, countDocuments });
+    return { ...built, find, query, countDocuments };
+  }
+
+  it('lets the airline’s own moderator and an admin list, newest departure first, one page at a time', async () => {
+    for (const user of [moderator, admin]) {
+      const { service, query } = withFlights([flight()], 11);
+      const result = await service.listForAirline(user, AIRLINE_ID, page);
+      expect(query.sort).toHaveBeenCalledWith({ departureUtc: -1, _id: -1 });
+      expect(query.skip).toHaveBeenCalledWith(10);
+      expect(query.limit).toHaveBeenCalledWith(10);
+      expect(result).toMatchObject({ total: 11, page: 2, limit: 10 });
+      expect(result.items[0]).toMatchObject({
+        flightNumber: 'MS985',
+        departure: { localTime: '14:30' },
+      });
+    }
+  });
+
+  it('keeps other airlines’ moderators, users and hotel moderators out (403)', async () => {
+    for (const user of [
+      otherModerator,
+      { id: 'u1', role: Role.USER },
+      { id: 'h1', role: Role.HOTEL_MODERATOR, providerId: AIRLINE_ID },
+    ]) {
+      const { service, find } = withFlights([]);
+      await expect(
+        service.listForAirline(user, AIRLINE_ID, page),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(find).not.toHaveBeenCalled();
+    }
+  });
+
+  it('answers 404 for an airline that does not exist', async () => {
+    const { service, airlinesService } = withFlights([]);
+    airlinesService.findForFlights.mockResolvedValueOnce(null);
+    await expect(
+      service.listForAirline(admin, new Types.ObjectId().toString(), page),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('limits the query to the airline and the requested status', async () => {
+    const { service, find } = withFlights([]);
+    await service.listForAirline(moderator, AIRLINE_ID, {
+      ...page,
+      status: FlightStatus.CANCELLED,
+    });
+    const filter = (find.mock.calls[0] as unknown[])[0] as Record<
+      string,
+      unknown
+    >;
+    expect(String(filter.airlineId)).toBe(AIRLINE_ID);
+    expect(filter.status).toBe(FlightStatus.CANCELLED);
+  });
+});
+
+describe('statusFilter (FLT-30)', () => {
+  const now = new Date('2027-01-01T00:00:00Z');
+
+  it('Scheduled means not yet departed, even if the cron has not run', () => {
+    expect(statusFilter(FlightStatus.SCHEDULED, now)).toEqual({
+      status: FlightStatus.SCHEDULED,
+      departureUtc: { $gt: now },
+    });
+  });
+
+  it('Departed also covers Scheduled flights whose time has passed', () => {
+    expect(statusFilter(FlightStatus.DEPARTED, now)).toEqual({
+      $or: [
+        { status: FlightStatus.DEPARTED },
+        { status: FlightStatus.SCHEDULED, departureUtc: { $lte: now } },
+      ],
+    });
+  });
+
+  it('Cancelled is stored, and no status means no filter', () => {
+    expect(statusFilter(FlightStatus.CANCELLED, now)).toEqual({
+      status: FlightStatus.CANCELLED,
+    });
+    expect(statusFilter(undefined, now)).toEqual({});
   });
 });

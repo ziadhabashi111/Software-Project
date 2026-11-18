@@ -10,7 +10,9 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model, QueryFilter } from 'mongoose';
+import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
+import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
 import { fieldError } from '../common/validation/validation-errors';
 import { NOTIFICATION_SERVICE } from '../notifications/notification.service.interface';
 import type { NotificationService } from '../notifications/notification.service.interface';
@@ -19,6 +21,7 @@ import { AirlinesService } from './airlines.service';
 import { AirportsService } from './airports.service';
 import { CreateCabinDto } from './dto/create-cabin.dto';
 import { CreateFlightDto } from './dto/create-flight.dto';
+import { ListAirlineFlightsQueryDto } from './dto/list-airline-flights.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { UpdateFlightDto } from './dto/update-flight.dto';
 import { FlightBookingHooks } from './flight-booking-hooks';
@@ -69,6 +72,51 @@ export class FlightsService {
     @Inject(NOTIFICATION_SERVICE)
     private readonly notifications?: NotificationService,
   ) {}
+
+  /**
+   * FLT-05, FLT-06, FLT-29: the airline's flights for its own moderator (or an
+   * admin), newest departure first. The Departed filter is computed from the
+   * departure time too, so it is right between runs of the scheduled job.
+   */
+  async listForAirline(
+    user: AuthUser,
+    airlineId: string,
+    query: ListAirlineFlightsQueryDto,
+  ): Promise<Paginated<FlightView>> {
+    if (user.role !== Role.ADMIN) assertOwnAirline(user, airlineId);
+    const airline = await this.airlines.findForFlights(airlineId, {
+      includeInactive: true,
+    });
+    if (!airline) throw new NotFoundException('Airline not found');
+
+    const filter: QueryFilter<Flight> = {
+      airlineId: new Types.ObjectId(airlineId),
+      ...statusFilter(query.status, new Date()),
+    };
+    const [flights, total] = await Promise.all([
+      this.flights
+        .find(filter)
+        .sort({ departureUtc: -1, _id: -1 })
+        .skip(skipFor(query))
+        .limit(query.limit),
+      this.flights.countDocuments(filter),
+    ]);
+
+    const airports = await this.airports.findByCodes([
+      ...new Set(
+        flights.flatMap((f) => [f.departureAirport, f.arrivalAirport]),
+      ),
+    ]);
+    const byCode = new Map(airports.map((a) => [a.iataCode, a]));
+    const items = flights.flatMap((flight) => {
+      const departure = byCode.get(flight.departureAirport);
+      const arrival = byCode.get(flight.arrivalAirport);
+      return departure && arrival
+        ? [toFlightView(flight, airline, departure, arrival)]
+        : [];
+    });
+    return toPage(items, total, query);
+  }
 
   /** FLT-03 */
   async create(user: AuthUser, dto: CreateFlightDto): Promise<FlightView> {
@@ -435,4 +483,29 @@ function hasAnyBooking(flight: FlightDocument): boolean {
     flight.everBooked ||
     flight.cabins.some((c) => c.bookedSeats > 0 || c.heldSeats > 0)
   );
+}
+
+/**
+ * Database filter for a status as users see it: a Scheduled flight whose
+ * departure time has passed already counts as Departed (FLT-30).
+ */
+export function statusFilter(
+  status: FlightStatus | undefined,
+  now: Date,
+): QueryFilter<Flight> {
+  switch (status) {
+    case FlightStatus.SCHEDULED:
+      return { status: FlightStatus.SCHEDULED, departureUtc: { $gt: now } };
+    case FlightStatus.DEPARTED:
+      return {
+        $or: [
+          { status: FlightStatus.DEPARTED },
+          { status: FlightStatus.SCHEDULED, departureUtc: { $lte: now } },
+        ],
+      };
+    case FlightStatus.CANCELLED:
+      return { status: FlightStatus.CANCELLED };
+    default:
+      return {};
+  }
 }
