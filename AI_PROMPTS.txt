@@ -481,3 +481,15 @@ I am Ahmed Ismail. Read the README; the workflow is: create a branch for the iss
 How the output was used:
 Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: none (repository maintenance; README note concerns PAY-04)
+Prompt:
+Check all the stuff I merged to main for conflicts and check whether we should bring main back into develop to avoid future conflicts. Then do it.
+
+How the output was used:
+Claude compared main and develop: my merge #88 (develop -> main) was clean (re-running the merge gave the identical tree). main still had commits develop lacked: duplicate docs merges #66/#68 (same content as #65/#67) and a direct commit to main (0ad30d2) with one README line about PLATFORM_CURRENCY. Claude advised against reverting (reverting a merge makes later develop -> main merges drop that code) and instead back-merged main into develop on docs/sync-main-into-develop. Dry runs both ways were conflict-free. I reviewed the one-line diff.
+================================================
