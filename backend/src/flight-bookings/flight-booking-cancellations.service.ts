@@ -28,6 +28,7 @@ import {
   FlightBooking,
   FlightBookingDocument,
 } from './schemas/flight-booking.schema';
+import { refundFailureReason } from './refund-failure-reason';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -44,7 +45,7 @@ export interface CancellationResult {
  * cancels a flight (FLT-06). The status change, the refund record and the
  * returned seats commit together; the refund is then issued through Ziad's
  * refund service (PAY-03). A refund failure never undoes the cancellation:
- * the refund stays Pending so it can be retried.
+ * the refund is marked Failed with a short reason code instead.
  */
 @Injectable()
 export class FlightBookingCancellationsService {
@@ -253,6 +254,17 @@ export class FlightBookingCancellationsService {
     await this.shared.notify(doc.user.toString(), type, message);
   }
 
+  /**
+   * Asks the payments module to send the money back (PAY-03). The
+   * cancellation itself always stands and the seats stay released:
+   * - refund service not wired in this deployment: the refund stays PENDING
+   *   (a deploy state, not a failure) and can be issued later;
+   * - Stripe / the refund service throws: the refund becomes FAILED with a
+   *   short reason code (never a message, stack or secret), shown on the
+   *   booking details (FLT-25);
+   * - otherwise the result is stored (REFUNDED, or PENDING/FAILED as Stripe
+   *   reported it) and any earlier failure reason is cleared.
+   */
   private async issueRefund(bookingId: string): Promise<void> {
     const refunds = this.shared.refunds();
     if (!refunds) {
@@ -265,9 +277,24 @@ export class FlightBookingCancellationsService {
       const result = await refunds.issue('flight', bookingId);
       await this.payments.recordRefundResult(bookingId, result);
     } catch (error) {
+      const reason = refundFailureReason(error);
       this.logger.error(
-        `Refund of flight booking ${bookingId} failed; it stays Pending`,
-        error instanceof Error ? error.stack : String(error),
+        `Refund of flight booking ${bookingId} failed (${reason}); marked Failed`,
+      );
+      // Only a still-pending refund becomes Failed: never overwrite an
+      // outcome a refund webhook may have recorded in the meantime.
+      await this.bookings.updateOne(
+        {
+          _id: new Types.ObjectId(bookingId),
+          status: BookingStatus.CANCELLED,
+          'refund.status': 'PENDING',
+        },
+        {
+          $set: {
+            'refund.status': 'FAILED',
+            'refund.failureReason': reason,
+          },
+        },
       );
     }
   }

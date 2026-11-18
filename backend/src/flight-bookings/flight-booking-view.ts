@@ -90,7 +90,10 @@ export interface FlightBookingView {
     percent: number;
     amount: number;
     currency: string;
+    /** PENDING, REFUNDED or FAILED (PAY-03); null when nothing is refunded. */
     status: string | null;
+    /** Why the refund failed (a short code such as `STRIPE_<CODE>`), when FAILED. */
+    failureReason: string | null;
   } | null;
   /** What cancelling now would refund; only while the booking can be cancelled (FLT-26). */
   cancellation?: UserRefundQuote | null;
@@ -241,6 +244,7 @@ export class FlightBookingViews {
             amount: doc.refund.amount,
             currency: doc.refund.currency,
             status: doc.refund.status ?? null,
+            failureReason: doc.refund.failureReason ?? null,
           }
         : null,
       createdAt: doc.createdAt.toISOString(),

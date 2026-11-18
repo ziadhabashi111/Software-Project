@@ -155,6 +155,10 @@ export class BookingRefund {
   /** Unset when nothing is refunded (0%). */
   @Prop({ type: String })
   status?: RefundStatus;
+
+  /** Why the refund failed, when FAILED. A short code, never a stack/secret. */
+  @Prop({ type: String })
+  failureReason?: string;
 }
 const BookingRefundSchema = SchemaFactory.createForClass(BookingRefund);
 

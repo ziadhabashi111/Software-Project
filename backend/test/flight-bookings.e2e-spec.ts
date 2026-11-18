@@ -13,6 +13,7 @@ import {
   FlightBooking,
   FlightBookingDocument,
 } from '../src/flight-bookings/schemas/flight-booking.schema';
+import { SharedServices } from '../src/flight-bookings/shared-services';
 import { FlightBookingHooks } from '../src/flights/flight-booking-hooks';
 import { CabinClass, FlightStatus } from '../src/flights/flight-status';
 import { FlightsModule } from '../src/flights/flights.module';
@@ -833,14 +834,146 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       );
     });
 
-    it('keeps the refund Pending when the refund service fails', async () => {
+    it('marks the refund Failed with a code-only reason when the refund service fails (PAY-03)', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        new Error('Invalid API Key provided: sk_test_planted_secret'),
+      );
+      const res = await cancel(user.client, booking.id, {
+        confirm: true,
+      }).expect(200);
+      const body = res.body as {
+        booking: BookingBody & {
+          refund: { status: string; failureReason: string | null };
+        };
+      };
+      expect(body.booking.status).toBe('CANCELLED');
+      expect(body.booking.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('CANCELLED');
+      expect(doc!.refund).toMatchObject({
+        percent: 100,
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
+
+      // FLT-25: the details show the failure; the basis carries it too.
+      const details = await user.client
+        .get(`/api/flight-bookings/${booking.id}`)
+        .expect(200);
+      expect(details.body).toMatchObject({
+        status: 'CANCELLED',
+        refund: { status: 'FAILED', failureReason: 'REFUND_ISSUE_FAILED' },
+      });
+      expect(JSON.stringify(details.body)).not.toContain('sk_test');
+      const basis = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .refundBasis(booking.id);
+      expect(basis).toMatchObject({
+        status: 'FAILED',
+        stripeRefundId: null,
+        idempotencyKey: `flight-booking-refund-${booking.id}`,
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+    });
+
+    it("stores Stripe's error code as the failure reason", async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('sk_test_planted_secret was refused'), {
+          code: 'charge_already_refunded',
+        }),
+      );
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'STRIPE_CHARGE_ALREADY_REFUNDED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+    });
+
+    it('never overwrites a refund result recorded while the call was failing', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const payments = ctx.moduleRef.get(FlightBookingPayments);
+      refundService.issue.mockImplementationOnce(async (_type, id) => {
+        // A refund webhook lands first, then the call itself errors.
+        await payments.recordRefundResult(id, {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+        throw new Error('timeout');
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'REFUNDED',
+        refundId: `re_${booking.id}`,
+      });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+    });
+
+    it('a later successful refund clears the failure reason', async () => {
       const flight = await makeFlight({ departInDays: 40 });
       const { user, booking } = await confirmedBooking(flight);
       refundService.issue.mockRejectedValueOnce(new Error('Stripe down'));
       await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund?.failureReason,
+      ).toBe('REFUND_ISSUE_FAILED');
+
+      const recorded = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .recordRefundResult(booking.id, {
+          refundId: `re_retry_${booking.id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+      expect(recorded).toBe(true);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'REFUNDED',
+        refundId: `re_retry_${booking.id}`,
+      });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+      const basis = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .refundBasis(booking.id);
+      expect(basis).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: `re_retry_${booking.id}`,
+        failureReason: null,
+      });
+    });
+
+    it('keeps the refund Pending when no refund service is wired', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const shared = ctx.moduleRef.get(SharedServices, { strict: false });
+      const spy = jest.spyOn(shared, 'refunds').mockReturnValueOnce(undefined);
+      try {
+        await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      } finally {
+        spy.mockRestore();
+      }
       const doc = await bookings.findById(booking.id).lean();
       expect(doc!.status).toBe('CANCELLED');
       expect(doc!.refund).toMatchObject({ percent: 100, status: 'PENDING' });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+      expect(refundService.issue).not.toHaveBeenCalled();
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
     });
 
     it('blocks cancellation after departure', async () => {
@@ -900,6 +1033,38 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         cancelled: 0,
         notifiedUserIds: [],
       });
+    });
+
+    it('marks the refund Failed when it fails during the airline cascade (FLT-06, PAY-03)', async () => {
+      const flight = await makeFlight();
+      const confirmed = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('Invalid API Key provided: sk_test_planted'), {
+          code: 'api_key_expired',
+        }),
+      );
+      const { client } = await moderator();
+      await client
+        .post(`/api/flights/${flight.id}/cancel`)
+        .send({ confirm: true })
+        .expect(201);
+
+      const doc = await bookings.findById(confirmed.booking.id).lean();
+      expect(doc!.status).toBe('CANCELLED');
+      expect(doc!.cancelledBy).toBe('airline');
+      expect(doc!.refund).toMatchObject({
+        percent: 100,
+        amount: confirmed.booking.price.total,
+        status: 'FAILED',
+        failureReason: 'STRIPE_API_KEY_EXPIRED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        confirmed.user.id,
+        'FLIGHT_CANCELLED',
+        expect.any(String),
+      );
     });
 
     it("lists the flight's bookings for its airline (FLT-29)", async () => {
