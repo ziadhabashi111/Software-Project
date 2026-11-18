@@ -1,0 +1,112 @@
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  MaxLength,
+} from 'class-validator';
+import { PaginationQueryDto } from '../../common/pagination/pagination';
+import { PostStatus } from '../schemas/post.schema';
+
+export const TITLE_MAX = 150;
+export const BODY_MAX = 20_000;
+export const TAGS_MAX = 5;
+export const TAG_MAX_LENGTH = 30;
+export const IMAGES_MAX = 5;
+
+const trim = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.trim() : value;
+
+/** Tags are trimmed, lower-cased and de-duplicated, so `Cairo` = `cairo `. */
+export const normalizeTags = ({ value }: { value: unknown }): unknown =>
+  Array.isArray(value)
+    ? [
+        ...new Set(
+          value.map((tag: unknown) =>
+            typeof tag === 'string' ? tag.trim().toLowerCase() : tag,
+          ),
+        ),
+      ]
+    : value;
+
+/** Body for `POST /api/posts` (BLG-01, BLG-08). */
+export class CreatePostDto {
+  @ApiProperty({ example: 'Three days in Cairo', maxLength: TITLE_MAX })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'Title is required' })
+  @MaxLength(TITLE_MAX, {
+    message: `Title can be at most ${TITLE_MAX} characters`,
+  })
+  title!: string;
+
+  @ApiProperty({
+    example: 'Day 1: the pyramids at sunrise...',
+    maxLength: BODY_MAX,
+  })
+  @IsString()
+  @Matches(/\S/, { message: 'Body is required' })
+  @MaxLength(BODY_MAX, {
+    message: `Body can be at most ${BODY_MAX} characters`,
+  })
+  body!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['cairo', 'food'],
+    description: `Up to ${TAGS_MAX} tags of at most ${TAG_MAX_LENGTH} characters; stored lower-case`,
+  })
+  @IsOptional()
+  @Transform(normalizeTags)
+  @IsArray()
+  @ArrayMaxSize(TAGS_MAX, { message: `At most ${TAGS_MAX} tags` })
+  @IsString({ each: true })
+  @Matches(/\S/, { each: true, message: 'A tag cannot be empty' })
+  @MaxLength(TAG_MAX_LENGTH, {
+    each: true,
+    message: `Each tag can be at most ${TAG_MAX_LENGTH} characters`,
+  })
+  tags?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: `Up to ${IMAGES_MAX} image URLs returned by POST /api/uploads/images (GEN-08). Images can also be added later with POST /api/posts/:id/images.`,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(IMAGES_MAX, { message: `At most ${IMAGES_MAX} images` })
+  @IsUrl(
+    { require_tld: false, require_protocol: true },
+    { each: true, message: 'Each image must be a URL from the upload helper' },
+  )
+  imageUrls?: string[];
+
+  @ApiPropertyOptional({
+    enum: PostStatus,
+    default: PostStatus.DRAFT,
+    description: 'draft (only you see it) or published',
+  })
+  @IsOptional()
+  @IsEnum(PostStatus, { message: 'status must be draft or published' })
+  status?: PostStatus;
+}
+
+/** Body for `PATCH /api/posts/:id` (BLG-04, BLG-08). Images: use the image endpoints. */
+export class UpdatePostDto extends PartialType(CreatePostDto) {}
+
+/** Query for `GET /api/posts/mine` (BLG-03). */
+export class ListMyPostsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: PostStatus })
+  @IsOptional()
+  @IsEnum(PostStatus)
+  status?: PostStatus;
+}
+
+/** Query for `GET /api/tags/:tag/posts` (BLG-08). */
+export class ListTagPostsQueryDto extends PaginationQueryDto {}

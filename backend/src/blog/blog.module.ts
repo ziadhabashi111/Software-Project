@@ -1,9 +1,52 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { AdminModule } from '../admin/admin.module';
+import { UploadsModule } from '../uploads/uploads.module';
+import { UsersModule } from '../users/users.module';
+import { BlogModerationService } from './blog-moderation.service';
+import { PostsController } from './posts.controller';
+import { PostsService } from './posts.service';
+import { TagsController } from './tags.controller';
+import { ReportTargets } from './reports/report-targets';
+import { Report, ReportSchema } from './reports/report.schema';
+import { ReportsController } from './reports/reports.controller';
+import { ReportsService } from './reports/reports.service';
+import { Comment, CommentSchema } from './schemas/comment.schema';
+import { Post, PostSchema } from './schemas/post.schema';
 
 /**
  * Owner: Ahmed Ismail
  * Requirements: BLG-01..13, GEN-09
- * Add controllers, services, schemas/ and dto/ in this folder.
+ *
+ * BLG-01, 03, 04, 08, 10: authors create, list, edit and delete their posts
+ * (`/api/posts`), with tags (`GET /api/tags/:tag/posts`) and images through
+ * the upload helper (GEN-08).
+ *
+ * GEN-09 report submission (`POST /api/reports`) and the Report schema, read
+ * and resolved by the admin module through `ReportDirectory` (GEN-10).
+ * Posts and comments have `isHidden` with hide/unhide/delete in
+ * `BlogModerationService`, registered with the admin `ContentModerators`.
+ * Other content modules can register a `ReportTarget` (exported) so reports
+ * of their items are checked for existence and visibility.
  */
-@Module({})
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Post.name, schema: PostSchema },
+      { name: Comment.name, schema: CommentSchema },
+      { name: Report.name, schema: ReportSchema },
+    ]),
+    AdminModule,
+    UploadsModule,
+    UsersModule,
+  ],
+  controllers: [PostsController, TagsController, ReportsController],
+  providers: [
+    ReportTargets,
+    ReportsService,
+    BlogModerationService,
+    PostsService,
+  ],
+  exports: [ReportTargets, BlogModerationService, PostsService],
+})
 export class BlogModule {}
