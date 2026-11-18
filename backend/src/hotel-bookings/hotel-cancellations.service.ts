@@ -17,6 +17,20 @@ import {
 import { RoomNight, RoomNightDocument } from './schemas/room-night.schema';
 import { SharedServices } from './shared-services';
 
+/**
+ * A short, safe reason for a failed refund: Stripe's error code when it has
+ * one (e.g. `charge_already_refunded`), never a message, stack or secret.
+ */
+export function refundFailureReason(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const { code } = error as { code?: unknown };
+    if (typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code)) {
+      return `STRIPE_${code.toUpperCase()}`;
+    }
+  }
+  return 'REFUND_ISSUE_FAILED';
+}
+
 export interface CancellationResult {
   reservation: HotelReservationView;
   refund: RefundQuote;
@@ -99,13 +113,23 @@ export class HotelCancellationsService {
   }
 
   /**
-   * Asks the payments module to send the money back. If it is not connected
-   * yet or Stripe fails, the refund stays PENDING (recorded above) so it can
-   * be retried; the cancellation itself stands.
+   * Asks the payments module to send the money back (PAY-03). The
+   * cancellation itself always stands and the rooms stay released:
+   * - refund service not wired in this deployment: the refund stays PENDING
+   *   (a deploy state, not a failure) and can be issued later;
+   * - Stripe / the refund service throws: the refund becomes FAILED with a
+   *   short reason code (never a stack or secret), visible on the details;
+   * - otherwise the result is stored (REFUNDED, or PENDING/FAILED as Stripe
+   *   reported it).
    */
   private async issueRefund(doc: HotelReservationDocument): Promise<void> {
     const refunds = this.shared.refunds();
-    if (!refunds) return;
+    if (!refunds) {
+      this.logger.warn(
+        `No refund service yet: the refund of hotel reservation ${doc.id} stays Pending`,
+      );
+      return;
+    }
     try {
       const result = await refunds.issue('hotel', doc.id);
       doc.refund = {
@@ -114,9 +138,10 @@ export class HotelCancellationsService {
         amount: result.amount,
         currency: result.currency,
         status: result.status,
+        failureReason: undefined,
       };
       await this.reservations.updateOne(
-        { _id: doc._id },
+        { _id: doc._id, status: ReservationStatus.CANCELLED },
         {
           $set: {
             'refund.stripeRefundId': result.refundId,
@@ -124,13 +149,32 @@ export class HotelCancellationsService {
             'refund.currency': result.currency,
             'refund.status': result.status,
           },
+          $unset: { 'refund.failureReason': 1 },
         },
       );
     } catch (error) {
+      const reason = refundFailureReason(error);
       this.logger.error(
-        `Refund for hotel reservation ${doc.id} could not be issued yet`,
-        error instanceof Error ? error.stack : String(error),
+        `Refund of hotel reservation ${doc.id} failed (${reason}); marked Failed`,
       );
+      // Only a still-pending refund becomes Failed: never overwrite an
+      // outcome a refund webhook may have recorded in the meantime.
+      const marked = await this.reservations.updateOne(
+        {
+          _id: doc._id,
+          status: ReservationStatus.CANCELLED,
+          'refund.status': 'PENDING',
+        },
+        {
+          $set: {
+            'refund.status': 'FAILED',
+            'refund.failureReason': reason,
+          },
+        },
+      );
+      if (marked.modifiedCount === 1) {
+        doc.refund = { ...doc.refund, status: 'FAILED', failureReason: reason };
+      }
     }
   }
 

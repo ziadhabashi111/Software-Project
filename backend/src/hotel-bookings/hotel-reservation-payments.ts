@@ -41,6 +41,24 @@ export interface RefundBasis {
   currency: string;
   /** NONE, PENDING, REFUNDED or FAILED. */
   status: string;
+  /**
+   * The Stripe refund already created for this cancellation, or `null` if
+   * none went out yet. A retrying caller must not create another one when
+   * this is set.
+   */
+  stripeRefundId: string | null;
+  /**
+   * Stable per reservation: pass it as Stripe's `Idempotency-Key` when
+   * creating the refund so a retry after a timeout cannot refund twice.
+   */
+  idempotencyKey: string;
+  /** Why the last attempt failed (no secrets), when `status` is FAILED. */
+  failureReason: string | null;
+}
+
+/** The Stripe idempotency key for the refund of one hotel reservation. */
+export function hotelRefundIdempotencyKey(reservationId: string): string {
+  return `hotel-reservation-refund-${reservationId}`;
 }
 
 /** The Stripe facts the webhook verified (PAY-01). */
@@ -315,7 +333,9 @@ export class HotelReservationPayments {
   /**
    * PAY-03, for `RefundService.issue('hotel', id)`: the amount fixed when the
    * guest cancelled and the PaymentIntent to refund. `null` unless the
-   * reservation was cancelled with a refund to pay.
+   * reservation was cancelled with a refund to pay. Check `stripeRefundId`
+   * before retrying and use `idempotencyKey` with Stripe so a retry can
+   * never refund twice.
    */
   async refundBasis(reservationId: string): Promise<RefundBasis | null> {
     const doc = Types.ObjectId.isValid(reservationId)
@@ -337,6 +357,9 @@ export class HotelReservationPayments {
       percentage: doc.refund.percentage ?? 0,
       currency: doc.refund.currency ?? doc.currency,
       status: doc.refund.status,
+      stripeRefundId: doc.refund.stripeRefundId ?? null,
+      idempotencyKey: hotelRefundIdempotencyKey(doc.id),
+      failureReason: doc.refund.failureReason ?? null,
     };
   }
 
@@ -357,6 +380,7 @@ export class HotelReservationPayments {
           'refund.currency': result.currency,
           'refund.status': result.status,
         },
+        $unset: { 'refund.failureReason': 1 },
       },
     );
     return updated.matchedCount === 1;

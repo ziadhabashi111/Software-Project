@@ -13,7 +13,11 @@ import {
   InventoryHotel,
   InventoryRoom,
 } from '../src/hotel-bookings/hotel-inventory';
-import { HotelReservationPayments } from '../src/hotel-bookings/hotel-reservation-payments';
+import {
+  HotelReservationPayments,
+  hotelRefundIdempotencyKey,
+} from '../src/hotel-bookings/hotel-reservation-payments';
+import { SharedServices } from '../src/hotel-bookings/shared-services';
 import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation-queries';
 import { ReviewModerator } from '../src/hotel-bookings/review-moderator';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
@@ -1018,22 +1022,52 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(refundService.issue).not.toHaveBeenCalled();
     });
 
-    it('keeps the refund PENDING when Stripe fails; the cancellation stands', async () => {
+    it('marks the refund FAILED when Stripe fails; cancelled, rooms released', async () => {
       const { client } = await loggedInAs();
-      const { reservation } = await confirmedStay(client, 45);
-      refundService.issue.mockRejectedValueOnce(new Error('Stripe is down'));
+      const { room, reservation } = await confirmedStay(client, 45);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('Stripe is down: sk_test_secret'), {
+          code: 'api_connection_error',
+        }),
+      );
       const res = await client.post(cancelUrl(reservation.id)).expect(200);
-      const body = res.body as { reservation: HotelReservationView };
-      expect(body.reservation.status).toBe(ReservationStatus.CANCELLED);
-      expect(body.reservation.refund?.status).toBe('PENDING');
+      const cancelled = res.body as { reservation: HotelReservationView };
+      expect(cancelled.reservation.status).toBe(ReservationStatus.CANCELLED);
+      expect(cancelled.reservation.refund?.status).toBe('FAILED');
 
-      // The refund service can read what to refund and record the outcome.
+      // Stored as Failed with a short code only (no message, stack, secret).
+      const stored = await reservations.findById(reservation.id).lean();
+      expect(stored?.status).toBe(ReservationStatus.CANCELLED);
+      expect(stored?.refund?.status).toBe('FAILED');
+      expect(stored?.refund?.failureReason).toBe('STRIPE_API_CONNECTION_ERROR');
+      expect(JSON.stringify(stored?.refund)).not.toContain('sk_test');
+      // Visible on the details page (PAY-03).
+      const details = (
+        await client.get(`/api/hotel-bookings/${reservation.id}`).expect(200)
+      ).body as HotelReservationView;
+      expect(details.refund?.status).toBe('FAILED');
+
+      // The room is free again for those dates.
+      expect(await nights.countDocuments({ reservation: reservation.id })).toBe(
+        0,
+      );
+      const next = await loggedInAs();
+      await hold(
+        next.client,
+        body([room], reservation.checkIn, reservation.checkOut),
+      ).expect(201);
+
+      // The refund service can read what to refund, retry safely, and record
+      // the outcome.
       const basis = await payments.refundBasis(reservation.id);
       expect(basis).toMatchObject({
         paymentIntentId: `pi_${reservation.id}`,
         amount: 200,
         percentage: 100,
-        status: 'PENDING',
+        status: 'FAILED',
+        stripeRefundId: null,
+        failureReason: 'STRIPE_API_CONNECTION_ERROR',
+        idempotencyKey: hotelRefundIdempotencyKey(reservation.id),
       });
       expect(
         await payments.recordRefundResult(reservation.id, {
@@ -1043,9 +1077,65 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           currency: 'USD',
         }),
       ).toBe(true);
-      expect((await payments.refundBasis(reservation.id))?.status).toBe(
-        'REFUNDED',
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: 're_retry',
+        failureReason: null,
+        idempotencyKey: hotelRefundIdempotencyKey(reservation.id),
+      });
+    });
+
+    it('a generic refund error is FAILED with a generic reason', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 46);
+      refundService.issue.mockRejectedValueOnce(new Error('boom'));
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      const stored = await reservations.findById(reservation.id).lean();
+      expect(stored?.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+    });
+
+    it('marks the refund REFUNDED on success and exposes the Stripe refund id', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 47);
+      refundService.issue.mockImplementationOnce((_type, id) =>
+        Promise.resolve({
+          refundId: `re_${id}`,
+          amount: 200,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
       );
+      const res = await client.post(cancelUrl(reservation.id)).expect(200);
+      const body = res.body as { reservation: HotelReservationView };
+      expect(body.reservation.refund?.status).toBe('REFUNDED');
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: `re_${reservation.id}`,
+        failureReason: null,
+      });
+    });
+
+    it('keeps the refund PENDING when no refund service is wired (deploy state)', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 48);
+      const shared = ctx.moduleRef.get(SharedServices);
+      const spy = jest.spyOn(shared, 'refunds').mockReturnValue(undefined);
+      try {
+        const res = await client.post(cancelUrl(reservation.id)).expect(200);
+        const body = res.body as { reservation: HotelReservationView };
+        expect(body.reservation.status).toBe(ReservationStatus.CANCELLED);
+        expect(body.reservation.refund?.status).toBe('PENDING');
+      } finally {
+        spy.mockRestore();
+      }
+      expect(refundService.issue).not.toHaveBeenCalled();
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'PENDING',
+        stripeRefundId: null,
+      });
     });
 
     it('a webhook replay of the same payment after cancellation is not refunded again (PAY-01)', async () => {
