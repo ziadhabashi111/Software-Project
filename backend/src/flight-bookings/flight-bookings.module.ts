@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
+import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import { FlightBookingQuotesService } from './flight-booking-quotes.service';
 import { FlightBookingViews } from './flight-booking-view';
@@ -40,6 +41,7 @@ import { SharedServices } from './shared-services';
     FlightBookingViews,
     FlightBookingQuotesService,
     FlightBookingHoldsService,
+    FlightBookingExpiryService,
   ],
   exports: [MongooseModule],
 })

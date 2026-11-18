@@ -6,6 +6,7 @@ import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
+import { FlightBookingExpiryService } from '../src/flight-bookings/flight-booking-expiry.service';
 import { FlightBookingsModule } from '../src/flight-bookings/flight-bookings.module';
 import {
   FlightBooking,
@@ -478,6 +479,72 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .send({ arrivalAirport: 'JED' })
         .expect(409);
       expect((res.body as ErrorBody).code).toBe('AIRPORTS_LOCKED');
+    });
+  });
+  describe('hold expiry and completion (FLT-22, GEN-11, PAY-01)', () => {
+    const expiry = () => ctx.moduleRef.get(FlightBookingExpiryService);
+    const pastDue = (id: string) =>
+      bookings.updateOne(
+        { _id: new Types.ObjectId(id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 1_000) } },
+      );
+
+    it('expires an unpaid hold and releases its seats', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight, [adult(), child()]);
+      await pastDue(booking.id);
+      expect(await expiry().expireDue()).toBe(1);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('EXPIRED');
+      expect(doc!.expiredAt).toBeInstanceOf(Date);
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+      expect(paymentService.cancelPendingPayment).toHaveBeenCalledWith(
+        'flight',
+        booking.id,
+      );
+    });
+
+    it('is safe when two sweeps run at once', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await pastDue(booking.id);
+      const [a, b] = await Promise.all([
+        expiry().expireDue(),
+        expiry().expireDue(),
+      ]);
+      expect(a + b).toBe(1);
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('leaves a live hold alone', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      expect(await expiry().expireDue()).toBe(0);
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'PENDING_PAYMENT',
+      );
+    });
+
+    it('completes a confirmed booking once its last flight has landed', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { status: 'CONFIRMED' } },
+      );
+      await flights.updateOne(
+        { _id: flight._id },
+        {
+          $set: {
+            departureUtc: new Date(Date.now() - 5 * 3_600_000),
+            arrivalUtc: new Date(Date.now() - 1 * 3_600_000),
+          },
+        },
+      );
+      expect(await expiry().completeDue()).toBeGreaterThanOrEqual(1);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('COMPLETED');
+      expect(doc!.completedAt).toBeInstanceOf(Date);
     });
   });
 });
