@@ -457,3 +457,15 @@ Add test:e2e to CI so integration breaks are caught (the ITN-09 one slipped thro
 How the output was used:
 Added a backend build step and an end-to-end step (npm run test:e2e -- --runInBand) to .github/workflows/ci.yml. The e2e harness uses mongodb-memory-server with ignoreEnvFile and its own test config, so no secrets are needed in CI. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ACC-17, GEN-11
+Prompt:
+Review flagged that the admin booking-list status filter was still free text, so a wrong-cased value returned an empty page instead of 400. Fix it.
+
+How the output was used:
+Changed ListBookingsQueryDto.status to @IsEnum(BookingStatus) (test-first), added a DTO unit spec and an admin e2e case asserting the old display spelling now returns 400, and updated the e2e fixtures to the shared uppercase values. Reviewed the diff.
+================================================

@@ -748,7 +748,7 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
         endDate: new Date(Date.UTC(2027, 0, n + 2)),
         amount: 100 * n,
         currency: 'EGP',
-        status: 'Confirmed',
+        status: 'CONFIRMED',
         createdAt: new Date(Date.UTC(2026, 10, n)),
         ...overrides,
       };
@@ -766,7 +766,7 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
       traveller = await createAccount({ name: 'Booking Traveller' });
       flights = [1, 3, 5].map((n) => record('flight', n, traveller.id));
       hotels = [2, 4].map((n) =>
-        record('hotel', n, traveller.id, { status: 'Cancelled' }),
+        record('hotel', n, traveller.id, { status: 'CANCELLED' }),
       );
       for (const [type, rows] of [
         ['flight', flights],
@@ -811,7 +811,7 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
           provider: { id: 'p-flight', name: 'flight provider' },
           amount: 500,
           currency: 'EGP',
-          status: 'Confirmed',
+          status: 'CONFIRMED',
           user: {
             id: traveller.id,
             name: 'Booking Traveller',
@@ -848,18 +848,23 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
       const admin = await loggedInAs(Role.ADMIN);
       const res = await admin.client
         .get(
-          '/api/admin/bookings?status=Cancelled&from=2027-01-01&to=2027-01-31',
+          '/api/admin/bookings?status=CANCELLED&from=2027-01-01&to=2027-01-31',
         )
         .expect(200);
       expect((res.body as Page<unknown>).total).toBe(2);
       const asked = queries.hotel[0];
-      expect(asked.status).toBe('Cancelled');
+      expect(asked.status).toBe('CANCELLED');
       expect(asked.from?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
       expect(asked.to?.toISOString()).toBe('2027-01-31T23:59:59.999Z');
     });
 
     it.each([
       ['an unknown type', 'type=train', 'type'],
+      [
+        'an old display spelling of a status',
+        'status=Pending%20Payment',
+        'status',
+      ],
       ['a malformed date', 'from=yesterday', 'from'],
       ['an end before the start', 'from=2027-02-01&to=2027-01-01', 'to'],
     ])('rejects %s', async (_label, query, field) => {
