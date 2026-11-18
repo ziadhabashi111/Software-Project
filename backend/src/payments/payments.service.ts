@@ -16,7 +16,21 @@ import type { PaymentService } from './payment.service.interface';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import type { BookingType } from './refund.service.interface';
 import { Payment, PaymentDocument } from './schemas/payment.schema';
+import {
+  ProcessedStripeEvent,
+  ProcessedStripeEventDocument,
+} from './schemas/processed-stripe-event.schema';
 import { STRIPE_CLIENT } from './stripe.provider';
+
+/** Stripe event types this service acts on; others are acknowledged and ignored. */
+const HANDLED_EVENTS = new Set([
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
+  'payment_intent.canceled',
+]);
+
+/** Final payment states: only succeeded -> refunded may leave one of them. */
+const FINAL_STATES = ['succeeded', 'refunded'];
 
 export interface PaymentView {
   paymentId: string;
@@ -57,6 +71,8 @@ export class PaymentsService implements PaymentService {
     private readonly payments: Model<PaymentDocument>,
     private readonly gateway: BookingPaymentGateway,
     private readonly policies: PolicyAcceptanceService,
+    @InjectModel(ProcessedStripeEvent.name)
+    private readonly processedEvents: Model<ProcessedStripeEventDocument>,
   ) {}
 
   /** POST /payments: starts (or reuses) the PaymentIntent of the user's own hold. */
@@ -105,20 +121,34 @@ export class PaymentsService implements PaymentService {
     }
 
     const created = intent;
-    const payment = await this.payments.findOneAndUpdate(
-      { bookingType: type, bookingId: new Types.ObjectId(bookingId) },
-      {
-        $set: {
-          userId: new Types.ObjectId(userId),
-          stripePaymentIntentId: created.id,
-          amount: payable.amount,
-          currency: payable.currency.toUpperCase(),
-          status: created.status,
+    const filter = {
+      bookingType: type,
+      bookingId: new Types.ObjectId(bookingId),
+    };
+    let payment: PaymentDocument | null;
+    try {
+      payment = await this.payments.findOneAndUpdate(
+        filter,
+        {
+          $set: {
+            userId: new Types.ObjectId(userId),
+            stripePaymentIntentId: created.id,
+            amount: payable.amount,
+            currency: payable.currency.toUpperCase(),
+            status: created.status,
+          },
+          ...(createdNew ? { $inc: { attempts: 1 } } : {}),
         },
-        ...(createdNew ? { $inc: { attempts: 1 } } : {}),
-      },
-      { upsert: true, new: true },
-    );
+        { upsert: true, new: true },
+      );
+    } catch (error) {
+      // Two first requests for the same booking raced the unique
+      // {bookingType, bookingId} upsert. Both got the same PaymentIntent
+      // (same idempotency key), so answer with the winner's record.
+      if (!isDuplicateKey(error)) throw error;
+      payment = await this.payments.findOne(filter);
+    }
+    if (!payment) throw new InternalServerErrorException();
     return {
       ...toView(payment),
       status: created.status,
@@ -161,10 +191,18 @@ export class PaymentsService implements PaymentService {
         return;
       await this.stripe.paymentIntents.cancel(payment.stripePaymentIntentId);
       await this.payments.updateOne(
-        { _id: payment._id, status: { $nin: ['succeeded', 'refunded'] } },
+        { _id: payment._id, status: { $nin: FINAL_STATES } },
         { $set: { status: 'canceled' } },
       );
     } catch (error) {
+      if (isStripeUnexpectedState(error)) {
+        // Expected race: the intent already succeeded (or was cancelled)
+        // before the hold expired; the webhook decides what happens next.
+        this.logger.warn(
+          `PaymentIntent of ${bookingType} ${bookingId} can no longer be cancelled`,
+        );
+        return;
+      }
       this.logger.error(
         `Could not cancel the PaymentIntent of ${bookingType} ${bookingId}`,
         error instanceof Error ? error.stack : String(error),
@@ -174,8 +212,9 @@ export class PaymentsService implements PaymentService {
 
   /**
    * POST /payments/webhook: the only place a booking becomes Confirmed.
-   * The signature is checked against the RAW body; Stripe retries are safe
-   * because `confirmPaid` is idempotent and the refund uses an idempotency key.
+   * The signature is checked against the RAW body. Stripe retries are safe:
+   * each event id is processed once (ProcessedStripeEvent), `confirmPaid` is
+   * idempotent, and a payment already marked refunded is never refunded again.
    */
   async handleWebhook(
     rawBody: Buffer | undefined,
@@ -197,20 +236,48 @@ export class PaymentsService implements PaymentService {
       throw new BadRequestException('Invalid Stripe signature');
     }
 
-    switch (event.type) {
-      case 'payment_intent.succeeded':
-        await this.onSucceeded(event.data.object);
-        break;
-      case 'payment_intent.payment_failed':
-        await this.onFailed(event.data.object);
-        break;
-      case 'payment_intent.canceled':
-        await this.setStatus(event.data.object, 'canceled');
-        break;
-      default:
-        break; // other events are not needed for PAY-01
+    if (!HANDLED_EVENTS.has(event.type)) {
+      return { received: true }; // other events are not needed for PAY-01
+    }
+    // Atomic claim (unique eventId): a redelivered or concurrent duplicate of
+    // this event is acknowledged with 2xx and not processed again.
+    if (!(await this.claimEvent(event))) {
+      return { received: true };
+    }
+    try {
+      switch (event.type) {
+        case 'payment_intent.succeeded':
+          await this.onSucceeded(event.data.object);
+          break;
+        case 'payment_intent.payment_failed':
+          await this.onFailed(event.data.object);
+          break;
+        case 'payment_intent.canceled':
+          await this.setStatus(event.data.object, 'canceled');
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      // Release the claim so Stripe's retry can process the event.
+      await this.processedEvents.deleteOne({ eventId: event.id });
+      throw error;
     }
     return { received: true };
+  }
+
+  /** True when this call is the first to handle `event.id`. */
+  private async claimEvent(event: Stripe.Event): Promise<boolean> {
+    try {
+      await this.processedEvents.create({
+        eventId: event.id,
+        type: event.type,
+      });
+      return true;
+    } catch (error) {
+      if (isDuplicateKey(error)) return false;
+      throw error;
+    }
   }
 
   private async onSucceeded(intent: Stripe.PaymentIntent): Promise<void> {
@@ -221,13 +288,24 @@ export class PaymentsService implements PaymentService {
       amount: intent.amount_received / 100,
       currency: intent.currency.toUpperCase(),
     });
+    // Only `rejected` refunds. `already_confirmed` / `already_processed`
+    // (replay, incl. after a cancellation that refunded) must NOT refund.
     if (outcome === 'rejected') {
       // Late, wrong amount or booking gone: nothing was confirmed, give the money back.
-      await this.stripe.refunds.create(
+      const existing = await this.payments.findOne({
+        stripePaymentIntentId: intent.id,
+      });
+      if (existing?.status === 'refunded' || existing?.stripeRefundId) {
+        return; // already refunded; the idempotency key only lasts 24h
+      }
+      const refund = await this.stripe.refunds.create(
         { payment_intent: intent.id },
         { idempotencyKey: `refund-rejected-${intent.id}` },
       );
-      await this.setStatus(intent, 'refunded');
+      await this.payments.updateOne(
+        { stripePaymentIntentId: intent.id, status: { $ne: 'refunded' } },
+        { $set: { status: 'refunded', stripeRefundId: refund.id } },
+      );
       return;
     }
     await this.setStatus(intent, 'succeeded');
@@ -244,8 +322,12 @@ export class PaymentsService implements PaymentService {
     intent: Stripe.PaymentIntent,
     status: string,
   ): Promise<void> {
+    // Stripe does not guarantee event order: a late `payment_failed` or
+    // `canceled` must never overwrite `succeeded`/`refunded`. The only exit
+    // from a final state is succeeded -> refunded.
+    const blocked = status === 'refunded' ? ['refunded'] : FINAL_STATES;
     await this.payments.updateOne(
-      { stripePaymentIntentId: intent.id, status: { $ne: 'refunded' } },
+      { stripePaymentIntentId: intent.id, status: { $nin: blocked } },
       { $set: { status } },
     );
   }
@@ -272,6 +354,23 @@ function readReference(
     return null;
   }
   return { type: bookingType, bookingId };
+}
+
+function isDuplicateKey(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 11000
+  );
+}
+
+/** Stripe refuses to cancel an intent that already succeeded or was cancelled. */
+function isStripeUnexpectedState(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'payment_intent_unexpected_state'
+  );
 }
 
 function toView(p: PaymentDocument): PaymentView {
