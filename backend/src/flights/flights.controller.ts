@@ -121,7 +121,7 @@ export class FlightsController {
   @ApiReq(
     ['FLT-05', 'FLT-30'],
     'Edit a Scheduled flight (own airline)',
-    'Changes departure and/or arrival time (local, as when creating). Airports can change only while the flight has no booking or hold (409 AIRPORTS_LOCKED). Passengers with Confirmed bookings are notified of any time change. Cabin prices and seat counts are edited with PATCH /api/flights/:id/cabins/:cabinId. Only Scheduled flights can be edited.',
+    'Changes departure and/or arrival time (local, as when creating). Airports can change only while the flight has no booking or hold (409 AIRPORTS_LOCKED). When an airport changes, send the matching time too (departureTime for the departure airport, arrivalTime for the arrival airport): it is the local time at the new airport, otherwise 400. Passengers with Confirmed bookings are notified of any time change. Cabin prices and seat counts are edited with PATCH /api/flights/:id/cabins/:cabinId. Only Scheduled flights can be edited.',
   )
   @ApiOkResponse({ schema: { example: FLIGHT_EXAMPLE } })
   @ApiBadRequestResponse({
@@ -198,7 +198,7 @@ export class FlightsController {
   @ApiReq(
     ['FLT-06', 'FLT-30'],
     'Cancel a flight (own airline, after confirmation)',
-    'Send `{ "confirm": true }`. The flight becomes Cancelled and is hidden from search; every Confirmed booking becomes Cancelled with a 100% refund, pending holds are released and passengers are notified. Only Scheduled flights can be cancelled. If the refunds fail part-way the flight stays Cancelled and the same request can be sent again to finish.',
+    'Send `{ "confirm": true }`. The flight becomes Cancelled and is hidden from search; every Confirmed booking becomes Cancelled with a 100% refund, pending holds are released, and the booking module notifies each passenger (FLIGHT_CANCELLED) right after their booking is cancelled, so a retry never skips anyone. Only Scheduled flights can be cancelled. If the refunds fail part-way the flight stays Cancelled and the same request can be sent again to finish.',
   )
   @ApiCreatedResponse({
     schema: {

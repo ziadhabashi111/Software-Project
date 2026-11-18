@@ -1,17 +1,12 @@
 import {
   ConflictException,
-  Inject,
   Injectable,
-  Logger,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
 import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
-import { NOTIFICATION_SERVICE } from '../notifications/notification.service.interface';
-import type { NotificationService } from '../notifications/notification.service.interface';
 import { assertOwnAirline } from './airline-access';
 import { toCsv } from './csv';
 import { FlightBookingHooks } from './flight-booking-hooks';
@@ -28,7 +23,7 @@ export interface FlightCancellationResult {
   flight: FlightView;
   /** Confirmed bookings that were cancelled and refunded in full. */
   cancelledBookings: number;
-  /** Passengers who received an in-app notification. */
+  /** Passengers the booking module notified as each booking was cancelled. */
   notifiedPassengers: number;
 }
 
@@ -50,22 +45,18 @@ export interface FlightBookingsView {
 /** FLT-06 and FLT-29: cancelling a flight and the moderator's booking views. */
 @Injectable()
 export class FlightManagementService {
-  private readonly logger = new Logger(FlightManagementService.name);
-
   constructor(
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
     private readonly flightsService: FlightsService,
     private readonly bookings: FlightBookingHooks,
-    @Optional()
-    @Inject(NOTIFICATION_SERVICE)
-    private readonly notifications?: NotificationService,
   ) {}
 
   /**
    * FLT-06: the flight becomes Cancelled first (so it disappears from search
    * and no new hold can start), then every Confirmed booking is cancelled
-   * with a 100% refund and holds are released. If that second step fails the
-   * flight stays Cancelled and the same request can be sent again to finish.
+   * with a 100% refund, holds are released and each passenger is notified by
+   * the booking module. If that second step fails the flight stays Cancelled
+   * and the same request can be sent again to finish.
    */
   async cancel(id: string, user: AuthUser): Promise<FlightCancellationResult> {
     const flight = await this.loadOwned(id, user);
@@ -105,20 +96,18 @@ export class FlightManagementService {
       current = updated;
     }
 
+    // The booking module cancels and refunds each booking and notifies its
+    // user right afterwards (FLIGHT_CANCELLED), so a retry never skips anyone
+    // and a booking confirmed a moment ago is not left out.
     const link = this.bookings.get();
-    // Read the passengers before their bookings change state.
-    const passengerIds = link
-      ? await link.getConfirmedPassengerUserIds(current.id)
-      : [];
     const outcome = link
       ? await link.cancelBookingsForFlight(current.id)
-      : { cancelled: 0 };
-    const notified = await this.notifyCancelled(current, passengerIds);
+      : { cancelled: 0, notifiedUserIds: [] };
 
     return {
       flight: await this.flightsService.view(current),
       cancelledBookings: outcome.cancelled,
-      notifiedPassengers: notified,
+      notifiedPassengers: outcome.notifiedUserIds.length,
     };
   }
 
@@ -185,28 +174,5 @@ export class FlightManagementService {
     if (!flight) throw new NotFoundException('Flight not found');
     assertOwnAirline(user, flight.airlineId.toString());
     return flight;
-  }
-
-  /** Best effort: the flight is already cancelled and the refunds are issued. */
-  private async notifyCancelled(
-    flight: FlightDocument,
-    userIds: string[],
-  ): Promise<number> {
-    const notifications = this.notifications;
-    if (!notifications || userIds.length === 0) return 0;
-    const message = `Flight ${flight.flightNumber} on ${flight.departureLocalDate} was cancelled by the airline. Your booking is cancelled and you will receive a full refund.`;
-    let sent = 0;
-    for (const userId of userIds) {
-      try {
-        await notifications.notify(userId, 'FLIGHT_CANCELLED', message);
-        sent += 1;
-      } catch (error) {
-        this.logger.error(
-          `Could not notify user ${userId} about flight ${flight.id}`,
-          error instanceof Error ? error.stack : String(error),
-        );
-      }
-    }
-    return sent;
   }
 }

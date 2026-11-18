@@ -85,6 +85,10 @@ export class ReservationRefund {
   /** NONE (0% refund), PENDING, REFUNDED or FAILED (PAY-03). */
   @Prop({ type: String })
   status?: string;
+
+  /** Why the refund failed, when FAILED. A short code, never a stack/secret. */
+  @Prop({ type: String })
+  failureReason?: string;
 }
 const ReservationRefundSchema = SchemaFactory.createForClass(ReservationRefund);
 
