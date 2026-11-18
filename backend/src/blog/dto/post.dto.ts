@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -97,8 +102,14 @@ export class CreatePostDto {
   status?: PostStatus;
 }
 
-/** Body for `PATCH /api/posts/:id` (BLG-04, BLG-08). Images: use the image endpoints. */
-export class UpdatePostDto extends PartialType(CreatePostDto) {}
+/**
+ * Body for `PATCH /api/posts/:id` (BLG-04, BLG-08). No `imageUrls`: images
+ * change only through the image endpoints, and the global ValidationPipe
+ * (forbidNonWhitelisted) rejects the field with a 400.
+ */
+export class UpdatePostDto extends PartialType(
+  OmitType(CreatePostDto, ['imageUrls'] as const),
+) {}
 
 /** Query for `GET /api/posts/mine` (BLG-03). */
 export class ListMyPostsQueryDto extends PaginationQueryDto {

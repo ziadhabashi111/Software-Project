@@ -27,3 +27,6 @@ export class Notification {
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
+
+// GEN-01: the list query filters by userId and sorts newest first.
+NotificationSchema.index({ userId: 1, createdAt: -1 });
