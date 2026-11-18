@@ -17,7 +17,7 @@ import {
 import { renderETicket } from './e-ticket/e-ticket.renderer';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingView, FlightBookingViews } from './flight-booking-view';
-import { quoteUserRefund } from './rules/cancellation-rules';
+import { cancellationTerms } from './rules/cancellation-rules';
 import {
   FlightBooking,
   FlightBookingDocument,
@@ -144,14 +144,23 @@ export function cancellationPreview(
   view: FlightBookingView,
   now: Date,
 ): FlightBookingView['cancellation'] {
-  const outbound = view.segments[0];
-  if (doc.status !== BookingStatus.CONFIRMED || !outbound) return null;
-  const departure = new Date(outbound.departure.utc);
-  if (departure.getTime() <= now.getTime()) return null;
-  return quoteUserRefund(
-    doc.price.total,
-    doc.cancellationTiers,
-    departure,
-    now,
-  );
+  if (view.segments.length !== doc.segments.length) return null;
+  try {
+    return cancellationTerms(
+      {
+        status: doc.status,
+        total: doc.price.total,
+        perSegment: doc.price.perSegment,
+        tiers: doc.cancellationTiers,
+      },
+      view.segments.map((s) => ({
+        departureUtc: new Date(s.departure.utc),
+        cancelled: s.flightStatus === 'Cancelled',
+      })),
+      now,
+    );
+  } catch {
+    // Not cancellable now (not Confirmed, or already departed).
+    return null;
+  }
 }

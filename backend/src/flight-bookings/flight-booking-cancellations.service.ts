@@ -16,11 +16,11 @@ import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingPayments } from './flight-booking-payments';
 import { FlightBookingView, FlightBookingViews } from './flight-booking-view';
+import { FlightStatus } from '../flights/flight-status';
 import {
   airlineRefundAmount,
-  assertUserCancellable,
-  quoteUserRefund,
-  UserRefundQuote,
+  CancellationTerms,
+  cancellationTerms,
 } from './rules/cancellation-rules';
 import { roundMoney } from './rules/pricing';
 import {
@@ -33,8 +33,8 @@ import { SharedServices } from './shared-services';
 
 export interface CancellationResult {
   cancelled: boolean;
-  /** The refund for cancelling now (FLT-26). */
-  preview: UserRefundQuote;
+  /** The refund for cancelling now (FLT-26; 100% if the airline cancelled a flight). */
+  preview: CancellationTerms;
   booking?: FlightBookingView;
   message: string;
 }
@@ -73,15 +73,7 @@ export class FlightBookingCancellationsService {
     if (!doc) throw new NotFoundException('Booking not found');
     assertCanAccess(doc.user, user);
 
-    const outbound = await this.flights.findById(doc.segments[0].flight);
-    const departure = outbound?.departureUtc ?? new Date(0);
-    assertUserCancellable(doc.status, departure, now);
-    const preview = quoteUserRefund(
-      doc.price.total,
-      doc.cancellationTiers,
-      departure,
-      now,
-    );
+    const preview = await this.termsFor(doc, now);
     if (!confirm) {
       return {
         cancelled: false,
@@ -92,7 +84,7 @@ export class FlightBookingCancellationsService {
 
     const cancelled = await this.cancelOne(
       doc._id,
-      'user',
+      preview.byAirline ? 'airline' : 'user',
       {
         percent: preview.refundPercent,
         amount: preview.refundAmount,
@@ -103,7 +95,7 @@ export class FlightBookingCancellationsService {
     if (!cancelled) throw notCancellable();
     await this.afterCancel(
       cancelled,
-      'FLIGHT_BOOKING_CANCELLED',
+      preview.byAirline ? 'FLIGHT_CANCELLED' : 'FLIGHT_BOOKING_CANCELLED',
       `Your flight booking ${cancelled.reference ?? ''} is cancelled. Refund: ${preview.refundAmount} ${cancelled.currency} (${preview.refundPercent}%).`,
     );
     const fresh = (await this.bookings.findById(doc._id)) ?? cancelled;
@@ -113,6 +105,33 @@ export class FlightBookingCancellationsService {
       booking: await this.views.bookingView(fresh),
       message: 'The booking is cancelled.',
     };
+  }
+
+  /** The cancellation terms of a booking with its flights' current status. */
+  async termsFor(
+    doc: FlightBookingDocument,
+    now: Date = new Date(),
+  ): Promise<CancellationTerms> {
+    const flights = await this.flights.find({
+      _id: { $in: doc.segments.map((s) => s.flight) },
+    });
+    const byId = new Map(flights.map((f) => [f.id, f]));
+    return cancellationTerms(
+      {
+        status: doc.status,
+        total: doc.price.total,
+        perSegment: doc.price.perSegment,
+        tiers: doc.cancellationTiers,
+      },
+      doc.segments.map((segment) => {
+        const flight = byId.get(segment.flight.toString());
+        return {
+          departureUtc: flight?.departureUtc ?? new Date(0),
+          cancelled: flight?.status === FlightStatus.CANCELLED,
+        };
+      }),
+      now,
+    );
   }
 
   /**

@@ -19,7 +19,10 @@ import {
 } from './booking-reference';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
 import { FlightBookingView, FlightBookingViews } from './flight-booking-view';
-import { quoteUserRefund, UserRefundQuote } from './rules/cancellation-rules';
+import {
+  CancellationTerms,
+  cancellationTerms,
+} from './rules/cancellation-rules';
 import { roundMoney } from './rules/pricing';
 import {
   FlightBooking,
@@ -57,7 +60,12 @@ export type FlightConfirmRejection =
 
 export type FlightConfirmResult =
   | {
-      outcome: 'confirmed' | 'already_confirmed';
+      /**
+       * `already_processed`: this same payment was already applied and the
+       * booking has moved on (e.g. the user cancelled and got their refund).
+       * Do not refund again.
+       */
+      outcome: 'confirmed' | 'already_confirmed' | 'already_processed';
       booking: FlightBookingView;
     }
   /** Nothing was confirmed: the caller must refund the payment. */
@@ -73,7 +81,7 @@ export interface FlightBookingPolicies {
   maxBagWeightKg: number[];
 }
 
-export interface FlightRefundQuote extends UserRefundQuote {
+export interface FlightRefundQuote extends CancellationTerms {
   bookingId: string;
   total: number;
   currency: string;
@@ -93,6 +101,7 @@ export interface FlightRefundBasis {
 type ConfirmAttempt =
   | { outcome: 'confirmed'; booking: FlightBookingDocument }
   | { outcome: 'already_confirmed'; booking: FlightBookingDocument }
+  | { outcome: 'already_processed'; booking: FlightBookingDocument }
   | { outcome: 'rejected'; reason: FlightConfirmRejection };
 
 const REFERENCE_ATTEMPTS = 3;
@@ -264,21 +273,40 @@ export class FlightBookingPayments {
     if (!Types.ObjectId.isValid(bookingId)) return null;
     const doc = await this.bookings.findById(bookingId);
     if (!doc || doc.status !== BookingStatus.CONFIRMED) return null;
-    const outbound = await this.flights.findById(doc.segments[0].flight);
-    if (!outbound || outbound.departureUtc.getTime() <= now.getTime()) {
+    const flights = await this.flights.find({
+      _id: { $in: doc.segments.map((s) => s.flight) },
+    });
+    const byId = new Map(flights.map((f) => [f.id, f]));
+    if (
+      byId.size !== new Set(doc.segments.map((s) => s.flight.toString())).size
+    ) {
       return null;
     }
-    return {
-      bookingId: doc.id,
-      total: doc.price.total,
-      currency: doc.currency,
-      ...quoteUserRefund(
-        doc.price.total,
-        doc.cancellationTiers,
-        outbound.departureUtc,
-        now,
-      ),
-    };
+    try {
+      return {
+        bookingId: doc.id,
+        total: doc.price.total,
+        currency: doc.currency,
+        ...cancellationTerms(
+          {
+            status: doc.status,
+            total: doc.price.total,
+            perSegment: doc.price.perSegment,
+            tiers: doc.cancellationTiers,
+          },
+          doc.segments.map((s) => {
+            const flight = byId.get(s.flight.toString());
+            return {
+              departureUtc: flight!.departureUtc,
+              cancelled: flight!.status === FlightStatus.CANCELLED,
+            };
+          }),
+          now,
+        ),
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -340,13 +368,16 @@ export class FlightBookingPayments {
       const doc = await this.bookings.findById(id).session(session);
       if (!doc) return { outcome: 'rejected', reason: 'NOT_FOUND' };
       if (doc.status !== BookingStatus.PENDING_PAYMENT) {
+        // A replayed webhook for a payment already applied must never be
+        // refunded again, whatever happened to the booking since.
         const samePayment =
           doc.payment?.paymentIntentId === paid.paymentIntentId &&
-          (doc.status === BookingStatus.CONFIRMED ||
-            doc.status === BookingStatus.COMPLETED);
-        return samePayment
+          doc.payment?.status === 'SUCCEEDED';
+        if (!samePayment) return { outcome: 'rejected', reason: 'NOT_PENDING' };
+        return doc.status === BookingStatus.CONFIRMED ||
+          doc.status === BookingStatus.COMPLETED
           ? { outcome: 'already_confirmed', booking: doc }
-          : { outcome: 'rejected', reason: 'NOT_PENDING' };
+          : { outcome: 'already_processed', booking: doc };
       }
       if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' };

@@ -1053,4 +1053,80 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect(items.every((i) => i.status === 'CONFIRMED')).toBe(true);
     });
   });
+  describe('refund safety (review fixes: PAY-01, PAY-03, FLT-06)', () => {
+    async function confirmed(flight: FlightDocument) {
+      const held = await heldBooking(flight);
+      await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .confirmPaid(held.booking.id, {
+          paymentIntentId: `pi_${held.booking.id}`,
+          amount: held.booking.price.total,
+          currency: 'USD',
+        });
+      return held;
+    }
+
+    it('does not ask for a refund when the webhook is replayed after cancelling', async () => {
+      const flight = await makeFlight({ departInDays: 10.5 });
+      const { user, booking } = await confirmed(flight);
+      await user.client
+        .post(`/api/flight-bookings/${booking.id}/cancel`)
+        .send({ confirm: true })
+        .expect(200);
+      const replay = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .confirmPaid(booking.id, {
+          paymentIntentId: `pi_${booking.id}`,
+          amount: booking.price.total,
+          currency: 'USD',
+        });
+      expect(replay.outcome).toBe('already_processed');
+    });
+
+    it('refunds 100% when a booking is left on a flight the airline cancelled', async () => {
+      const flight = await makeFlight({ departInDays: 10.5 });
+      const { user, booking } = await confirmed(flight);
+      // The airline's cancel stopped before the bookings were handled.
+      await flights.updateOne(
+        { _id: flight._id },
+        { $set: { status: FlightStatus.CANCELLED } },
+      );
+      const details = await user.client
+        .get(`/api/flight-bookings/${booking.id}`)
+        .expect(200);
+      expect((details.body as BookingBody).cancellation).toMatchObject({
+        refundPercent: 100,
+        refundAmount: booking.price.total,
+      });
+      await user.client
+        .post(`/api/flight-bookings/${booking.id}/cancel`)
+        .send({ confirm: true })
+        .expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.cancelledBy).toBe('airline');
+      expect(doc!.refund).toMatchObject({
+        percent: 100,
+        amount: booking.price.total,
+      });
+    });
+
+    it('never completes a booking whose flight the airline cancelled', async () => {
+      const flight = await makeFlight();
+      const { booking } = await confirmed(flight);
+      await flights.updateOne(
+        { _id: flight._id },
+        {
+          $set: {
+            status: FlightStatus.CANCELLED,
+            departureUtc: new Date(Date.now() - 5 * 3_600_000),
+            arrivalUtc: new Date(Date.now() - 3_600_000),
+          },
+        },
+      );
+      await ctx.moduleRef.get(FlightBookingExpiryService).completeDue();
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'CONFIRMED',
+      );
+    });
+  });
 });

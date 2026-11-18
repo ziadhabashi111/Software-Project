@@ -81,3 +81,56 @@ export function airlineRefundAmount(
     ? roundMoney(perSegment[1])
     : roundMoney(total);
 }
+
+export interface CancellationTerms extends UserRefundQuote {
+  /** True when the airline cancelled one of the flights (FLT-06: 100%). */
+  byAirline: boolean;
+}
+
+/**
+ * What cancelling a booking now means, in one place for the cancel route,
+ * the details preview and the refund service. If the airline cancelled one
+ * of its flights (its cancellation may not have reached this booking yet),
+ * the refund is the FLT-06 100% and departure does not block it. Otherwise
+ * the user's FLT-26 rules apply: Confirmed, before the outbound departs, on
+ * the outbound airline's tiers.
+ */
+export function cancellationTerms(
+  booking: {
+    status: BookingStatus;
+    total: number;
+    perSegment: number[];
+    tiers: { daysBefore: number; refundPercent: number }[];
+  },
+  segments: { departureUtc: Date; cancelled: boolean }[],
+  now: Date,
+): CancellationTerms {
+  const outbound = segments[0];
+  if (booking.status !== BookingStatus.CONFIRMED || !outbound) {
+    assertUserCancellable(booking.status, outbound?.departureUtc ?? now, now);
+  }
+  if (segments.some((s) => s.cancelled)) {
+    const outboundFlown =
+      !outbound.cancelled && outbound.departureUtc.getTime() <= now.getTime();
+    return {
+      byAirline: true,
+      daysBeforeDeparture: daysBeforeDeparture(outbound.departureUtc, now),
+      refundPercent: 100,
+      refundAmount: airlineRefundAmount(
+        booking.total,
+        booking.perSegment,
+        outboundFlown,
+      ),
+    };
+  }
+  assertUserCancellable(booking.status, outbound.departureUtc, now);
+  return {
+    byAirline: false,
+    ...quoteUserRefund(
+      booking.total,
+      booking.tiers,
+      outbound.departureUtc,
+      now,
+    ),
+  };
+}

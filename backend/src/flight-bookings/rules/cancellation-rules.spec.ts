@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { BookingStatus } from '../../common/booking-status/booking-status';
 import {
   airlineRefundAmount,
+  cancellationTerms,
   assertUserCancellable,
   daysBeforeDeparture,
   quoteUserRefund,
@@ -93,5 +94,86 @@ describe('cancellation rules (FLT-26, FLT-09, FLT-12a, FLT-06)', () => {
   it('an airline cancellation refunds everything, or only the unflown return', () => {
     expect(airlineRefundAmount(433, [240, 193], false)).toBe(433);
     expect(airlineRefundAmount(433, [240, 193], true)).toBe(193);
+  });
+
+  describe('cancellationTerms', () => {
+    const booking = {
+      status: BookingStatus.CONFIRMED,
+      total: 433,
+      perSegment: [240, 193],
+      tiers: TIERS,
+    };
+
+    it('uses the airline tier when no flight was cancelled', () => {
+      expect(
+        cancellationTerms(
+          booking,
+          [
+            { departureUtc: inDays(10), cancelled: false },
+            { departureUtc: inDays(15), cancelled: false },
+          ],
+          NOW,
+        ),
+      ).toEqual({
+        byAirline: false,
+        daysBeforeDeparture: 10,
+        refundPercent: 50,
+        refundAmount: 216.5,
+      });
+    });
+
+    it('refunds 100% when the airline cancelled one of the flights', () => {
+      expect(
+        cancellationTerms(
+          booking,
+          [
+            { departureUtc: inDays(3), cancelled: true },
+            { departureUtc: inDays(8), cancelled: false },
+          ],
+          NOW,
+        ),
+      ).toMatchObject({
+        byAirline: true,
+        refundPercent: 100,
+        refundAmount: 433,
+      });
+    });
+
+    it('refunds the return leg when the outbound flew and the return was cancelled', () => {
+      expect(
+        cancellationTerms(
+          booking,
+          [
+            { departureUtc: inDays(-2), cancelled: false },
+            { departureUtc: inDays(3), cancelled: true },
+          ],
+          NOW,
+        ),
+      ).toMatchObject({ byAirline: true, refundAmount: 193 });
+    });
+
+    it('still blocks a normal cancellation after departure', () => {
+      expect(
+        errorCode(() =>
+          cancellationTerms(
+            booking,
+            [{ departureUtc: inDays(-1), cancelled: false }],
+            NOW,
+          ),
+        ),
+      ).toBe('ALREADY_DEPARTED');
+    });
+
+    it('needs a Confirmed booking even when the airline cancelled', () => {
+      expect(
+        errorCode(() =>
+          cancellationTerms(
+            { ...booking, status: BookingStatus.CANCELLED },
+            [{ departureUtc: inDays(3), cancelled: true }],
+            NOW,
+          ),
+        ),
+      ).toBe('NOT_CANCELLABLE');
+    });
   });
 });

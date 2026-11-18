@@ -222,9 +222,9 @@ Design: `docs/design/2026-11-16-flight-bookings-design.md`. Routes as in PDF sec
 
 **For the payments module (Ziad):** import `FlightBookingsModule` and use the exported `FlightBookingPayments`. Same names as the hotel side:
 - `forPayment(bookingId, userId)` and `attachPaymentIntent` / `recordPaymentFailure` (PAY-01, retry until the hold expires)
-- `confirmPaid(bookingId, { paymentIntentId, amount, currency })` from the verified webhook only. Idempotent. Returns `rejected` with a reason (`HOLD_EXPIRED`, `AMOUNT_MISMATCH`, `FLIGHT_NOT_BOOKABLE`, ...) when the payment must be refunded.
+- `confirmPaid(bookingId, { paymentIntentId, amount, currency })` from the verified webhook only. Idempotent: a replayed webhook gets `already_confirmed`, or `already_processed` if the booking was cancelled since (do **not** refund again). Returns `rejected` with a reason (`HOLD_EXPIRED`, `AMOUNT_MISMATCH`, `FLIGHT_NOT_BOOKABLE`, ...) only when the payment must be refunded.
 - `policiesFor(bookingId, userId)` for PAY-02 (cancellation tiers and baggage policy accepted at hold time)
-- `refundQuote`, `refundBasis` and `recordRefundResult` for `RefundService` (PAY-03)
+- `refundQuote`, `refundBasis` and `recordRefundResult` for `RefundService` (PAY-03). If the airline cancelled one of the booking's flights, the quote is 100% (FLT-06) even if its cancellation has not reached the booking yet.
 
 This module finds `NOTIFICATION_SERVICE`, `PAYMENT_SERVICE` and `REFUND_SERVICE` by token at runtime, so there is no import cycle. Until they exist, notifications are skipped and refunds stay Pending.
 

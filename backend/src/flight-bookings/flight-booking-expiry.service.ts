@@ -6,6 +6,7 @@ import {
   assertCanTransition,
   BookingStatus,
 } from '../common/booking-status/booking-status';
+import { FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import {
   FlightBooking,
@@ -118,7 +119,12 @@ export class FlightBookingExpiryService {
     const landed = new Set(
       (
         await this.flights
-          .find({ _id: { $in: flightIds }, arrivalUtc: { $lte: now } })
+          .find({
+            _id: { $in: flightIds },
+            arrivalUtc: { $lte: now },
+            // A flight the airline cancelled never flew (FLT-06 refunds it).
+            status: { $ne: FlightStatus.CANCELLED },
+          })
           .select('_id')
           .lean()
       ).map((f) => f._id.toString()),
