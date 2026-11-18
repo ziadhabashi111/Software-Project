@@ -1,10 +1,16 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getModelToken } from '@nestjs/mongoose';
+import type { Model } from 'mongoose';
 import request from 'supertest';
 import { PasswordService } from '../src/auth/password.service';
 import { UploadsModule } from '../src/uploads/uploads.module';
-import type { StoredImage } from '../src/uploads/uploads.service';
+import { Upload } from '../src/uploads/upload.schema';
+import {
+  UploadsService,
+  type StoredImage,
+} from '../src/uploads/uploads.service';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
@@ -22,6 +28,8 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
   let ctx: TestApp;
   let dir: string;
   let cookie: string[];
+  let aliceId: string;
+  let bobId: string;
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), 'uploads-e2e-'));
@@ -31,11 +39,19 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
 
     const users = ctx.moduleRef.get(UsersService);
     const passwords = ctx.moduleRef.get(PasswordService);
-    await users.create({
+    const passwordHash = await passwords.hash('Passw0rd!');
+    const alice = await users.create({
       name: 'Uploader',
       email: 'uploader@example.com',
-      passwordHash: await passwords.hash('Passw0rd!'),
+      passwordHash,
     });
+    const bob = await users.create({
+      name: 'Other moderator',
+      email: 'other@example.com',
+      passwordHash,
+    });
+    aliceId = alice._id.toString();
+    bobId = bob._id.toString();
     const login = await request(ctx.server)
       .post('/api/auth/login')
       .send({ email: 'uploader@example.com', password: 'Passw0rd!' })
@@ -143,5 +159,68 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
       .get('/uploads/..%2F..%2Fpackage.json')
       .expect(404);
     await request(ctx.server).get('/uploads/.env').expect(404);
+  });
+
+  describe('ownership (GEN-08: only the uploader may reuse or delete a file)', () => {
+    let logo: StoredImage;
+
+    beforeAll(async () => {
+      const res = await request(ctx.server)
+        .post('/api/uploads/images?kind=airlineLogo')
+        .set('Cookie', cookie)
+        .attach('images', PNG, 'logo.png')
+        .expect(201);
+      [logo] = (res.body as { images: StoredImage[] }).images;
+    });
+
+    it("records the signed-in user as the file's owner", async () => {
+      const records = ctx.moduleRef.get<Model<Upload>>(
+        getModelToken(Upload.name),
+      );
+      const record = await records.findOne({ filename: logo.id }).lean();
+      expect(record?.ownerId.toString()).toBe(aliceId);
+      expect(record?.kind).toBe('airlineLogo');
+      expect(record?.url).toBe(logo.url);
+    });
+
+    it("accepts the uploader's URL and rejects it for anyone else", async () => {
+      const uploads = ctx.moduleRef.get(UploadsService);
+      await expect(uploads.isUploadedUrl(logo.url, aliceId)).resolves.toBe(
+        true,
+      );
+      await expect(uploads.isUploadedUrl(logo.url, bobId)).resolves.toBe(false);
+      await expect(
+        uploads.assertOwnedUpload(logo.url, bobId, 'logoUrl'),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('does not let another user delete the file', async () => {
+      const uploads = ctx.moduleRef.get(UploadsService);
+      await expect(uploads.remove(logo.url, bobId)).resolves.toBe(false);
+      expect(await readdir(dir)).toContain(logo.id);
+      await request(ctx.server).get(`/uploads/${logo.id}`).expect(200);
+
+      await expect(uploads.remove(logo.url, aliceId)).resolves.toBe(true);
+      expect(await readdir(dir)).not.toContain(logo.id);
+      await request(ctx.server).get(`/uploads/${logo.id}`).expect(404);
+    });
+
+    it('leaves no upload record when writing the file fails', async () => {
+      const records = ctx.moduleRef.get<Model<Upload>>(
+        getModelToken(Upload.name),
+      );
+      const before = await records.countDocuments();
+      await chmod(dir, 0o500); // read-only folder: the write fails
+      try {
+        await request(ctx.server)
+          .post('/api/uploads/images')
+          .set('Cookie', cookie)
+          .attach('images', PNG, 'a.png')
+          .expect(500);
+      } finally {
+        await chmod(dir, 0o700);
+      }
+      expect(await records.countDocuments()).toBe(before);
+    });
   });
 });

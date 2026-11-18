@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { isValidObjectId, Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { ContentModerators, ContentType } from '../admin/content-moderators';
 import type {
   ContentModerator,
@@ -8,10 +8,12 @@ import type {
 } from '../admin/content-moderators';
 import type { AuthUser } from '../auth/auth.types';
 import { canViewContent } from '../common/security/content-visibility';
+import { UploadsService } from '../uploads/uploads.service';
 import { ReportTargets } from './reports/report-targets';
 import type { ReportTargetInfo } from './reports/report-targets';
 import { Comment } from './schemas/comment.schema';
 import type { CommentDocument } from './schemas/comment.schema';
+import { Like } from './schemas/like.schema';
 import { Post, PostStatus } from './schemas/post.schema';
 import type { PostDocument } from './schemas/post.schema';
 
@@ -41,8 +43,10 @@ export class BlogModerationService implements OnModuleInit {
   constructor(
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     @InjectModel(Comment.name) private readonly comments: Model<Comment>,
+    @InjectModel(Like.name) private readonly likes: Model<Like>,
     private readonly moderators: ContentModerators,
     private readonly reportTargets: ReportTargets,
+    private readonly uploads: UploadsService,
   ) {}
 
   onModuleInit(): void {
@@ -74,34 +78,46 @@ export class BlogModerationService implements OnModuleInit {
     return post ? describePost(post) : null;
   }
 
-  /** Removes the post and its comments. */
+  /**
+   * Removes the post, its comments, its likes and its image files. The files
+   * are removed as the post's author (who uploaded them, GEN-08), so an admin
+   * delete (GEN-10) cleans them up too. Best-effort: a file that is already
+   * gone (or a failed removal) never fails the moderation.
+   */
   async deletePost(id: string): Promise<ModeratedContent | null> {
     if (!isValidObjectId(id)) return null;
     const post = await this.posts.findByIdAndDelete(id);
     if (!post) return null;
-    await this.comments.deleteMany({ post: post._id });
+    await Promise.all([
+      this.comments.deleteMany({ post: post._id }),
+      this.likes.deleteMany({ post: post._id }),
+    ]);
+    const uploader = post.author.toString();
+    await Promise.allSettled(
+      post.images.map((image) => this.uploads.remove(image.url, uploader)),
+    );
     return describePost(post);
   }
 
+  /**
+   * `commentCount` counts visible comments only (it feeds the interaction
+   * score, BLG-09), so hiding lowers it and unhiding raises it again, but
+   * only when the state really changes; calling twice is safe.
+   */
   async hideComment(id: string): Promise<ModeratedContent | null> {
-    const comment = await this.setCommentHidden(id, true);
-    return comment ? describeComment(comment) : null;
+    return this.setCommentHidden(id, true);
   }
 
   async unhideComment(id: string): Promise<ModeratedContent | null> {
-    const comment = await this.setCommentHidden(id, false);
-    return comment ? describeComment(comment) : null;
+    return this.setCommentHidden(id, false);
   }
 
-  /** Removes the comment and updates its post's comment count. */
+  /** Removes the comment; a visible one also lowers the post's count. */
   async deleteComment(id: string): Promise<ModeratedContent | null> {
     if (!isValidObjectId(id)) return null;
     const comment = await this.comments.findByIdAndDelete(id);
     if (!comment) return null;
-    await this.posts.updateOne(
-      { _id: comment.post, commentCount: { $gt: 0 } },
-      { $inc: { commentCount: -1 } },
-    );
+    if (!comment.isHidden) await this.changeCommentCount(comment.post, -1);
     return describeComment(comment);
   }
 
@@ -151,15 +167,32 @@ export class BlogModerationService implements OnModuleInit {
     );
   }
 
-  private setCommentHidden(
+  private async setCommentHidden(
     id: string,
     isHidden: boolean,
-  ): Promise<CommentDocument | null> {
-    if (!isValidObjectId(id)) return Promise.resolve(null);
-    return this.comments.findByIdAndUpdate(
-      id,
+  ): Promise<ModeratedContent | null> {
+    if (!isValidObjectId(id)) return null;
+    // Only the request that actually flips the flag adjusts the count.
+    const changed = await this.comments.findOneAndUpdate(
+      { _id: id, isHidden: !isHidden },
       { isHidden },
       { returnDocument: 'after' },
+    );
+    if (changed) {
+      await this.changeCommentCount(changed.post, isHidden ? -1 : 1);
+      return describeComment(changed);
+    }
+    const comment = await this.comments.findById(id);
+    return comment ? describeComment(comment) : null;
+  }
+
+  private async changeCommentCount(
+    postId: Types.ObjectId,
+    delta: 1 | -1,
+  ): Promise<void> {
+    await this.posts.updateOne(
+      delta < 0 ? { _id: postId, commentCount: { $gt: 0 } } : { _id: postId },
+      { $inc: { commentCount: delta } },
     );
   }
 }
