@@ -1048,6 +1048,50 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       );
     });
 
+    it('a webhook replay of the same payment after cancellation is not refunded again (PAY-01)', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 10);
+      refundService.issue.mockImplementationOnce((_type, id) =>
+        Promise.resolve({
+          refundId: `re_${id}`,
+          amount: 100,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
+      );
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      const before = await reservations.findById(reservation.id).lean();
+      expect(before?.refund).toMatchObject({ percentage: 50, amount: 100 });
+
+      // Stripe re-delivers payment_intent.succeeded for the original payment.
+      const replay = await payments.confirmPaid(
+        reservation.id,
+        paid(reservation),
+      );
+      expect(replay.outcome).toBe('already_processed');
+      if (replay.outcome !== 'already_processed') return;
+      expect(replay.reservation.status).toBe(ReservationStatus.CANCELLED);
+
+      const after = await reservations.findById(reservation.id).lean();
+      expect(after?.status).toBe(ReservationStatus.CANCELLED);
+      expect(after?.refund).toEqual(before?.refund);
+      expect(after?.payment).toEqual(before?.payment);
+      expect(after?.updatedAt).toEqual(before?.updatedAt);
+      expect(refundService.issue).toHaveBeenCalledTimes(1);
+    });
+
+    it('a different payment on a cancelled reservation must be refunded in full', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 11);
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      expect(
+        await payments.confirmPaid(
+          reservation.id,
+          paid(reservation, 'pi_someone_else'),
+        ),
+      ).toEqual({ outcome: 'rejected', reason: 'NOT_PENDING' });
+    });
+
     it('uses the tiers in force when the reservation was made', async () => {
       const { client } = await loggedInAs();
       const { reservation } = await confirmedStay(client, 40);

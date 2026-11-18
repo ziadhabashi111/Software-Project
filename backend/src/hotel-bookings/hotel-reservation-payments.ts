@@ -50,13 +50,26 @@ export interface VerifiedPayment {
   currency: string;
 }
 
+/**
+ * The answer to a verified Stripe payment (PAY-01). Same contract as flight
+ * bookings' `FlightConfirmResult`:
+ * - `confirmed`: this payment just confirmed the reservation.
+ * - `already_confirmed`: a webhook retry for the payment that confirmed it
+ *   (the reservation is Confirmed or Completed). Do NOT refund.
+ * - `already_processed`: this same payment was already applied and the
+ *   reservation has since been Cancelled (its tier refund is handled by the
+ *   cancellation, PAY-03). Do NOT refund again.
+ * - `rejected`: nothing was confirmed by this payment (unknown reservation,
+ *   a different payment on a reservation that is no longer pending, expired
+ *   hold, wrong amount). The caller must refund that payment in full.
+ */
 export type ConfirmResult =
   | {
-      outcome: 'confirmed' | 'already_confirmed';
+      outcome: 'confirmed' | 'already_confirmed' | 'already_processed';
       reservation: HotelReservationView;
     }
   | {
-      /** The payment must be refunded by the caller: nothing was confirmed. */
+      /** The payment must be refunded in full by the caller. */
       outcome: 'rejected';
       reason: 'NOT_FOUND' | 'NOT_PENDING' | 'HOLD_EXPIRED' | 'AMOUNT_MISMATCH';
     };
@@ -64,7 +77,10 @@ export type ConfirmResult =
 /** One transaction's answer; `userId` is for the notification after commit. */
 type ConfirmAttempt =
   | { outcome: 'confirmed'; reservation: HotelReservationView; userId: string }
-  | { outcome: 'already_confirmed'; reservation: HotelReservationView }
+  | {
+      outcome: 'already_confirmed' | 'already_processed';
+      reservation: HotelReservationView;
+    }
   | Extract<ConfirmResult, { outcome: 'rejected' }>;
 
 /** Reference collisions are astronomically rare; retry a few times anyway. */
@@ -171,8 +187,10 @@ export class HotelReservationPayments {
    * HTL-17: called only after the webhook verified that the PaymentIntent
    * succeeded. Confirms all rooms at once, assigns the unique reference and
    * sends the in-app notification. Safe to call twice for the same payment
-   * (Stripe retries webhooks). A `rejected` result means nothing changed and
-   * the payment has to be refunded.
+   * (Stripe retries webhooks), even after the guest cancelled: a replay of the
+   * payment already applied answers `already_confirmed` / `already_processed`
+   * and must not be refunded. Only `rejected` means the payment has to be
+   * refunded in full; nothing changed.
    */
   async confirmPaid(
     reservationId: string,
@@ -218,16 +236,25 @@ export class HotelReservationPayments {
         .session(session);
       if (!doc) return { outcome: 'rejected', reason: 'NOT_FOUND' } as const;
 
-      if (doc.status === ReservationStatus.CONFIRMED) {
-        return doc.payment?.stripePaymentIntentId === payment.paymentIntentId
-          ? ({
-              outcome: 'already_confirmed',
-              reservation: toReservationView(doc, now),
-            } as const)
-          : ({ outcome: 'rejected', reason: 'NOT_PENDING' } as const);
-      }
       if (doc.status !== ReservationStatus.PENDING_PAYMENT) {
-        return { outcome: 'rejected', reason: 'NOT_PENDING' } as const;
+        // A replayed webhook for the payment already applied must never be
+        // refunded again, whatever happened to the reservation since (a
+        // cancelled one already has its tier refund). `succeeded` is only
+        // stored on confirmation, so an expired hold's intent never matches.
+        const samePayment =
+          doc.payment?.stripePaymentIntentId === payment.paymentIntentId &&
+          doc.payment?.status === 'succeeded';
+        if (!samePayment) {
+          return { outcome: 'rejected', reason: 'NOT_PENDING' } as const;
+        }
+        return {
+          outcome:
+            doc.status === ReservationStatus.CONFIRMED ||
+            doc.status === ReservationStatus.COMPLETED
+              ? 'already_confirmed'
+              : 'already_processed',
+          reservation: toReservationView(doc, now),
+        } as const;
       }
       if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' } as const;
