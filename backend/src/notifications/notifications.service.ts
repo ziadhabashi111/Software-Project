@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { NotificationService } from './notification.service.interface';
@@ -16,6 +16,8 @@ export interface NotificationPage {
 
 @Injectable()
 export class NotificationsService implements NotificationService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @InjectModel(Notification.name)
     private readonly model: Model<NotificationDocument>,
@@ -23,6 +25,11 @@ export class NotificationsService implements NotificationService {
 
   /** Called by other modules (bookings, payments) through NOTIFICATION_SERVICE. */
   async notify(userId: string, type: string, message: string): Promise<void> {
+    if (!Types.ObjectId.isValid(userId)) {
+      // Callers treat notify as fire-and-forget, so a bad id must not throw.
+      this.logger.warn(`Skipped ${type} notification: invalid user id`);
+      return;
+    }
     await this.model.create({
       userId: new Types.ObjectId(userId),
       type,

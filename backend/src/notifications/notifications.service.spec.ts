@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { NotificationsService } from './notifications.service';
 import type { NotificationDocument } from './schemas/notification.schema';
@@ -43,6 +43,21 @@ describe('NotificationsService (GEN-01)', () => {
       type: 'BOOKING_CONFIRMED',
       message: 'Flight confirmed',
     });
+  });
+
+  it('notify skips a malformed user id without throwing or saving', async () => {
+    const { model, service } = setup();
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    await expect(
+      service.notify('not-an-id', 'BOOKING_CONFIRMED', 'Flight confirmed'),
+    ).resolves.toBeUndefined();
+    expect(model.create).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'Skipped BOOKING_CONFIRMED notification: invalid user id',
+    );
+    warn.mockRestore();
   });
 
   it('lists one page: page 3 of 10 skips 20, newest first', async () => {
