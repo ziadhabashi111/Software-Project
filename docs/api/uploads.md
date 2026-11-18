@@ -47,6 +47,8 @@ await this.uploads.remove(image.url, user.id);
 
 `saveImages(files, kind, ownerId, existing)` counts the existing images, so a 6th image is rejected. The kinds are `post`, `activity`, `hotel` (5 each) and `airlineLogo` (1).
 
+When someone other than the uploader deletes the record (for example an admin removing a post under GEN-10), pass the **uploader's** id (the record's author/owner), not the acting user, so the files are still cleaned up. The blog does this: `BlogModerationService.deletePost` removes a post's images as `post.author`, and `POST /api/posts` accepts `imageUrls` only when the author uploaded each one.
+
 Users: **Habashi** (ITN-12 activity images), **Abdelrahman** (HTL-01 hotel photos), **Ahmed** (BLG-10 post images).
 
 ## Option B: upload first, then save the URL (airline logo)
