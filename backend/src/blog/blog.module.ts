@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
+import { UploadsModule } from '../uploads/uploads.module';
+import { UsersModule } from '../users/users.module';
 import { BlogModerationService } from './blog-moderation.service';
+import { PostsController } from './posts.controller';
+import { PostsService } from './posts.service';
+import { TagsController } from './tags.controller';
 import { ReportTargets } from './reports/report-targets';
 import { Report, ReportSchema } from './reports/report.schema';
 import { ReportsController } from './reports/reports.controller';
@@ -12,6 +17,10 @@ import { Post, PostSchema } from './schemas/post.schema';
 /**
  * Owner: Ahmed Ismail
  * Requirements: BLG-01..13, GEN-09
+ *
+ * BLG-01, 03, 04, 08, 10: authors create, list, edit and delete their posts
+ * (`/api/posts`), with tags (`GET /api/tags/:tag/posts`) and images through
+ * the upload helper (GEN-08).
  *
  * GEN-09 report submission (`POST /api/reports`) and the Report schema, read
  * and resolved by the admin module through `ReportDirectory` (GEN-10).
@@ -28,9 +37,16 @@ import { Post, PostSchema } from './schemas/post.schema';
       { name: Report.name, schema: ReportSchema },
     ]),
     AdminModule,
+    UploadsModule,
+    UsersModule,
   ],
-  controllers: [ReportsController],
-  providers: [ReportTargets, ReportsService, BlogModerationService],
-  exports: [ReportTargets, BlogModerationService],
+  controllers: [PostsController, TagsController, ReportsController],
+  providers: [
+    ReportTargets,
+    ReportsService,
+    BlogModerationService,
+    PostsService,
+  ],
+  exports: [ReportTargets, BlogModerationService, PostsService],
 })
 export class BlogModule {}
