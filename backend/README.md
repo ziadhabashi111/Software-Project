@@ -205,6 +205,35 @@ All flight and hotel prices, payments and refunds use one currency: `PLATFORM_CU
 
 Booking prices are **never converted**. Only itinerary budgets are converted, into the user's preferred currency, by the exchange-rate module (ITN-18). That module must not touch flight or hotel prices.
 
+## Flight bookings (FLT-12, 19, 21, 22, 23, 25, 26, GEN-06, GEN-11; issues 18-22)
+
+Design: `docs/design/2026-11-16-flight-bookings-design.md`. Routes as in PDF section 8.4, all for registered users (`GET /:id` also for admins; another user's booking answers 404):
+
+| Route | Req | What it does |
+|---|---|---|
+| `POST /api/flight-bookings` | FLT-19, 21, 12 | Booking summary: passengers (type checked against the date of birth on the local departure date), extra bags and weight, prices (infants 10%, no seat), total, policies. Stores nothing. |
+| `POST /api/flight-bookings/hold` | FLT-22 | Same body; holds the seats for 10 minutes as one Pending Payment booking (a round trip is all or nothing, 409 `SEATS_UNAVAILABLE`). |
+| `GET /api/flight-bookings?group=upcoming\|past\|cancelled` | FLT-25 | My bookings, 10 per page. |
+| `GET /api/flight-bookings/:id` | FLT-25, PAY-01, PAY-03 | Details in local times, payment and refund status, and `cancellation` (the refund if cancelled now). |
+| `POST /api/flight-bookings/:id/cancel` | FLT-26, PAY-03 | Without `{ "confirm": true }` only shows the refund; with it, cancels, returns the seats and creates the refund. Blocked after departure. |
+| `GET /api/flight-bookings/:id/e-ticket` | FLT-23, GEN-06 | PDF e-ticket of a Confirmed booking. |
+
+**Seats are concurrency-safe:** every hold, confirmation, expiry and cancellation is one conditional `$inc` on the flight's cabin counters (`heldSeats`, `bookedSeats`) inside a MongoDB transaction, guarded by `total - booked - held >= seats`. Two requests for the last seat: one wins, the other gets 409. A job every 30 s (plus a check on read) expires unpaid holds and releases their seats; Confirmed bookings become Completed once their last flight lands.
+
+**For the payments module (Ziad):** import `FlightBookingsModule` and use the exported `FlightBookingPayments`. Same names as the hotel side:
+- `forPayment(bookingId, userId)` and `attachPaymentIntent` / `recordPaymentFailure` (PAY-01, retry until the hold expires)
+- `confirmPaid(bookingId, { paymentIntentId, amount, currency })` from the verified webhook only. Idempotent: a replayed webhook gets `already_confirmed`, or `already_processed` if the booking was cancelled since (do **not** refund again). Returns `rejected` with a reason (`HOLD_EXPIRED`, `AMOUNT_MISMATCH`, `FLIGHT_NOT_BOOKABLE`, ...) only when the payment must be refunded.
+- `policiesFor(bookingId, userId)` for PAY-02 (cancellation tiers and baggage policy accepted at hold time)
+- `refundQuote`, `refundBasis` and `recordRefundResult` for `RefundService` (PAY-03). If the airline cancelled one of the booking's flights, the quote is 100% (FLT-06) even if its cancellation has not reached the booking yet.
+
+This module finds `NOTIFICATION_SERVICE`, `PAYMENT_SERVICE` and `REFUND_SERVICE` by token at runtime, so there is no import cycle. Until they exist, notifications are skipped and refunds stay Pending.
+
+**For the flights module (Youssef):** registered with `FlightBookingHooks`: `getConfirmedPassengerUserIds` (FLT-05), `cancelBookingsForFlight` (FLT-06; also returns `notifiedUserIds` because each user is notified as their booking is cancelled), `listBookings` (FLT-29) and `getConfirmedUserIdsForAirline` (ACC-15, for `setActive`).
+
+**For the account and admin modules (Habashi):** registered with `DeactivationBlockers` (ACC-12) and `BookingSources` (ACC-17; the status filter accepts `Confirmed` or `CONFIRMED`).
+
+**Running the e2e tests on Node 24:** MongoDB driver 7.8 uses a dynamic `import()` that Jest blocks on Node 24, which shows up as `Missing required sub-document 'driver'`. Run `NODE_OPTIONS=--experimental-vm-modules npm run test:e2e`. CI (Node 22) does not need it.
+
 ## Module ownership
 
 | Module | Owner |
