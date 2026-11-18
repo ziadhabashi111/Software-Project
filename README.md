@@ -18,7 +18,8 @@ Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 | Youssef Wahby | Airlines, Flights, Flight search, Itinerary budgets/FX |
 | Yahia Tarek | Flight booking, holds, cancellation |
 | Ziad Mohannad | Payments, Refunds, Notifications |
-| Abdelrahman | Hotels, Rooms, Availability, Hotel search |
+| Abdelrahman | Hotels, Rooms, Availability, Policies |
+| Noureldin | Hotel search, Available rooms, Moderator reservations |
 | Amina | Hotel booking, Reviews |
 | Ahmed Ismail | Blog and community, Seeding, Uploads, Docs |
 

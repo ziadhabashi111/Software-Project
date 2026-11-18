@@ -2,7 +2,7 @@
 
 **Course:** Software Project I, Winter 2026 (Faculty of Informatics and Computer Science, GIU)
 **Instructor:** Dr. Nada Sharaf
-**Team (7):** Habashi, Youssef Wahby, Amina, Ziad Mohannad, Ahmed Ismail, Yahia Tarek, Abdelrahman
+**Team (8):** Habashi, Youssef Wahby, Amina, Ziad Mohannad, Ahmed Ismail, Yahia Tarek, Abdelrahman, Noureldin
 
 > The official Excel requirements sheet is the authoritative source for exact business rules, limits and acceptance criteria. This file is the team plan built on top of the project PDF (`docs/requirements/Project_Description.pdf`) and the transcribed requirements (`docs/requirements/REQUIREMENTS.md`). **Every member must read their requirement IDs in the Excel sheet before coding.** Ready-to-paste GitHub issues for every member are in `docs/issues.md`.
 >
@@ -52,9 +52,9 @@ The scaffold already has NestJS, Mongoose, Swagger, `class-validator`/`class-tra
 
 | Package (install inside `backend/` unless noted) | Who installs | When | Why |
 |---|---|---|---|
-| `@nestjs/jwt` | Habashi | day 2 | Sign and verify access/refresh tokens |
+| `@nestjs/jwt@^11` | Habashi | day 2 | Sign and verify access/refresh tokens (v12 is ESM-only for Nest 12 and breaks Jest and this Nest 11 project) |
 | `bcryptjs` | Habashi | day 2 | Salted password hashing (pure JS, no native build on Windows) |
-| `@nestjs/schedule` | Habashi | day 2 | One shared scheduler for hold expiry, daily FX fetch, flight "Departed" status |
+| `@nestjs/schedule@^6` | Habashi | day 2 | One shared scheduler for hold expiry, daily FX fetch, flight "Departed" status (v12 is ESM-only; use v6 with Nest 11) |
 | `csv-parse` | Ahmed | day 2 | Read the official reference CSVs in the seed script (also add an `npm run seed` script) |
 | `@types/multer` (dev) | Ahmed | day 2 | Typings for the upload helper (multer itself ships with `@nestjs/platform-express`) |
 | `stripe` | Ziad | day 3 | PaymentIntents, Refunds API, webhook signature verification |
@@ -65,7 +65,7 @@ The scaffold already has NestJS, Mongoose, Swagger, `class-validator`/`class-tra
 
 No package needed: FXRatesAPI calls (use built-in `fetch`), CSV export (plain string), serving uploaded images (Express static assets on the Nest app), in-app notifications.
 
-Optional dev dependency for the parallel-request tests (Yahia, Amina): `mongodb-memory-server` using a replica set (MongoDB transactions need one), or a separate test database on Atlas.
+`mongodb-memory-server` is already installed as a dev dependency (with `develop`). It starts a real MongoDB in memory for the database tests: see `backend/test/helpers/app.ts` and `npm run test:e2e` (the script sets Node's `--experimental-vm-modules` flag, which the MongoDB driver needs under Jest; the first run downloads the MongoDB binary once). The parallel-request tests (Yahia, Amina) need transactions, which need a replica set: use `MongoMemoryReplSet` in your own test helper.
 
 Tools, not packages: the [Stripe CLI](https://docs.stripe.com/stripe-cli) for webhook testing (Ziad and anyone testing payments).
 
@@ -91,9 +91,10 @@ The plan was written on 12/11, so Milestone 1 is **8 days away**. Section 11 has
 | 2 | **Youssef Wahby** | Airlines, Flights, Flight status, Flight search + Itinerary budgets/FX + `GET /itineraries/:id/flights` | Medium-High |
 | 3 | **Yahia Tarek** | Flight booking (one-way and round-trip), passengers, inventory holds, e-ticket, flight cancellation | High |
 | 4 | **Ziad Mohannad** | Payments (Stripe), Refunds, Policy acceptance, Notifications, booking-state rules | High |
-| 5 | **Abdelrahman** | Hotels, Rooms, Availability, Policies, Hotel search | Medium |
+| 5 | **Abdelrahman** | Hotels, Rooms, Availability, Policies | Medium |
 | 6 | **Amina** | Hotel booking, concurrency, cancellation, Reviews | High |
 | 7 | **Ahmed Ismail** | Blog and community, report submission, seeding + reference-data API, upload helper, docs upkeep, M2 frontend shell/design system | **Lightest in M1** |
+| 8 | **Noureldin** | Hotel search and filters, available rooms, moderator reservations view (took over from Abdelrahman) | Medium |
 
 Ahmed has the easiest backend load by design: Blog is mostly standard CRUD with no concurrency or payments logic. In M2 he also builds the shared frontend shell so the UI is consistent (GEN-14..17). Everyone else carries at least one concurrency, money, or multi-entity integration problem.
 
@@ -142,10 +143,10 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** team lead and owner of the shared foundations; also auth, accounts, admin, moderation, audit logs and itinerary structure. Folders: `auth`, `users`, `admin`, `audit`, `itineraries`.
-> - **Install (in `backend/`):** `npm install @nestjs/jwt bcryptjs @nestjs/schedule`. For the email bonuses later: `npm install nodemailer` and `npm install -D @types/nodemailer`.
+> - **Install (in `backend/`):** `npm install @nestjs/jwt@^11 @nestjs/schedule@^6 bcryptjs` (already installed on `develop` once the foundations PR is merged). For the email bonuses later: `npm install nodemailer` and `npm install -D @types/nodemailer`.
 > - **Most important:** the foundations (guards, roles, ownership helper, pagination helper, error filter, Swagger, `AuditLogService`, scheduler) merged to `develop` by **Fri 13/11**, because every other member is blocked on them. Then lockout (5 failures, 15 min), 30-minute session expiry, and ownership checks.
 > - **Others depend on you for:** guards, `@Roles()`, pagination, errors, Swagger, audit log, `isHidden` moderation hooks.
-> - **You depend on:** Ahmed (Report schema, upload helper, seed), Yahia and Amina (`hasUpcomingConfirmedBookings`), Youssef and Abdelrahman (`setActive`), Ziad (`NotificationService`), Abdelrahman (hotel search for ITN-25), Youssef (budget data for city-group subtotals).
+> - **You depend on:** Ahmed (Report schema, upload helper, seed), Yahia and Amina (`hasUpcomingConfirmedBookings`), Youssef and Abdelrahman (`setActive`), Ziad (`NotificationService`), Noureldin (hotel search for ITN-25), Youssef (budget data for city-group subtotals).
 > - **Team lead:** protect branches, accept/confirm teammates' repo access, review PRs, make sure conflicts never delete a teammate's work.
 > - **Bonus (only after your own mandatory issues are merged):** GEN-01-B email notifications (issue 53), ACC-02 email verification (54), ACC-07 password reset by email (55), BON-02 favourites (56), BLG-13 attach an itinerary to a blog post (57), and the cloud deployment (64, 65). See section 15 for the order and dates.
 
@@ -199,7 +200,7 @@ Common to **every** member, for their own module(s):
 - ITN-12: `POST /api/activities/:id/images`, `DELETE .../images/:imageId` through Ahmed's upload helper (GEN-08: JPG/PNG, <= 5 MB, up to 5 per activity)
 - ITN-20: public/private visibility via `PATCH /api/itineraries/:id`; setting Private removes it from public search immediately
 - ITN-21: `GET /api/itineraries/public/search` (keyword in title, country or city; filter by duration min/max days and country/city), `GET /api/itineraries/public/:id` (read-only: author, days, activities, budget), `POST /api/itineraries/:id/clone` (copies days, activities and budgets; private; credits original author; fully independent)
-- ITN-25: `GET /api/itineraries/:id/hotels`: for a chosen city group, search hotels with check-in = first day of the group, check-out = the day after its last day, plus guest count and number of rooms; **reuse Abdelrahman's search (HTL-11)**
+- ITN-25: `GET /api/itineraries/:id/hotels`: for a chosen city group, search hotels with check-in = first day of the group, check-out = the day after its last day, plus guest count and number of rooms; **reuse Noureldin's search (HTL-11)**
 
 **Milestone 2 (frontend):** registration (consent checkbox, inline errors), login (generic, lockout and suspended messages, role-based landing), forced password change, profile (name, phone, preferred currency), change password, account deactivation with confirmation, ACC-10 "login then return to the action", route protection (UI only; backend still enforces); admin dashboard (accounts with search/filter/pagination, create moderator, suspend/reactivate, provider deactivate/reactivate, bookings list with filters, reports queue with dismiss/hide/delete, audit logs); itinerary list and editor (days, city groups with subtotals, activities, images, reorder, visibility), public itinerary search and detail (ISR), clone, hotel suggestions for a city group.
 
@@ -250,9 +251,9 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** everything between "user picks a flight" and "booking confirmed or cancelled": seat holds, passengers, baggage, round-trip, e-ticket, cancellation. Folder: `flight-bookings`.
-> - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` (use a replica set, because transactions need one).
+> - **Install (in `backend/`):** `npm install pdfkit` and `npm install -D @types/pdfkit`. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** the seat hold must be atomic so two requests for the last seat never both succeed. It lasts **10 minutes**, then the booking becomes Expired and the seats are released. A round-trip is one booking with two segments, one payment and one reference. Infants pay 10% and take no seat. Nothing becomes Confirmed before Ziad's verified webhook. Write the parallel-request test.
-> - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings`, the booking queries for the admin list and FLT-29.
+> - **Others depend on you for:** `cancelBookingsForFlight`, `getConfirmedPassengers`, `hasUpcomingConfirmedBookings` (register your service with `DeactivationBlockers` from `UsersModule`; see `backend/README.md`), the booking queries for the admin list and FLT-29.
 > - **You depend on:** Youssef (flight, cabin and policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, booking-status enum, Sat 14/11).
 > - **Bonus (only after your own mandatory issues are merged):** FLT-27 change flight booking (issue 58): reserve the new seats before releasing the old ones, and settle the fare difference through Stripe or a refund. See section 15.
 
@@ -297,14 +298,14 @@ Common to **every** member, for their own module(s):
 
 > **Brief (for you and your Claude)**
 > - **Role:** everything between "user picks rooms" and "reservation confirmed, cancelled or reviewed". Folder: `hotel-bookings` (reviews included).
-> - **Install:** nothing required. Optional, for the parallel-request test: `npm install -D mongodb-memory-server` in `backend/` (use a replica set, because transactions need one).
+> - **Install:** nothing required. For the parallel-request test, `mongodb-memory-server` is already installed: use `MongoMemoryReplSet` (transactions need a replica set) and see `backend/test/helpers/app.ts`.
 > - **Most important:** publish the Hotel Reservation schema by **Sat 14/11** (Abdelrahman needs it). Multi-room booking is all-or-nothing and no two reservations may overlap, even under parallel requests. The hold lasts **10 minutes**, then Expired. Guests per room respect occupancy, with at least one adult. Cancel the whole reservation only, before check-in. Reviews only after a Completed stay, one per reservation. Write the parallel-request test.
-> - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings`, booking queries for the admin list, reviews and `isHidden` for moderation.
+> - **Others depend on you for:** the reservation schema, `hasUpcomingConfirmedBookings` (register your service with `DeactivationBlockers` from `UsersModule`; see `backend/README.md`), booking queries for the admin list, reviews and `isHidden` for moderation.
 > - **You depend on:** Abdelrahman (hotel, room, availability, policy schemas, Sat 14/11), Ziad (`PaymentService`, `RefundService`, `NotificationService`, status enum).
 > - **Bonus (only after your own mandatory issues are merged):** HTL-26 hotel moderator replies to reviews (issue 62). It is the easiest bonus, so do it first. See section 15.
 
 **Milestone 1 (backend)**
-- **Publish the hotel reservation schema by end of day 3** (rooms, check-in/out, status, hold expiry): Abdelrahman needs it for availability, search, block rules and the moderator reservations view.
+- **Publish the hotel reservation schema by end of day 3** (rooms, check-in/out, status, hold expiry): Abdelrahman and Noureldin need it for availability, block rules, search and the moderator reservations view.
 - HTL-16 `POST /api/hotel-bookings`: one or more available rooms of the **same hotel and dates** in one reservation; assign adults and children (ages 0-17) per room, **at least one adult per reservation**, no room above its maximum occupancy; total = sum over rooms of nights x that room's price at booking time (price snapshot)
 - HTL-18 hold: all selected rooms held **together for 10 minutes** as one **Pending Payment** reservation. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, **the whole request is rejected and nothing is held** (MongoDB transaction or equivalent atomic approach). Unpaid reservations become **Expired** and rooms are released. Check-out must be after check-in; check-in cannot be in the past.
 - HTL-17: on verified payment (Ziad's webhook) all rooms go to Confirmed, unique reference, in-app notification, confirmation page data
@@ -312,39 +313,52 @@ Common to **every** member, for their own module(s):
 - HTL-21 `POST /api/hotel-bookings/:id/cancel`: own Confirmed reservation **as a whole** before check-in (no partial cancellation), refund preview from the hotel's tiers on the full total, all rooms released, refund via Ziad's `RefundService`
 - HTL-23 a Confirmed reservation becomes **Completed** after check-out; `POST /api/hotel-bookings/:id/review`: one rating (1-5) plus optional review (<= 1000 chars) per Completed reservation regardless of room count; `PATCH/DELETE /api/reviews/:id`; hotel average rating recalculated
 - HTL-24 `GET /api/hotels/:id/reviews`: average rating, number of ratings, reviews newest first, paginated; reviews of deactivated users show "Deleted user" (ACC-12); reviews support `isHidden` for GEN-10 and can be reported (GEN-09)
-- Hooks: `hasUpcomingConfirmedBookings(userId)` for Habashi (ACC-12); hotel bookings feed the admin bookings list (ACC-17) and Abdelrahman's reservations view (HTL-22)
+- Hooks: `hasUpcomingConfirmedBookings(userId)` for Habashi (ACC-12); hotel bookings feed the admin bookings list (ACC-17) and Noureldin's reservations view (HTL-22)
 - **Parallel-request test:** no overlapping reservations; multi-room request is all-or-nothing
 - Optional bonus after mandatory work: moderator replies (HTL-26, `POST /api/reviews/:id/reply`)
 
 **Milestone 2 (frontend):** room selection with guest assignment per room, booking summary and policy acceptance, hold countdown, my hotel bookings (Upcoming/Past/Cancelled), booking details, cancel flow with refund preview and confirmation, review form (rating + text) and review list, hotel moderator reservations view.
 
-### 🟨 **ABDELRAHMAN**: Hotels, Rooms, Availability, Policies, Hotel Search
+### 🟨 **ABDELRAHMAN**: Hotels, Rooms, Availability, Policies
 
 > **Brief (for you and your Claude)**
-> - **Role:** hotel catalogue and inventory data: hotels, rooms, availability and blocked dates, policies, hotel search. Folder: `hotels`.
+> - **Role:** the hotel catalogue and inventory data: hotels, rooms, availability and blocked dates, policies. Folder: `hotels` (your files at the top level of the folder; Noureldin works in `hotels/search/`). Hotel search, available rooms and the moderator reservations view moved to Noureldin.
 > - **Install:** nothing extra.
-> - **Most important:** publish the Hotel, Room, Availability and Policy schemas by **Sat 14/11** (Amina and Habashi wait on them) and agree the reservation shape with Amina. Availability ranges must not overlap. Blocking, deactivating or deleting a room is rejected if it overlaps a Confirmed or Pending Payment reservation. Search rules: city or country, dates, guests, rooms, combined occupancy, and "free" means no overlap with Confirmed reservations, unexpired holds or blocked ranges. A moderator manages only their own hotel.
-> - **Others depend on you for:** the four schemas, `setActive()` on Hotel, hotel search reused by itineraries (ITN-25).
+> - **Most important:** publish the Hotel, Room, Availability and Policy schemas **now** (they were due Sat 14/11; Amina's reservation code and Noureldin's search wait on them) and agree the reservation shape with Amina. Availability ranges must not overlap. Blocking, deactivating or deleting a room is rejected if it overlaps a Confirmed or Pending Payment reservation. A moderator manages only their own hotel. Register the hotel catalogue with Amina's `HotelInventoryRegistry` (see `backend/src/hotel-bookings/hotel-inventory.ts`), otherwise `POST /api/hotel-bookings` answers 503.
+> - **Others depend on you for:** the four schemas, `setActive()` on Hotel, the inventory registration. Noureldin builds search on your schemas.
 > - **You depend on:** Amina (reservation schema and holds), Ahmed (upload helper for hotel photos, seed data), Ziad (`RefundService` applies your cancellation tiers).
-> - **Bonus (only after your own mandatory issues are merged):** ITN-27 link booked flights and hotels to itinerary days (issue 61); coordinate with Habashi (days) and Youssef (budget). See section 15.
 
 **Milestone 1 (backend)**
-- **Do first (by end of day 3):** publish the Hotel, Room, Availability and Policy schemas so Amina (hotel booking) and Habashi (itinerary hotels) can build on them; agree the reservation shape with Amina.
+- **Do first:** publish the Hotel, Room, Availability and Policy schemas so Amina (hotel booking), Noureldin (search) and Habashi (itinerary hotels) can build on them; agree the reservation shape with Amina.
 - HTL-01 `POST /api/hotels` (admin), `PATCH /api/hotels/:id` (own hotel moderator): name, address, city and country, description, **photos (up to 5, JPG/PNG <= 5 MB via Ahmed's helper)**, star class, amenities. `isActive` flag for provider deactivation (ACC-15).
-- HTL-02 `GET /api/hotels/:id`: profile, photos, amenities, check-in/out times, cancellation policy, average rating and reviews (from Amina), available rooms when dates are provided
+- HTL-02 `GET /api/hotels/:id`: profile, photos, amenities, check-in/out times, cancellation policy, average rating and reviews (from Amina), available rooms when dates are provided (use Noureldin's room-availability query, HTL-15)
 - HTL-03 `POST /api/hotels/:id/rooms`: room number/name unique within the hotel, type, beds, max occupancy (>= 1), price per night (> 0)
 - HTL-04 `POST .../rooms/:roomId/availability`: **non-overlapping** bookable date ranges
 - HTL-05 `PATCH .../rooms/:roomId` and `.../availability`: edit beds, occupancy, price, availability; price changes do not affect existing reservations; availability **cannot be removed for dates with Confirmed reservations**
 - HTL-06 block date ranges, deactivate or delete a room (`DELETE .../rooms/:roomId`): **rejected if it overlaps any Confirmed or Pending Payment reservation**; deactivated rooms excluded from search; delete only if never reserved
 - HTL-08 `GET /api/hotels/:id/availability`: each room's status over a date range: Available, Booked (with reservation reference) or Blocked
 - HTL-09/10 `PUT /api/hotels/:id/policies`: check-in/out times and cancellation tiers (unique days-before-check-in threshold >= 0, refund 0-100%, same selection rule as FLT-09)
+- Hotel moderator restriction: manage **only** their assigned hotel
+
+**Milestone 2 (frontend):** hotel moderator dashboard (hotel profile and photos, rooms, availability and blocked dates, per-room status calendar, check-in/out times, cancellation tiers). Noureldin builds the hotel search, details page and reservations view.
+
+### 🟨 **NOURELDIN**: Hotel Search, Available Rooms, Moderator Reservations
+
+> **Brief (for you and your Claude)**
+> - **Role:** the read side of hotels: search with filters, the available-rooms list and the moderator's reservations list. Folder: `hotels/search/` (a sub-folder of Abdelrahman's `hotels` module, so you do not edit the same files). GitHub: noureldin1098-bit.
+> - **Install:** nothing extra.
+> - **Most important:** HTL-11 search must be correct and reusable (Habashi's `GET /api/itineraries/:id/hotels` calls it). City or country, check-in, check-out, guests and **rooms (default 1)**; active hotels with enough rooms free for the **whole stay** whose **combined max occupancy covers the guests**. "Free" means no overlap with Confirmed reservations, unexpired holds or blocked ranges: use `ROOM_HOLDING_STATUSES` (`backend/src/hotel-bookings/reservation-status.ts`) and the `RoomNight` collection (`backend/src/hotel-bookings/schemas/room-night.schema.ts`). Statuses are the shared `BookingStatus` values (`PENDING_PAYMENT`, ...). Validate check-out after check-in and check-in not in the past. Deactivated hotels and rooms are hidden. Write the test for a room that is held but unpaid.
+> - **Others depend on you for:** hotel search as a reusable service (ITN-25), the available-rooms query (used by the hotel profile, HTL-02), the moderator reservations list.
+> - **You depend on:** Abdelrahman (Hotel, Room, Availability, Policy schemas: ask for them today), Amina (reservation and room-night schemas, already on `develop`), Ahmed (seed data).
+> - **Bonus (only after your own mandatory issues are merged):** ITN-27 link booked flights and hotels to itinerary days (issue 61); coordinate with Habashi (days) and Youssef (budget). See section 15.
+
+**Milestone 1 (backend)**
 - HTL-11 `GET /api/hotels/search`: city or country, check-in, check-out, guests, **number of rooms (default 1)**; active hotels with enough rooms free for the whole stay whose **combined max occupancy covers the guests**; validate check-out after check-in and check-in not in the past; "free" means no overlap with Confirmed reservations, unexpired holds or blocked ranges
 - HTL-12 filters: inclusive min/max price per night (cheapest qualifying room), minimum average rating (1-5; unrated hotels excluded when set); sort by that price or rating; pagination
 - HTL-15 `GET /api/hotels/:id/rooms/available`: all rooms free for the searched dates with type, beds, occupancy, price per night and **total stay price**
-- HTL-22 `GET /api/hotels/:id/reservations`: guest, dates, status for own hotel
-- Hotel moderator restriction: manage **only** their assigned hotel
+- HTL-22 `GET /api/hotels/:id/reservations`: guest, dates, status for own hotel (a moderator sees only their hotel's reservations)
 
-**Milestone 2 (frontend):** hotel search and results (rooms count, filters, sort), hotel details page (photos, amenities, policy, reviews, rooms for the searched dates), room selection, hotel moderator dashboard (hotel profile and photos, rooms, availability and blocked dates, per-room status calendar, check-in/out times, cancellation tiers, reservations).
+**Milestone 2 (frontend):** hotel search and results (rooms count, filters, sort), hotel details page (photos, amenities, policy, reviews, rooms for the searched dates), room selection, hotel moderator reservations view. Dynamic SSR for search.
 
 ### 🟨 **AHMED ISMAIL**: Blog and Community, Reports, Seeding and Reference Data, Upload Helper, Docs, Frontend Shell
 
@@ -352,7 +366,7 @@ Common to **every** member, for their own module(s):
 > - **Role:** blog and community, report submission, the seed script and reference-data endpoints, the shared upload helper, docs upkeep, and in M2 the shared frontend shell and design system. Folders: `blog`, `uploads`, plus a new reference-data/seed folder.
 > - **Install (in `backend/`):** `npm install csv-parse` and `npm install -D @types/multer`, and add an `npm run seed` script to `backend/package.json`. In M2, pick one styling approach for `frontend/` (for example Tailwind CSS) and install it once for the whole team.
 > - **Most important:** by **Fri 13/11** deliver the seed script (official datasets from the PDF link, IDs unchanged, idempotent), the reference-data endpoints (countries, cities, currencies) and the upload helper (JPG/PNG, max 5 MB, up to 5 images per post/activity/hotel, 1 logo per airline), because everyone else needs them. Then blog rules: one like per user per post, up to 5 tags of 30 characters, search ordered by likes plus comments, and one report per user per item. Own the Report schema and share it with Habashi by Mon 16/11 at the latest.
-> - **Others depend on you for:** seed data, upload helper, Report schema, `isHidden` and `hide/unhide/delete` on posts and comments, the shared UI shell in M2.
+> - **Others depend on you for:** seed data, upload helper, Report schema, `isHidden` and `hide/unhide/delete` on posts and comments, the shared UI shell in M2, and the `CURRENCY_CATALOG` provider (`isSupported(code)`) so profiles can validate the preferred currency against the seeded currencies (see `backend/README.md`).
 > - **You depend on:** Habashi (public itineraries for the author page, guards and pagination helper).
 > - **Bonus:** none assigned (the bonuses in his area are with Habashi). If your mandatory work and the frontend shell are finished early, ask the team leader for extra work.
 
@@ -404,8 +418,9 @@ Common to **every** member, for their own module(s):
 | Everyone | Ahmed | Seed script, reference-data endpoints, upload helper | Day 2 |
 | Yahia, Amina | Ziad | `PaymentService`, `RefundService`, `NotificationService`, booking-status enum | Day 3 (Sat 14/11) |
 | Yahia | Youssef | Flight, cabin, baggage and cancellation-policy schemas | Day 3 |
-| Amina, Habashi | Abdelrahman | Hotel, room, availability, policy schemas | Day 3 |
-| Abdelrahman | Amina | Hotel reservation schema (rooms, dates, status, hold expiry) for availability, search, blocking rules and HTL-22 | Day 3 |
+| Amina, Habashi, Noureldin | Abdelrahman | Hotel, room, availability, policy schemas | Day 3 (overdue) |
+| Abdelrahman, Noureldin | Amina | Hotel reservation schema (rooms, dates, status, hold expiry) for availability, search, blocking rules and HTL-22 (merged) | Day 3 |
+| Habashi | Noureldin | Hotel search (HTL-11) as a reusable service for ITN-25 | Day 6 |
 | Youssef | Yahia | `cancelBookingsForFlight`, `getConfirmedPassengers`, bookings-per-flight query (FLT-05, FLT-06, FLT-29) | Day 5 |
 | Youssef | Habashi | Itinerary and day schemas (budgets hang off days) | Day 1 call |
 | Habashi | Youssef | Budget data per day for group subtotals (ITN-09) and cleanup when a day is deleted (ITN-07) | Day 5 |
@@ -434,8 +449,8 @@ The app must **not** use one rendering strategy; each member justifies theirs in
 | Itinerary editor | Dynamic SSR + client components | Habashi (budget panel: Youssef) |
 | User booking pages | Dynamic SSR | Yahia (flights), Amina (hotels) |
 | Flight search | Dynamic SSR | Youssef |
-| Hotel search | Dynamic SSR | Abdelrahman |
-| Admin / moderator dashboards | Dynamic SSR | Habashi (admin), Youssef (airline), Abdelrahman + Amina (hotel) |
+| Hotel search | Dynamic SSR | Noureldin |
+| Admin / moderator dashboards | Dynamic SSR | Habashi (admin), Youssef (airline), Abdelrahman + Noureldin + Amina (hotel) |
 
 ---
 
@@ -543,7 +558,8 @@ Per member, the thing evaluators will probe hardest:
 | **Youssef Wahby** | Airline moderator cannot touch another airline; flight creation validations and UTC storage; flight status Departed/Cancelled hidden from search; flight cancel cascades to 100% refunds; round-trip search with filters/sorting; time zones; FX conversion plus all three failure cases (invalid code, no rate, API down) with the cached fallback and rate date; key never exposed to frontend |
 | **Yahia Tarek** | Two simultaneous requests for the last seat: only one succeeds; hold expiry (10 min) releases seats; infant/child/adult rules; round-trip is one booking with one payment; no confirmation before verified payment; policy-based cancellation with refund preview; cancellation blocked after departure |
 | **Ziad Mohannad** | Stripe test mode with webhook signature verification and idempotency; failed/expired payment releases inventory and cancels the PaymentIntent; payment blocked until policies accepted; acceptance timestamp stored; refund calculations and Stripe refund status; notifications fire from other modules; single platform currency |
-| **Abdelrahman** | Moderator limited to own hotel; non-overlapping availability ranges; blocking rejected over Confirmed/Pending reservations; room status Available/Booked/Blocked; search by destination/dates/guests/rooms with combined occupancy, filters and sorting; deactivated hotel hidden |
+| **Abdelrahman** | Moderator limited to own hotel; non-overlapping availability ranges; blocking rejected over Confirmed/Pending reservations; room status Available/Booked/Blocked; deactivated hotel hidden |
+| **Noureldin** | Search by destination/dates/guests/rooms with combined occupancy; a held-but-unpaid room is not free; filters and sorting; deactivated hotel hidden; moderator sees only own hotel's reservations |
 | **Amina** | No overlapping reservations under concurrency; multi-room booking is all-or-nothing; hold expiry; guests per room and occupancy limits; review only after a completed stay (one per reservation); whole-reservation cancellation refund by policy |
 | **Ahmed Ismail** | Draft vs published visibility; author-only edit/delete; one like per user per post; search ordering by interaction score; tag and author pages; one report per user per item; seed script reproduces the official reference data and IDs; upload validation (type, size, counts); shared shell consistency |
 
@@ -577,7 +593,7 @@ The team wants **all** optional bonuses and the cloud-deployment bonus. The PDF'
 | 57 | BLG-13 | Attach an itinerary to a blog post (`PATCH /api/posts/:id/itinerary`) | Habashi | Decide the privacy rule for private itineraries; coordinate with Ahmed's blog module |
 | 56 | BON-02 | Favourites for hotels and public itineraries | Habashi | |
 | 60 | ITN-28 | Itinerary PDF export (`GET /api/itineraries/:id/pdf`) | Youssef | Reuse Yahia's `pdfkit` |
-| 61 | ITN-27 | Link booked flights and hotels to itinerary days (`POST /api/itineraries/:id/bookings`) | Abdelrahman | Feeds the budget; coordinate with Habashi and Youssef |
+| 61 | ITN-27 | Link booked flights and hotels to itinerary days (`POST /api/itineraries/:id/bookings`) | Noureldin | Feeds the budget; coordinate with Habashi and Youssef |
 | 63 | BON-01 | Admin analytics: bookings and revenue per provider for a period | Ziad | State the revenue definition (net of refunds) in Swagger |
 | 53 | GEN-01-B | Email notifications via SMTP (test inbox in dev) | Habashi | Adds `MailService`; Ziad's `NotificationService` calls it |
 | 55 | ACC-07 | Forgot/reset password by email (30-minute, single-use link) | Habashi | Needs 53; lives in your auth module |
@@ -625,7 +641,7 @@ The PDF says teams applying for the deployment bonus are evaluated **only on the
 |---|---|
 | ACC | **Habashi:** 01, 04, 05, 06, 07a, 08, 09, 10 (M2), 11, 12, 13, 14, 15, 16, 17, 18, 19 (hooks from Yahia/Amina for 12 and 17; `setActive` from Youssef/Abdelrahman for 15) |
 | FLT | **Youssef:** 01, 02, 03, 04, 05, 06, 08, 09, 11, 12 (search side), 15, 17, 29, 30. **Yahia:** 12 (booking side), 19, 21, 22, 23, 25, 26 |
-| HTL | **Abdelrahman:** 01, 02, 03, 04, 05, 06, 08, 09, 10, 11, 12, 15, 22. **Amina:** 16, 17, 18, 20, 21, 23, 24 |
+| HTL | **Abdelrahman:** 01, 02, 03, 04, 05, 06, 08, 09, 10. **Noureldin:** 11, 12, 15, 22. **Amina:** 16, 17, 18, 20, 21, 23, 24 |
 | PAY | **Ziad:** 01, 02, 03, 04 |
 | ITN | **Habashi:** 01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25. **Youssef:** 14, 16, 18, 26 |
 | BLG | **Ahmed:** 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 12 |
@@ -641,7 +657,7 @@ Owners, order, issues and the deployment plan are in section 15.
 | FLT-28 | Seat selection | Youssef |
 | HTL-26 | Hotel moderator review replies | Amina |
 | ACC-02, ACC-07, GEN-01-B | Email verification, email password reset, email notifications | Habashi |
-| ITN-27 | Link bookings to itinerary days | Abdelrahman |
+| ITN-27 | Link bookings to itinerary days | Noureldin |
 | ITN-28 | Itinerary PDF export | Youssef |
 | BLG-13 | Attach itinerary to post | Habashi |
 | BON-01 | Admin analytics | Ziad |

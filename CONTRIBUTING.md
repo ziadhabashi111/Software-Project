@@ -43,7 +43,7 @@ Pull `develop` into your branch regularly, and always right before you push. If 
 Start from a fresh `git pull origin develop`:
 
 - [ ] CI is green on the latest `develop` commit (backend and frontend)
-- [ ] Backend: `cd backend && npm install && npm run lint && npm test && npm run build`
+- [ ] Backend: `cd backend && npm install && npm run lint && npm test && npm run test:e2e && npm run build` (CI does not run `test:e2e`, the database tests, so this manual run matters)
 - [ ] Frontend (from Milestone 2): `cd frontend && npm install && npm run lint && npm run build`
 - [ ] Backend starts with a fresh `backend/.env` (from `.env.example` plus the shared values) and `GET /api/health` returns ok
 - [ ] Swagger (`/api/docs`) loads and every merged endpoint shows its requirement ID
