@@ -13,6 +13,12 @@ import { ExchangeRates } from './exchange-rates.schema';
 
 const API_URL = 'https://api.fxratesapi.com/latest';
 const REQUEST_TIMEOUT_MS = 8000;
+/**
+ * After a failed refresh, cached rates are served straight away for this long
+ * before the API is tried again, so an outage does not make every itinerary
+ * read wait for the request timeout.
+ */
+export const FAILED_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 
 /** The provider's answer, as far as we rely on it. */
 interface ApiResponse {
@@ -36,6 +42,8 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 export class FxService {
   private readonly logger = new Logger(FxService.name);
   private refreshing?: Promise<RateTable | null>;
+  /** When the last refresh failed (ms since epoch); cleared by a success. */
+  private lastFailureAt?: number;
 
   constructor(
     @InjectModel(ExchangeRates.name)
@@ -43,12 +51,17 @@ export class FxService {
     private readonly config: ConfigService,
   ) {}
 
-  /** Today's rates: from the cache when fetched today, otherwise fetched once. */
+  /**
+   * Today's rates: from the cache when fetched today, otherwise fetched once.
+   * Right after a failed fetch the cached rates are returned as stale without
+   * calling the API again until the cooldown is over.
+   */
   async getRates(): Promise<RateTable> {
     const cached = await this.model.findOne({ base: PLATFORM_CURRENCY });
     if (cached && cached.fetchedAt.toISOString().slice(0, 10) === today()) {
       return toTable(cached, false);
     }
+    if (cached && this.inCooldown()) return toTable(cached, true);
 
     const fresh = await this.refresh();
     if (fresh) return fresh;
@@ -72,7 +85,8 @@ export class FxService {
   /**
    * Fetches and stores new rates. Requests that arrive while a fetch is
    * running share it, so a burst never calls the API twice. Returns null
-   * when the API cannot be used (the reason is logged).
+   * when the API cannot be used (the reason is logged) and remembers the
+   * failure for `FAILED_REFRESH_COOLDOWN_MS`.
    */
   refresh(): Promise<RateTable | null> {
     this.refreshing ??= this.fetchAndStore().finally(() => {
@@ -101,13 +115,23 @@ export class FxService {
         },
         { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       );
-      return doc ? toTable(doc, false) : null;
+      if (!doc) throw new Error('the rates could not be stored');
+      this.lastFailureAt = undefined;
+      return toTable(doc, false);
     } catch (error) {
+      this.lastFailureAt = Date.now();
       this.logger.warn(
         `Could not refresh the exchange rates, using the cached ones: ${error instanceof Error ? error.message : String(error)}`,
       );
       return null;
     }
+  }
+
+  private inCooldown(): boolean {
+    return (
+      this.lastFailureAt !== undefined &&
+      Date.now() - this.lastFailureAt < FAILED_REFRESH_COOLDOWN_MS
+    );
   }
 
   private async fetchRates(): Promise<ApiResponse> {
