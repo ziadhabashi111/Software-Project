@@ -632,3 +632,16 @@ What was the problem in GEN-12? Yes, fix it.
 How the output was used:
 Claude explained that ProfileService (ACC-09) asks for an optional CURRENCY_CATALOG hook that my GEN-12 module never provided. Without it, any three-letter code was accepted as a preferred currency. ReferenceDataModule now provides CURRENCY_CATALOG, backed by ReferenceDataService.isCurrency, and is @Global, which avoids a circular import with UsersModule. Claude added an e2e test (XYZ rejected, EUR accepted). I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
+Date: 2026-11-18
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-08, BLG-01, BLG-10
+Prompt:
+CI for Yahia's upload-ownership PR #123 failed on lint after develop was merged in. Find out why and fix it.
+
+How the output was used:
+The lint error (no-misused-promises) exposed a real integration bug: #123 made the upload ownership check async and added an owner argument, but Ahmed's already-merged blog code still called the old synchronous isUploadedUrl(url), so the blog's image-URL check would have been silently bypassed (and saveImages/remove got the wrong arguments). Updated every blog call site to the new contract (assertOwnedUpload, remove(url, authorId), saveImages(files, 'post', authorId, existing)) and added an e2e case that another author cannot attach someone else's upload. Reviewed the diff.
+================================================

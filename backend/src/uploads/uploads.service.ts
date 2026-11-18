@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -10,6 +12,7 @@ import {
   MAX_IMAGE_BYTES,
   type ImageOwnerKind,
 } from './image-rules';
+import { Upload } from './upload.schema';
 
 /** What a module stores for each image: an id to remove it and its URL. */
 export interface StoredImage {
@@ -35,6 +38,8 @@ const STORED_NAME =
  * Files go to `UPLOAD_DIR` (default `backend/uploads/`) under a random name
  * and are served at `UPLOAD_PUBLIC_URL/<name>`. Every rule is checked before
  * anything is written, so a request is stored completely or not at all.
+ * Each file is recorded with the user who uploaded it (`Upload`), and only
+ * that user can reuse its URL (`assertOwnedUpload`) or delete it (`remove`).
  * Keeping all file access here means a persistent disk or cloud storage can
  * replace it at deployment without touching other modules.
  */
@@ -43,7 +48,10 @@ export class UploadsService {
   readonly directory: string;
   private readonly publicBase: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @InjectModel(Upload.name) private readonly records: Model<Upload>,
+  ) {
     this.directory = resolve(config.get<string>('UPLOAD_DIR') || 'uploads');
     const port = config.get<string>('PORT') || '3000';
     this.publicBase = (
@@ -71,11 +79,13 @@ export class UploadsService {
 
   /**
    * Validates and stores the files (JPG/PNG, <= 5 MB each, count limit for
-   * `kind` including `existing` images). Returns the new images in order.
+   * `kind` including `existing` images) and records `ownerId` (the signed-in
+   * user's id) as their uploader. Returns the new images in order.
    */
   async saveImages(
     files: ImageFile[] | undefined,
     kind: ImageOwnerKind,
+    ownerId: string,
     existing = 0,
   ): Promise<StoredImage[]> {
     if (!files || files.length === 0) {
@@ -96,6 +106,18 @@ export class UploadsService {
     });
 
     await mkdir(this.directory, { recursive: true });
+    const owner = new Types.ObjectId(ownerId);
+    const names = checked.map((file) => file.name);
+    // Record the owner first, then write the files; on any failure undo both
+    // so there is never an unowned file or a record without its file.
+    await this.records.insertMany(
+      checked.map((file) => ({
+        filename: file.name,
+        url: this.urlFor(file.name),
+        ownerId: owner,
+        kind,
+      })),
+    );
     const written: string[] = [];
     try {
       for (const file of checked) {
@@ -106,6 +128,7 @@ export class UploadsService {
       }
     } catch (error) {
       await Promise.all(written.map((name) => this.unlinkQuietly(name)));
+      await this.records.deleteMany({ filename: { $in: names } });
       throw error;
     }
     return checked.map((file) => ({
@@ -114,20 +137,56 @@ export class UploadsService {
     }));
   }
 
-  /** True when the URL points to a file this helper stored. */
-  isUploadedUrl(url: string): boolean {
-    return this.nameFromUrl(url) !== null;
+  /**
+   * True only when the URL points to a file this helper stored AND `ownerId`
+   * uploaded it. Another user's upload, a foreign URL or a made-up name is
+   * false.
+   */
+  async isUploadedUrl(url: string, ownerId: string): Promise<boolean> {
+    const name = this.nameFromUrl(url);
+    if (!name || !isValidObjectId(ownerId)) return false;
+    const found = await this.records.exists({
+      filename: name,
+      ownerId: new Types.ObjectId(ownerId),
+    });
+    return found !== null;
   }
 
   /**
-   * Deletes a stored image by its URL or id. Unknown or foreign URLs are
-   * ignored, so modules can call it safely when removing an image.
+   * Use before saving a client-sent URL (e.g. an airline `logoUrl`): throws a
+   * 400 field error on `field` unless `ownerId` uploaded that file.
    */
-  async remove(urlOrId: string): Promise<void> {
+  async assertOwnedUpload(
+    url: string,
+    ownerId: string,
+    field = 'images',
+  ): Promise<void> {
+    if (!(await this.isUploadedUrl(url, ownerId))) {
+      throw fieldError(
+        field,
+        'Use an image you uploaded through POST /api/uploads/images',
+      );
+    }
+  }
+
+  /**
+   * Deletes a stored image by its URL or id, but only when `ownerId` uploaded
+   * it. Anything else (another user's file, an unknown or foreign URL) is a
+   * no-op, so modules can call it safely while removing an image from their
+   * own record. Returns true when a file was deleted.
+   */
+  async remove(urlOrId: string, ownerId: string): Promise<boolean> {
     const name = STORED_NAME.test(urlOrId)
       ? urlOrId
       : this.nameFromUrl(urlOrId);
-    if (name) await this.unlinkQuietly(name);
+    if (!name || !isValidObjectId(ownerId)) return false;
+    const record = await this.records.findOneAndDelete({
+      filename: name,
+      ownerId: new Types.ObjectId(ownerId),
+    });
+    if (!record) return false;
+    await this.unlinkQuietly(name);
+    return true;
   }
 
   private urlFor(name: string): string {

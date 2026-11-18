@@ -8,6 +8,7 @@ import type {
 } from '../admin/content-moderators';
 import type { AuthUser } from '../auth/auth.types';
 import { canViewContent } from '../common/security/content-visibility';
+import { UploadsService } from '../uploads/uploads.service';
 import { ReportTargets } from './reports/report-targets';
 import type { ReportTargetInfo } from './reports/report-targets';
 import { Comment } from './schemas/comment.schema';
@@ -45,6 +46,7 @@ export class BlogModerationService implements OnModuleInit {
     @InjectModel(Like.name) private readonly likes: Model<Like>,
     private readonly moderators: ContentModerators,
     private readonly reportTargets: ReportTargets,
+    private readonly uploads: UploadsService,
   ) {}
 
   onModuleInit(): void {
@@ -76,7 +78,12 @@ export class BlogModerationService implements OnModuleInit {
     return post ? describePost(post) : null;
   }
 
-  /** Removes the post with its comments and likes. */
+  /**
+   * Removes the post, its comments, its likes and its image files. The files
+   * are removed as the post's author (who uploaded them, GEN-08), so an admin
+   * delete (GEN-10) cleans them up too. Best-effort: a file that is already
+   * gone (or a failed removal) never fails the moderation.
+   */
   async deletePost(id: string): Promise<ModeratedContent | null> {
     if (!isValidObjectId(id)) return null;
     const post = await this.posts.findByIdAndDelete(id);
@@ -85,6 +92,10 @@ export class BlogModerationService implements OnModuleInit {
       this.comments.deleteMany({ post: post._id }),
       this.likes.deleteMany({ post: post._id }),
     ]);
+    const uploader = post.author.toString();
+    await Promise.allSettled(
+      post.images.map((image) => this.uploads.remove(image.url, uploader)),
+    );
     return describePost(post);
   }
 
