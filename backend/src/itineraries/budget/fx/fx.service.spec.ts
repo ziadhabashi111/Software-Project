@@ -2,7 +2,7 @@ import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { Model } from 'mongoose';
 import { ExchangeRates } from './exchange-rates.schema';
-import { FxService } from './fx.service';
+import { FAILED_REFRESH_COOLDOWN_MS, FxService } from './fx.service';
 
 const iso = (daysAgo: number): Date =>
   new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
@@ -144,5 +144,58 @@ describe('FxService (ITN-18)', () => {
       RequestInit,
     ];
     expect(placeholderInit.headers).toEqual({});
+  });
+
+  describe('after a failed refresh', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({
+        now: new Date('2026-11-18T00:30:00.000Z'),
+        doNotFake: ['nextTick', 'setImmediate'],
+      });
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('serves the stale cache without calling the API again during the cooldown', async () => {
+      fetchMock.mockRejectedValue(new Error('network down'));
+      const { service } = build(cachedDoc(iso(1)));
+
+      await expect(service.getRates()).resolves.toMatchObject({ stale: true });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(FAILED_REFRESH_COOLDOWN_MS - 1000);
+      await expect(service.getRates()).resolves.toMatchObject({
+        stale: true,
+        rateDate: '2026-11-10',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('tries the API once more after the cooldown, and a success ends the backoff', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('network down'));
+      const { service } = build(cachedDoc(iso(1)));
+      await service.getRates();
+
+      jest.advanceTimersByTime(FAILED_REFRESH_COOLDOWN_MS);
+      fetchMock.mockResolvedValue(apiAnswer(freshBody));
+      const retries = [service.getRates(), service.getRates()];
+      await expect(Promise.all(retries)).resolves.toEqual([
+        expect.objectContaining({ stale: false, rateDate: '2026-11-17' }),
+        expect.objectContaining({ stale: false, rateDate: '2026-11-17' }),
+      ]);
+      // simultaneous retries still share one call
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps backing off when the retry after the cooldown fails too', async () => {
+      fetchMock.mockRejectedValue(new Error('network down'));
+      const { service } = build(cachedDoc(iso(1)));
+      await service.getRates();
+      jest.advanceTimersByTime(FAILED_REFRESH_COOLDOWN_MS);
+      await service.getRates();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      jest.advanceTimersByTime(1000);
+      await service.getRates();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 });
