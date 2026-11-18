@@ -240,7 +240,10 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
 
   it('changes airports on an unbooked flight, guarded against a hold that arrives meanwhile', async () => {
     const { service, model } = build(flight());
-    await service.update('f1', moderator, { arrivalAirport: 'LHR' });
+    await service.update('f1', moderator, {
+      arrivalAirport: 'LHR',
+      arrivalTime: '2090-03-01T19:45',
+    });
     const filter = argsOf(model.findOneAndUpdate, 0)[0] as Record<
       string,
       unknown
@@ -270,6 +273,52 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
       departureTime: '2090-03-01T14:30',
     });
     expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('needs the local time at the new airport when an airport changes (GEN-06)', async () => {
+    // Without it the stored UTC would turn 19:45 in New York into 00:45 in London.
+    for (const [change, field] of [
+      [{ arrivalAirport: 'LHR' }, 'arrivalTime'],
+      [{ departureAirport: 'LHR', departureTime: undefined }, 'departureTime'],
+    ] as const) {
+      const { service, model } = build(flight());
+      await expect(
+        service.update('f1', moderator, change),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: expect.objectContaining({
+          errors: [expect.objectContaining({ field }) as unknown],
+        }) as unknown,
+      });
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps the other end’s time when only one airport changes with its time', async () => {
+    const { service, model } = build(flight());
+    await service.update('f1', moderator, {
+      arrivalAirport: 'LHR',
+      arrivalTime: '2090-03-01T19:45',
+    });
+    const update = argsOf(model.findOneAndUpdate)[1] as {
+      $set: { arrivalUtc: Date; departureUtc: Date };
+    };
+    expect(update.$set.arrivalUtc.toISOString()).toBe(
+      '2090-03-01T19:45:00.000Z',
+    );
+    expect(update.$set.departureUtc.toISOString()).toBe(
+      '2090-03-01T12:30:00.000Z',
+    );
+  });
+
+  it('does not ask for a time when the airport is sent but did not change', async () => {
+    const { service } = build(flight());
+    await expect(
+      service.update('f1', moderator, {
+        arrivalAirport: 'JFK',
+        departureTime: '2090-03-01T15:00',
+      }),
+    ).resolves.toBeDefined();
   });
 
   it('rejects an empty change', async () => {

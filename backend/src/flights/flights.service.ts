@@ -178,6 +178,22 @@ export class FlightsService {
       );
     }
 
+    // The stored times are UTC. A new airport has another time zone, so keeping
+    // the old UTC would silently change the local time people see (GEN-06).
+    // The moderator must say what the local time is at the new airport.
+    if (departureCode !== flight.departureAirport && !dto.departureTime) {
+      throw fieldError(
+        'departureTime',
+        `Send the departure time at ${departureCode} when you change the departure airport`,
+      );
+    }
+    if (arrivalCode !== flight.arrivalAirport && !dto.arrivalTime) {
+      throw fieldError(
+        'arrivalTime',
+        `Send the arrival time at ${arrivalCode} when you change the arrival airport`,
+      );
+    }
+
     assertDifferentAirports(departureCode, arrivalCode);
     const airports = await this.loadAirports(departureCode, arrivalCode);
     const departure = airports.get(departureCode) as AirportDocument;
