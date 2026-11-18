@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
+import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import { FlightBookingQuotesService } from './flight-booking-quotes.service';
 import { FlightBookingViews } from './flight-booking-view';
 import { FlightBookingsController } from './flight-bookings.controller';
@@ -10,6 +11,7 @@ import {
   FlightBooking,
   FlightBookingSchema,
 } from './schemas/flight-booking.schema';
+import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
 /**
@@ -32,7 +34,13 @@ import { SharedServices } from './shared-services';
     AdminModule,
   ],
   controllers: [FlightBookingsController],
-  providers: [SharedServices, FlightBookingViews, FlightBookingQuotesService],
+  providers: [
+    SharedServices,
+    SeatInventory,
+    FlightBookingViews,
+    FlightBookingQuotesService,
+    FlightBookingHoldsService,
+  ],
   exports: [MongooseModule],
 })
 export class FlightBookingsModule {}

@@ -38,6 +38,20 @@ interface ErrorBody {
   errors?: { field: string; messages: string[] }[];
 }
 
+interface BookingBody {
+  id: string;
+  reference: string | null;
+  status: string;
+  statusLabel: string;
+  holdExpiresAt: string | null;
+  seats: number;
+  price: { total: number; perSegment: number[] };
+  segments: { flightId: string; departure: { localTime: string } }[];
+  payment: { status?: string } | null;
+  refund: { percent: number; amount: number; status?: string } | null;
+  cancellation?: { refundPercent: number; refundAmount: number } | null;
+}
+
 /** Stand-ins for Ziad's notification, payment and refund services. */
 const notifications = { notify: jest.fn().mockResolvedValue(undefined) };
 const paymentService = {
@@ -227,6 +241,36 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
     return fresh!.cabins[0];
   }
 
+  const hold = (client: Client, body: object) =>
+    client.post('/api/flight-bookings/hold').send(body);
+
+  const child = (overrides: Record<string, unknown> = {}) => ({
+    fullName: 'Omar Adel',
+    dateOfBirth: new Date(Date.now() - 6 * 365 * DAY)
+      .toISOString()
+      .slice(0, 10),
+    documentNumber: 'C1112223',
+    type: 'child',
+    ...overrides,
+  });
+
+  /** A held booking for a fresh user, returned with that user. */
+  async function heldBooking(
+    flight: FlightDocument,
+    passengers: object[] = [adult()],
+    extra: Record<string, unknown> = {},
+  ) {
+    const user = await loggedInAs();
+    const res = await hold(
+      user.client,
+      bookingBody(flight, passengers, extra),
+    ).expect(201);
+    return { user, booking: res.body as BookingBody };
+  }
+
+  /** The airline's moderator, logged in. */
+  const moderator = () => loggedInAs(Role.AIRLINE_MODERATOR, airline.id);
+
   describe('booking summary (FLT-19, FLT-21, FLT-12)', () => {
     it('prices passengers, the infant share and extra bags without holding seats', async () => {
       const flight = await makeFlight({ price: 200 });
@@ -293,6 +337,147 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .expect(401);
       const { client } = await loggedInAs(Role.ADMIN);
       await summary(client, bookingBody(flight)).expect(403);
+    });
+  });
+  describe('seat hold (FLT-22, FLT-12)', () => {
+    it('holds seats for 10 minutes as Pending Payment', async () => {
+      const flight = await makeFlight();
+      const before = Date.now();
+      const { booking } = await heldBooking(flight, [
+        adult(),
+        child(),
+        infant(),
+      ]);
+      expect(booking.status).toBe('PENDING_PAYMENT');
+      expect(booking.statusLabel).toBe('Pending Payment');
+      expect(booking.reference).toBeNull();
+      expect(booking.seats).toBe(2);
+      const expires = new Date(booking.holdExpiresAt!).getTime();
+      expect(expires - before).toBeGreaterThan(10 * 60_000 - 5_000);
+      expect(expires - before).toBeLessThan(10 * 60_000 + 5_000);
+      const cabin = await cabinOf(flight);
+      expect(cabin.heldSeats).toBe(2);
+      expect((await flights.findById(flight._id).lean())!.everBooked).toBe(
+        true,
+      );
+    });
+
+    it('never oversells the last seat', async () => {
+      const flight = await makeFlight({ seats: 1 });
+      const clients = await Promise.all(
+        Array.from({ length: 5 }, () => loggedInAs()),
+      );
+      const results = await Promise.all(
+        clients.map(({ client }) => hold(client, bookingBody(flight))),
+      );
+      const statuses = results.map((r) => r.status).sort();
+      expect(statuses).toEqual([201, 409, 409, 409, 409]);
+      results
+        .filter((r) => r.status === 409)
+        .forEach((r) =>
+          expect((r.body as ErrorBody).code).toBe('SEATS_UNAVAILABLE'),
+        );
+      expect((await cabinOf(flight)).heldSeats).toBe(1);
+      expect(
+        await bookings.countDocuments({ 'segments.flight': flight._id }),
+      ).toBe(1);
+
+      const search = await request(ctx.server)
+        .get('/api/flights/search')
+        .query({
+          from: 'CAI',
+          to: 'DXB',
+          date: flight.departureLocalDate,
+          adults: 1,
+        })
+        .expect(200);
+      const items = (search.body as { outbound: { items: { id: string }[] } })
+        .outbound.items;
+      expect(items.map((i) => i.id)).not.toContain(flight.id);
+    });
+
+    it('is all or nothing for a round trip', async () => {
+      const outbound = await makeFlight({ departInDays: 40 });
+      const back = await makeFlight({
+        from: 'DXB',
+        to: 'CAI',
+        departInDays: 45,
+        seats: 1,
+      });
+      await flights.updateOne(
+        { _id: back._id },
+        { $set: { 'cabins.0.bookedSeats': 1 } },
+      );
+      const { client } = await loggedInAs();
+      const res = await hold(
+        client,
+        bookingBody(outbound, [adult()], {
+          return: { flightId: back.id, cabinClass: 'Economy' },
+        }),
+      ).expect(409);
+      expect((res.body as ErrorBody).code).toBe('SEATS_UNAVAILABLE');
+      expect((await cabinOf(outbound)).heldSeats).toBe(0);
+      expect(
+        await bookings.countDocuments({ 'segments.flight': outbound._id }),
+      ).toBe(0);
+    });
+
+    it('holds both flights of a round trip as one booking', async () => {
+      const outbound = await makeFlight({ departInDays: 40, price: 200 });
+      const back = await makeFlight({
+        from: 'DXB',
+        to: 'CAI',
+        departInDays: 45,
+        price: 150,
+      });
+      const { booking } = await heldBooking(outbound, [adult()], {
+        return: { flightId: back.id, cabinClass: 'Economy' },
+      });
+      expect(booking.segments.map((s) => s.flightId)).toEqual([
+        outbound.id,
+        back.id,
+      ]);
+      expect(booking.price.total).toBe(350);
+      expect(booking.price.perSegment).toEqual([200, 150]);
+      expect((await cabinOf(outbound)).heldSeats).toBe(1);
+      expect((await cabinOf(back)).heldSeats).toBe(1);
+    });
+
+    it('cannot hold seats on a cancelled flight', async () => {
+      const flight = await makeFlight();
+      await flights.updateOne(
+        { _id: flight._id },
+        { $set: { status: FlightStatus.CANCELLED } },
+      );
+      const { client } = await loggedInAs();
+      const res = await hold(client, bookingBody(flight)).expect(400);
+      expect((res.body as ErrorBody).errors?.[0].field).toBe(
+        'outbound.flightId',
+      );
+    });
+
+    it('keeps the airline from cutting seats below those held', async () => {
+      const flight = await makeFlight({ seats: 2 });
+      await heldBooking(flight, [adult(), adult({ fullName: 'Sara Adel' })]);
+      const { client } = await moderator();
+      const res = await client
+        .patch(
+          `/api/flights/${flight.id}/cabins/${flight.cabins[0]._id.toString()}`,
+        )
+        .send({ seats: 1 })
+        .expect(409);
+      expect((res.body as ErrorBody).code).toBe('SEATS_BELOW_BOOKED');
+    });
+
+    it('locks the airports once seats are held', async () => {
+      const flight = await makeFlight();
+      await heldBooking(flight);
+      const { client } = await moderator();
+      const res = await client
+        .patch(`/api/flights/${flight.id}`)
+        .send({ arrivalAirport: 'JED' })
+        .expect(409);
+      expect((res.body as ErrorBody).code).toBe('AIRPORTS_LOCKED');
     });
   });
 });
