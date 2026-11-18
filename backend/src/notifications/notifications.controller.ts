@@ -7,13 +7,12 @@ import {
 } from '@nestjs/swagger';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PaginationQueryDto, toPage } from '../common/pagination/pagination';
+import type { Paginated } from '../common/pagination/pagination';
 import { ApiReq } from '../common/swagger/api-req.decorator';
-import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
-import {
-  NotificationPage,
-  NotificationsService,
-} from './notifications.service';
-import type { NotificationDocument } from './schemas/notification.schema';
+import { toNotificationView } from './notification-view';
+import type { NotificationView } from './notification-view';
+import { NotificationsService } from './notifications.service';
 
 @ApiTags('notifications')
 @ApiCookieAuth()
@@ -25,14 +24,19 @@ export class NotificationsController {
   @ApiReq(
     'GEN-01',
     'My notifications',
-    'Paginated list of the logged-in user only, newest first. Defaults: page 1, limit 20 (max 100).',
+    'Paginated list of the logged-in user only, newest first. Page size 10 by default (max 100).',
   )
   @ApiOkResponse({ description: 'One page of notifications' })
-  list(
+  async list(
     @CurrentUser() user: AuthUser,
-    @Query() query: ListNotificationsQueryDto,
-  ): Promise<NotificationPage> {
-    return this.notifications.findForUser(user.id, query.page, query.limit);
+    @Query() query: PaginationQueryDto,
+  ): Promise<Paginated<NotificationView>> {
+    const { items, total } = await this.notifications.findForUser(
+      user.id,
+      query.page,
+      query.limit,
+    );
+    return toPage(items.map(toNotificationView), total, query);
   }
 
   @Get('unread-count')
@@ -57,10 +61,10 @@ export class NotificationsController {
   )
   @ApiOkResponse({ description: 'The updated notification' })
   @ApiNotFoundResponse({ description: 'Not found, or not yours' })
-  markRead(
+  async markRead(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-  ): Promise<NotificationDocument> {
-    return this.notifications.markRead(user.id, id);
+  ): Promise<NotificationView> {
+    return toNotificationView(await this.notifications.markRead(user.id, id));
   }
 }

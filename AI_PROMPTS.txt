@@ -498,3 +498,15 @@ I am Ahmed Ismail. Read the README; the workflow is: create a branch for the iss
 How the output was used:
 Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-05
+Prompt:
+Review Ziad's PR #112 (in-app notifications) and fix the gaps before merging.
+
+How the output was used:
+Reviewed the module (user-scoped queries, ownership inside the update filter, 404 for others) and found it correct. Fixed two gaps on his branch: the list used its own DTO with page size 20 instead of the shared GEN-05 pagination (10 by default), and the API returned raw Mongo documents. Added a NotificationView, switched to PaginationQueryDto/toPage, removed the now-unused DTO, and added an e2e spec (401 without login, per-user isolation, page size 10, no database internals, cross-user mark-read returns 404). Reviewed the diff.
+================================================
