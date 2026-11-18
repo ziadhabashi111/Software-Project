@@ -517,3 +517,15 @@ Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete
 How the output was used:
 Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-08, GEN-12, PAY-01, PAY-03, HTL-17, HTL-21, ITN-10, ITN-14, ITN-18, FLT-05, FLT-06, ACC-15
+Prompt:
+Review all recent open PRs and merges, then fix all the findings and put the fixes on develop.
+
+How the output was used:
+Claude reviewed open PRs #111, #112, #114, #115 and the merges since 17/11 (flights, hotel bookings, itineraries, reference data, CI). It checked the reference CSVs against the official "Mock Data" sheet linked in the PDF (identical, so the GEN-12 seed is correct; only the outdated note in PROJECT_BREAKDOWN.md was fixed here). Following the branch rules, it opened fix PRs instead of committing to develop: #119 hotel bookings (no second refund on webhook replay after cancellation, failed refunds marked Failed, refund idempotency key), #122 itineraries (exchange-rate outage backoff, activity costs keep their currency, 400 for unsupported summary currency), and, against the owners' open branches, #120 for #112 (notifications provided to flights and admin) and #123 for #114 (uploads record their owner). Each fix has tests; lint, build, unit and e2e tests were run, and I read every diff before pushing.
+================================================
