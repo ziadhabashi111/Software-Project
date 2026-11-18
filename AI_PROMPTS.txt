@@ -472,6 +472,20 @@ Reviewed the merged flights, payments-interface, hotel-bookings and admin code f
 
 ================================================
 Date: 2026-11-18
+Student: Ziad Mohannad
+Tool: Claude Code
+Related Requirement: PAY-01, PAY-02
+Prompt:
+Do Issue 25 and Issue 26 (Stripe payments and webhook, policy view and acceptance): 
+POST /api/payments, retry, GET, and the verified webhook; only the webhook confirms a booking; handle failed and expired payments; use the flight and hotel payment hooks already in the repo.
+How the output was used:
+Claude wrote backend/src/payments/: Payment and PolicyAcceptance schemas, the Stripe provider, a gateway that hides the flight/hotel difference,
+PaymentsService (PaymentIntent create/reuse/retry, signature-verified webhook, refund of payments a booking cannot accept, cancelPendingPayment on hold expiry), the controller with Swagger, 
+the policies view and accept-policies endpoints, 19 unit tests, rawBody in main.ts and the stripe dependency. Ran lint and the full backend test suite.
+================================================
+
+================================================
+Date: 2026-11-18
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-05, FLT-06, FLT-03, FLT-29, FLT-30, GEN-06, ACC-15
@@ -540,6 +554,18 @@ Yes, start 46 (blog posts, drafts, tags, images).
 
 How the output was used:
 Claude built the author side of the blog on the Post schema from #118 and the upload helper from #114. It added POST /api/posts (title and body required, draft by default, up to 5 normalised tags of 30 chars, image URLs only from the upload helper), GET /api/posts/mine (drafts included, counts, status filter), GET /api/posts/mine/:id, and author-only PATCH and DELETE (403 for others' published posts, 404 for drafts; delete removes comments and image files). It also added POST/DELETE /api/posts/:id/images with an atomic 5-image limit and the public GET /api/tags/:tag/posts. It wrote 11 e2e tests, including parallel uploads. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-05, BLG-06, BLG-07 (GEN-10, ACC-12)
+Prompt:
+Yes, start 47 (comments and likes).
+
+How the output was used:
+Claude added a Like schema with a unique { post, user } index and POST/DELETE /api/posts/:id/like (409 ALREADY_LIKED; likeCount changes only when a like is really added or removed). It added POST /api/posts/:id/comments (1-500 chars, published and visible posts only), a public GET /api/posts/:id/comments (oldest first; hidden comments only for their author and admins; "Deleted user" for deactivated accounts), and author-only PATCH/DELETE /api/comments/:id (403/404, editedAt). commentCount now counts visible comments only: admin hide/unhide adjust it once, and deleting a post also deletes its likes. It wrote 11 e2e tests, including parallel likes. I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
 
 ================================================

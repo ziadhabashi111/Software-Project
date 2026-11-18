@@ -56,7 +56,7 @@ export class PostsService {
   /** BLG-01: title and body required; tags and images optional; draft by default. */
   async create(author: AuthUser, dto: CreatePostDto): Promise<PostView> {
     const imageUrls = dto.imageUrls ?? [];
-    await this.assertOwnImageUrls(author.id, imageUrls);
+    await this.assertOwnImageUrls(author, imageUrls);
     const status = dto.status ?? PostStatus.DRAFT;
     const post = await this.posts.create({
       author: new Types.ObjectId(author.id),
@@ -105,12 +105,6 @@ export class PostsService {
     dto: UpdatePostDto,
   ): Promise<PostView> {
     const post = await this.loadOwn(author, id);
-    if (dto.imageUrls !== undefined) {
-      throw fieldError(
-        'imageUrls',
-        'Add or remove images with the post image endpoints',
-      );
-    }
     if (dto.title !== undefined) post.title = dto.title;
     if (dto.body !== undefined) post.body = dto.body;
     if (dto.tags !== undefined) post.tags = dto.tags;
@@ -124,13 +118,13 @@ export class PostsService {
     return toPostView(post);
   }
 
-  /** BLG-04: deletes the post, its comments and its image files. */
+  /**
+   * BLG-04: deletes the post, its comments and its image files (the same
+   * cleanup an admin delete runs, see BlogModerationService.deletePost).
+   */
   async remove(author: AuthUser, id: string): Promise<void> {
     const post = await this.loadOwn(author, id);
     await this.moderation.deletePost(post.id);
-    await Promise.all(
-      post.images.map((image) => this.uploads.remove(image.url, author.id)),
-    );
   }
 
   /**
@@ -143,6 +137,7 @@ export class PostsService {
     files: ImageFile[] | undefined,
   ): Promise<PostView> {
     const post = await this.loadOwn(author, id);
+    // GEN-08: the author is recorded as the uploader of the new files.
     const stored = await this.uploads.saveImages(
       files,
       'post',
@@ -189,7 +184,8 @@ export class PostsService {
       { $pull: { images: { _id: image._id } } },
       { returnDocument: 'after' },
     );
-    await this.uploads.remove(image.url, author.id);
+    // The post's author uploaded its images (GEN-08 ownership).
+    await this.uploads.remove(image.url, post.author.toString());
     if (!updated) throw new NotFoundException('Post not found');
     return toPostView(updated);
   }
@@ -244,15 +240,22 @@ export class PostsService {
     return post;
   }
 
-  /** GEN-08: only images this author uploaded can be attached to their post. */
+  /**
+   * GEN-08: every URL must be a file the author uploaded, so nobody can attach
+   * (and later delete with the post) another user's image.
+   */
   private async assertOwnImageUrls(
-    ownerId: string,
+    author: AuthUser,
     urls: string[],
   ): Promise<void> {
-    await Promise.all(
-      urls.map((url) =>
-        this.uploads.assertOwnedUpload(url, ownerId, 'imageUrls'),
-      ),
+    const owned = await Promise.all(
+      urls.map((url) => this.uploads.isUploadedUrl(url, author.id)),
     );
+    if (owned.includes(false)) {
+      throw fieldError(
+        'imageUrls',
+        'Each image must be one you uploaded through POST /api/uploads/images',
+      );
+    }
   }
 }

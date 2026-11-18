@@ -6,6 +6,7 @@ import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { BlogModule } from '../src/blog/blog.module';
 import type { MyPostRow, PostView, PublicPostRow } from '../src/blog/post-view';
@@ -57,13 +58,17 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function author(name?: string): Promise<{ id: string; client: Agent }> {
+  async function author(
+    name?: string,
+    role: Role = Role.USER,
+  ): Promise<{ id: string; client: Agent }> {
     counter += 1;
     const email = `author${counter}@example.com`;
     const doc = await users.create({
       name: name ?? `Author ${counter}`,
       email,
       passwordHash: await passwords.hash(PASSWORD),
+      role,
     });
     const client = request.agent(ctx.server);
     await client
@@ -166,19 +171,22 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
       expect(post.images.map((i) => i.url)).toEqual([image.url]);
     });
 
-    it("rejects another author's uploaded image: only the uploader can attach it (GEN-08)", async () => {
-      const owner = await author();
-      const other = await author();
-      const uploaded = await owner.client
+    it("rejects another user's uploaded image URL (GEN-08 ownership)", async () => {
+      const a = await author();
+      const b = await author();
+      const uploaded = await a.client
         .post('/api/uploads/images')
         .attach('images', PNG, 'a.png')
         .expect(201);
       const [image] = (uploaded.body as { images: { url: string }[] }).images;
-      const res = await other.client
+
+      const res = await b.client
         .post('/api/posts')
-        .send({ title: 'Reusing it', body: 'b', imageUrls: [image.url] })
+        .send({ title: 'T', body: 'b', imageUrls: [image.url] })
         .expect(400);
-      expect(fieldsOf(res)).toContain('imageUrls');
+      expect(fieldsOf(res)).toEqual(['imageUrls']);
+      expect(messagesOf(res)).toMatch(/you uploaded/);
+      expect(await readdir(dir)).toContain(image.url.split('/').pop());
     });
   });
 
@@ -263,10 +271,11 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
         .send({ title: '' })
         .expect(400);
       expect(fieldsOf(invalid)).toContain('title');
-      await me.client
+      const noImages = await me.client
         .patch(`/api/posts/${draft.id}`)
         .send({ imageUrls: [] })
         .expect(400);
+      expect(fieldsOf(noImages)).toContain('imageUrls');
       await me.client
         .patch(`/api/posts/${new Types.ObjectId().toHexString()}`)
         .send({ title: 'x' })
@@ -289,6 +298,24 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
       expect(await comments.countDocuments({ post: post.id })).toBe(0);
       expect((await readdir(dir)).length).toBe(filesBefore - 1);
       await me.client.delete(`/api/posts/${post.id}`).expect(404);
+    });
+
+    it("removes the author's image files when an admin deletes the post (GEN-10)", async () => {
+      const me = await author();
+      const admin = await author('Admin', Role.ADMIN);
+      const post = await createPost(me.client, { status: 'published' });
+      const added = await upload(me.client, post.id, 2).expect(201);
+      const names = (added.body as PostView).images.map((i) =>
+        i.url.split('/').pop(),
+      );
+      expect(await readdir(dir)).toEqual(expect.arrayContaining(names));
+
+      await admin.client
+        .delete(`/api/admin/content/post/${post.id}?mode=delete`)
+        .expect(200);
+      expect(await posts.exists({ _id: post.id })).toBeNull();
+      const left = await readdir(dir);
+      for (const name of names) expect(left).not.toContain(name);
     });
   });
 
