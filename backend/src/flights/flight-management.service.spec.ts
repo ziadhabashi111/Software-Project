@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { Role } from '../auth/auth.types';
@@ -68,12 +67,13 @@ function build(found: ReturnType<typeof flight> | null, withLink = true) {
   };
   const link = {
     getConfirmedPassengerUserIds: jest.fn().mockResolvedValue(['u1', 'u2']),
-    cancelBookingsForFlight: jest.fn().mockResolvedValue({ cancelled: 2 }),
+    cancelBookingsForFlight: jest
+      .fn()
+      .mockResolvedValue({ cancelled: 2, notifiedUserIds: ['u1', 'u2'] }),
     listBookings: jest.fn().mockResolvedValue({ items: [row()], total: 1 }),
   } satisfies FlightBookingLink;
   const hooks = new FlightBookingHooks();
   if (withLink) hooks.register(link);
-  const notifications = { notify: jest.fn().mockResolvedValue(undefined) };
   const flightsService = {
     view: jest.fn().mockResolvedValue({ id: 'f1', status: 'Cancelled' }),
   };
@@ -81,14 +81,13 @@ function build(found: ReturnType<typeof flight> | null, withLink = true) {
     model as unknown as Model<Flight>,
     flightsService as unknown as FlightsService,
     hooks,
-    notifications,
   );
-  return { service, model, link, notifications };
+  return { service, model, link };
 }
 
 describe('FlightManagementService.cancel (FLT-06)', () => {
-  it('cancels the flight, then refunds the bookings and notifies the passengers', async () => {
-    const { service, model, link, notifications } = build(flight());
+  it('cancels the flight, then has the booking module refund, notify and report who it notified', async () => {
+    const { service, model, link } = build(flight());
     const result = await service.cancel('f1', moderator);
 
     const [filter, update] = model.findOneAndUpdate.mock.calls[0] as [
@@ -98,31 +97,29 @@ describe('FlightManagementService.cancel (FLT-06)', () => {
     expect(filter.status).toBe(FlightStatus.SCHEDULED);
     expect(update.$set.status).toBe(FlightStatus.CANCELLED);
     expect(link.cancelBookingsForFlight).toHaveBeenCalledWith('f1');
-    expect(notifications.notify).toHaveBeenCalledTimes(2);
-    expect(notifications.notify).toHaveBeenCalledWith(
-      'u1',
-      'FLIGHT_CANCELLED',
-      expect.stringContaining('full refund'),
-    );
     expect(result).toMatchObject({
       cancelledBookings: 2,
       notifiedPassengers: 2,
     });
   });
 
-  it('reads the passengers before their bookings are cancelled', async () => {
+  it('does not read the passengers itself any more (a retry or a late booking cannot be missed)', async () => {
     const { service, link } = build(flight());
-    const order: string[] = [];
-    link.getConfirmedPassengerUserIds.mockImplementation(() => {
-      order.push('read');
-      return Promise.resolve(['u1']);
-    });
-    link.cancelBookingsForFlight.mockImplementation(() => {
-      order.push('cancel');
-      return Promise.resolve({ cancelled: 1 });
-    });
     await service.cancel('f1', moderator);
-    expect(order).toEqual(['read', 'cancel']);
+    expect(link.getConfirmedPassengerUserIds).not.toHaveBeenCalled();
+  });
+
+  it('counts the users the booking module reports, so a retry reports its own work', async () => {
+    const { service, link } = build(flight({ status: FlightStatus.CANCELLED }));
+    link.cancelBookingsForFlight.mockResolvedValueOnce({
+      cancelled: 1,
+      notifiedUserIds: ['u3'],
+    });
+    const result = await service.cancel('f1', moderator);
+    expect(result).toMatchObject({
+      cancelledBookings: 1,
+      notifiedPassengers: 1,
+    });
   });
 
   it('blocks another airline’s moderator and never touches the flight', async () => {
@@ -161,7 +158,7 @@ describe('FlightManagementService.cancel (FLT-06)', () => {
     expect(result.cancelledBookings).toBe(2);
   });
 
-  it('keeps the flight Cancelled and reports the failure when the refunds fail', async () => {
+  it('keeps the flight Cancelled and reports the failure when the cascade fails', async () => {
     const { service, model, link } = build(flight());
     link.cancelBookingsForFlight.mockRejectedValueOnce(
       new Error('refund service down'),
@@ -187,19 +184,7 @@ describe('FlightManagementService.cancel (FLT-06)', () => {
       status: 409,
     });
   });
-
-  it('keeps notifying the others when one notification fails', async () => {
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const { service, notifications } = build(flight());
-    notifications.notify
-      .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce(undefined);
-    const result = await service.cancel('f1', moderator);
-    expect(result.notifiedPassengers).toBe(1);
-  });
 });
-
-afterEach(() => jest.restoreAllMocks());
 
 describe('FlightManagementService bookings and export (FLT-29)', () => {
   it('shows the bookings page with seats remaining per cabin', async () => {
