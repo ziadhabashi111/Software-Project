@@ -469,3 +469,15 @@ I'm Yahia Tarek, member 3. Analyze the project description and do my part (fligh
 How the output was used:
 Reviewed the merged flights, payments-interface, hotel-bookings and admin code first (review findings sent to Youssef and Ahmed). Wrote a design doc and plan (docs/design/), then built backend/src/flight-bookings/ test-first: booking summary, concurrency-safe 10-minute hold on the flight's cabin counters inside a transaction, expiry/completion job, payment/refund hooks for Ziad mirroring the hotel API, grouped list and details, tier-based cancellation and the airline flight-cancel cascade, PDF e-ticket in local times, and the ACC-12/ACC-17 registrations. 41 e2e tests (incl. 5 parallel holds for the last seat) and 48 unit tests. Reviewed every diff; ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-05, FLT-06, FLT-03, FLT-29, FLT-30, GEN-06, ACC-15
+Prompt:
+Apply the review fixes to my flights module only: list an airline's flights for its moderator; require the local time when an airport changes; make flight cancel rely on the booking module to notify (contract change agreed with Yahia); return the affected travellers when an airline is deactivated; block edits after departure; and add real-database e2e tests for the queries that were only mocked.
+
+How the output was used:
+Added GET /api/airlines/:id/flights, the airport-time rule, the notifiedUserIds contract and the optional getConfirmedUserIdsForAirline hook, and the departureUtc guard on the edit filters. Wrote test/flights.e2e-spec.ts against the in-memory MongoDB (24 tests). I checked the new tests can fail by temporarily breaking the seat-floor and airport-lock guards: exactly the expected three tests went red, then I restored the code. Reviewed the diff.
+================================================
