@@ -9,6 +9,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { CURRENCY_CODE, TIME_OF_DAY, trim, upper } from './transforms';
 
@@ -41,9 +42,14 @@ export class CreateActivityDto {
 
   @ApiPropertyOptional({
     example: 'USD',
-    description: 'Currency of the cost, a three-letter code',
+    description:
+      'Currency of the cost, a three-letter code. Required when a cost is given, so the cost converts correctly in the budget (ITN-14, ITN-18).',
   })
-  @IsOptional()
+  // Required whenever a cost is sent; optional otherwise.
+  @ValidateIf(
+    (dto: CreateActivityDto) => dto.cost != null || dto.currency != null,
+  )
+  @IsNotEmpty({ message: 'Give the currency of the cost, such as USD' })
   @Transform(upper)
   @Matches(CURRENCY_CODE, {
     message: 'Use a three-letter currency code such as USD',

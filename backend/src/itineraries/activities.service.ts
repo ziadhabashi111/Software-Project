@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../auth/auth.types';
+import { fieldError } from '../common/validation/validation-errors';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { ItineraryRepository } from './itinerary.repository';
@@ -72,6 +73,13 @@ export class ActivitiesService {
         if (dto.cost !== undefined) activity.cost = dto.cost ?? undefined;
         if (dto.currency !== undefined) {
           activity.currency = dto.currency ?? undefined;
+        }
+        // A cost is meaningless without its currency (ITN-14, ITN-18).
+        if (activity.cost != null && !activity.currency) {
+          throw fieldError(
+            'currency',
+            'Give the currency of the cost, such as USD',
+          );
         }
         return activity;
       },
