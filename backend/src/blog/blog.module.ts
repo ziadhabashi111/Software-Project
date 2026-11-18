@@ -3,7 +3,13 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
+import { AuthorItineraries } from './author-itineraries';
 import { BlogModerationService } from './blog-moderation.service';
+import {
+  AuthorsController,
+  PublicPostsController,
+} from './public-posts.controller';
+import { PublicPostsService } from './public-posts.service';
 import { CommentsService } from './comments.service';
 import {
   CommentsController,
@@ -29,6 +35,11 @@ import { Post, PostSchema } from './schemas/post.schema';
  * (`/api/posts`), with tags (`GET /api/tags/:tag/posts`) and images through
  * the upload helper (GEN-08).
  *
+ * BLG-02, 09, 12: public browsing (`GET /api/posts`, `GET /api/posts/:id`),
+ * search ordered by likes + comments (`GET /api/posts/search`) and the
+ * author page (`GET /api/authors/:id`). Public itineraries on the author
+ * page come from the itinerary module through `AuthorItineraries` (exported).
+ *
  * BLG-05, 06, 07: comments on published posts (`/api/posts/:id/comments`,
  * `/api/comments/:id`) and one like per user per post (`/api/posts/:id/like`).
  *
@@ -51,11 +62,14 @@ import { Post, PostSchema } from './schemas/post.schema';
     UploadsModule,
     UsersModule,
   ],
+  // PostsController first: its GET /posts/mine must win over GET /posts/:id.
   controllers: [
     PostsController,
+    PublicPostsController,
     PostCommunityController,
     CommentsController,
     TagsController,
+    AuthorsController,
     ReportsController,
   ],
   providers: [
@@ -63,9 +77,17 @@ import { Post, PostSchema } from './schemas/post.schema';
     ReportsService,
     BlogModerationService,
     PostsService,
+    PublicPostsService,
     CommentsService,
     LikesService,
+    AuthorItineraries,
   ],
-  exports: [ReportTargets, BlogModerationService, PostsService, LikesService],
+  exports: [
+    ReportTargets,
+    BlogModerationService,
+    PostsService,
+    LikesService,
+    AuthorItineraries,
+  ],
 })
 export class BlogModule {}

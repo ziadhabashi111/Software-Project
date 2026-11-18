@@ -566,3 +566,15 @@ Yes, start 47 (comments and likes).
 How the output was used:
 Claude added a Like schema with a unique { post, user } index and POST/DELETE /api/posts/:id/like (409 ALREADY_LIKED; likeCount changes only when a like is really added or removed). It added POST /api/posts/:id/comments (1-500 chars, published and visible posts only), a public GET /api/posts/:id/comments (oldest first; hidden comments only for their author and admins; "Deleted user" for deactivated accounts), and author-only PATCH/DELETE /api/comments/:id (403/404, editedAt). commentCount now counts visible comments only: admin hide/unhide adjust it once, and deleting a post also deletes its likes. It wrote 11 e2e tests, including parallel likes. I reviewed the diff and ran build, lint, unit and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-02, BLG-09, BLG-12 (ACC-12, GEN-10)
+Prompt:
+Yes, start 48 (browse, search, author page).
+
+How the output was used:
+Claude added a PublicPostsService built on one aggregation that joins only each author's name and status. It handles public GET /api/posts (newest first, tag filter) and GET /api/posts/search (title, tag or author name; sorted by likes + comments, newest first on ties). Posts of deactivated authors are excluded everywhere (ACC-12), and the tag page now uses the same query. GET /api/posts/:id shows drafts only to the author and hidden posts to the author and admins, with the first page of comments and likedByMe. GET /api/authors/:id gives name, join date, published posts and public itineraries through an AuthorItineraries hook for the itinerary module. It wrote 12 e2e tests. I reviewed the diff and ran build, lint, unit and e2e.
+================================================

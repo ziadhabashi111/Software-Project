@@ -11,45 +11,31 @@ import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
 import { fieldError } from '../common/validation/validation-errors';
 import type { ImageFile } from '../uploads/uploads.service';
 import { UploadsService } from '../uploads/uploads.service';
-import { UsersService } from '../users/users.service';
 import { BlogModerationService } from './blog-moderation.service';
 import {
   IMAGES_MAX,
   type CreatePostDto,
   type ListMyPostsQueryDto,
-  type ListTagPostsQueryDto,
   type UpdatePostDto,
 } from './dto/post.dto';
 import {
   toMyPostRow,
   toPostView,
-  toPublicPostRow,
   type MyPostRow,
   type PostView,
-  type PublicPostRow,
 } from './post-view';
 import { Post, PostStatus } from './schemas/post.schema';
 import type { PostDocument } from './schemas/post.schema';
 
-/** Shown instead of the name of an account that no longer exists. */
-export const UNKNOWN_AUTHOR = 'Deleted user';
-
-/** Published, not hidden: what guests and other users may see (BLG-02). */
-export const PUBLIC_POSTS: QueryFilter<Post> = {
-  status: PostStatus.PUBLISHED,
-  isHidden: { $ne: true },
-};
-
 /**
  * BLG-01, 03, 04, 08, 10: an author's own posts (create, list, edit, delete,
- * tags, images) and the public tag page.
+ * tags, images). Public reading is in `PublicPostsService`.
  */
 @Injectable()
 export class PostsService {
   constructor(
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     private readonly uploads: UploadsService,
-    private readonly users: UsersService,
     private readonly moderation: BlogModerationService,
   ) {}
 
@@ -189,39 +175,6 @@ export class PostsService {
     await this.uploads.remove(image.url);
     if (!updated) throw new NotFoundException('Post not found');
     return toPostView(updated);
-  }
-
-  /** BLG-08: published, visible posts with this tag, newest first. */
-  async listByTag(
-    tag: string,
-    query: ListTagPostsQueryDto,
-  ): Promise<Paginated<PublicPostRow>> {
-    const filter: QueryFilter<Post> = {
-      ...PUBLIC_POSTS,
-      tags: tag.trim().toLowerCase(),
-    };
-    const [items, total] = await Promise.all([
-      this.posts
-        .find(filter)
-        .sort({ publishedAt: -1, _id: -1 })
-        .skip(skipFor(query))
-        .limit(query.limit),
-      this.posts.countDocuments(filter),
-    ]);
-    return toPage(await this.withAuthors(items), total, query);
-  }
-
-  private async withAuthors(posts: PostDocument[]): Promise<PublicPostRow[]> {
-    const authors = await this.users.findByIds([
-      ...new Set(posts.map((post) => post.author.toString())),
-    ]);
-    const names = new Map(authors.map((user) => [user.id, user.name]));
-    return posts.map((post) =>
-      toPublicPostRow(
-        post,
-        names.get(post.author.toString()) ?? UNKNOWN_AUTHOR,
-      ),
-    );
   }
 
   /**

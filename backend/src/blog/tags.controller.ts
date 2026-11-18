@@ -5,19 +5,19 @@ import type { Paginated } from '../common/pagination/pagination';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { ListTagPostsQueryDto } from './dto/post.dto';
 import type { PublicPostRow } from './post-view';
-import { PostsService } from './posts.service';
+import { PublicPostsService } from './public-posts.service';
 
 @ApiTags('blog')
 @Controller('tags')
 export class TagsController {
-  constructor(private readonly posts: PostsService) {}
+  constructor(private readonly publicPosts: PublicPostsService) {}
 
   @Get(':tag/posts')
   @Public()
   @ApiReq(
     'BLG-08',
     'Posts with a tag',
-    'Published posts with this tag (case-insensitive), newest first: title, author, date, excerpt, tags, like and comment counts. Public. 10 per page.',
+    'Published posts with this tag (case-insensitive), newest first: title, author, date, excerpt, tags, like and comment counts. Public. 10 per page. Posts of deactivated authors are not shown (ACC-12).',
   )
   @ApiParam({ name: 'tag', example: 'cairo' })
   @ApiOkResponse({
@@ -45,6 +45,6 @@ export class TagsController {
     @Param('tag') tag: string,
     @Query() query: ListTagPostsQueryDto,
   ): Promise<Paginated<PublicPostRow>> {
-    return this.posts.listByTag(tag, query);
+    return this.publicPosts.browse(query, tag.trim().toLowerCase());
   }
 }
