@@ -30,6 +30,14 @@ jobs:
         run: npm run lint
       - if: steps.scaffold.outputs.ready == 'true'
         run: npm test -- --runInBand
+      - name: Build backend
+        if: steps.scaffold.outputs.ready == 'true'
+        run: npm run build
+      - name: End-to-end tests
+        if: steps.scaffold.outputs.ready == 'true'
+        # Uses mongodb-memory-server (in-memory replica set for transactions);
+        # serial, since the suites share the in-memory MongoDB.
+        run: npm run test:e2e -- --runInBand
 
   frontend:
     name: frontend
