@@ -4,6 +4,7 @@ import { AdminModule } from '../admin/admin.module';
 import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
+import { FlightBookingPayments } from './flight-booking-payments';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import { FlightBookingQuotesService } from './flight-booking-quotes.service';
 import { FlightBookingViews } from './flight-booking-view';
@@ -42,7 +43,8 @@ import { SharedServices } from './shared-services';
     FlightBookingQuotesService,
     FlightBookingHoldsService,
     FlightBookingExpiryService,
+    FlightBookingPayments,
   ],
-  exports: [MongooseModule],
+  exports: [FlightBookingPayments],
 })
 export class FlightBookingsModule {}

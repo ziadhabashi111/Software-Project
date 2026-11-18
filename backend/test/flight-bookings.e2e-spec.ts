@@ -7,6 +7,7 @@ import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { FlightBookingExpiryService } from '../src/flight-bookings/flight-booking-expiry.service';
+import { FlightBookingPayments } from '../src/flight-bookings/flight-booking-payments';
 import { FlightBookingsModule } from '../src/flight-bookings/flight-bookings.module';
 import {
   FlightBooking,
@@ -545,6 +546,137 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       const doc = await bookings.findById(booking.id).lean();
       expect(doc!.status).toBe('COMPLETED');
       expect(doc!.completedAt).toBeInstanceOf(Date);
+    });
+  });
+  describe('payments API for the payments module (PAY-01, PAY-02, FLT-23)', () => {
+    const payments = () => ctx.moduleRef.get(FlightBookingPayments);
+    const paid = (booking: BookingBody, overrides: object = {}) => ({
+      paymentIntentId: `pi_${booking.id}`,
+      amount: booking.price.total,
+      currency: 'USD',
+      ...overrides,
+    });
+
+    it('confirms a paid hold, books the seats and creates a reference', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight, [adult(), child()]);
+      const result = await payments().confirmPaid(booking.id, paid(booking));
+      expect(result.outcome).toBe('confirmed');
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('CONFIRMED');
+      expect(doc!.reference).toMatch(/^FB-[A-HJ-NP-Z2-9]{8}$/);
+      expect(doc!.payment).toMatchObject({
+        paymentIntentId: `pi_${booking.id}`,
+        amount: booking.price.total,
+        status: 'SUCCEEDED',
+      });
+      const cabin = await cabinOf(flight);
+      expect(cabin.heldSeats).toBe(0);
+      expect(cabin.bookedSeats).toBe(2);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        user.id,
+        'FLIGHT_BOOKING_CONFIRMED',
+        expect.stringContaining(doc!.reference!),
+      );
+    });
+
+    it('is idempotent for the same payment', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await payments().confirmPaid(booking.id, paid(booking));
+      const again = await payments().confirmPaid(booking.id, paid(booking));
+      expect(again.outcome).toBe('already_confirmed');
+      expect((await cabinOf(flight)).bookedSeats).toBe(1);
+    });
+
+    it('rejects a payment that arrives after the hold expired', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 1_000) } },
+      );
+      const result = await payments().confirmPaid(booking.id, paid(booking));
+      expect(result).toEqual({ outcome: 'rejected', reason: 'HOLD_EXPIRED' });
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'EXPIRED',
+      );
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('rejects a payment with the wrong amount', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const result = await payments().confirmPaid(
+        booking.id,
+        paid(booking, { amount: booking.price.total - 1 }),
+      );
+      expect(result).toEqual({
+        outcome: 'rejected',
+        reason: 'AMOUNT_MISMATCH',
+      });
+      expect((await cabinOf(flight)).heldSeats).toBe(1);
+    });
+
+    it('rejects a payment once the flight has departed', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await flights.updateOne(
+        { _id: flight._id },
+        { $set: { departureUtc: new Date(Date.now() - 60_000) } },
+      );
+      const result = await payments().confirmPaid(booking.id, paid(booking));
+      expect(result).toEqual({
+        outcome: 'rejected',
+        reason: 'FLIGHT_NOT_BOOKABLE',
+      });
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('gives the amount to charge only to the booking owner', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      const payable = await payments().forPayment(booking.id, user.id);
+      expect(payable).toMatchObject({
+        bookingId: booking.id,
+        amount: booking.price.total,
+        currency: 'USD',
+        paymentIntentId: null,
+      });
+      const stranger = await loggedInAs();
+      await expect(
+        payments().forPayment(booking.id, stranger.id),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('records the PaymentIntent and a failed attempt without ending the hold', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      await payments().attachPaymentIntent(booking.id, 'pi_retry');
+      await payments().recordPaymentFailure(booking.id);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('PENDING_PAYMENT');
+      expect(doc!.payment).toMatchObject({
+        paymentIntentId: 'pi_retry',
+        status: 'FAILED',
+      });
+      expect(
+        (await payments().forPayment(booking.id, user.id)).paymentIntentId,
+      ).toBe('pi_retry');
+    });
+
+    it('returns the policies the user accepts (PAY-02)', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      expect(await payments().policiesFor(booking.id, user.id)).toEqual({
+        cancellationTiers: [
+          { daysBefore: 30, refundPercent: 100 },
+          { daysBefore: 7, refundPercent: 50 },
+        ],
+        baggagePolicy: { extraBagPrice: 30, maxExtraBags: 2 },
+        freeBags: [1],
+        maxBagWeightKg: [23],
+      });
     });
   });
 });
