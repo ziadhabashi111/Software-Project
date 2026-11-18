@@ -569,6 +569,19 @@ Claude added a Like schema with a unique { post, user } index and POST/DELETE /a
 
 ================================================
 Date: 2026-11-18
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-08, GEN-12, PAY-01, PAY-03, HTL-17, HTL-21, ITN-10, ITN-14, ITN-18, FLT-05, FLT-06, ACC-15
+Prompt:
+Review all recent open PRs and merges, then fix all the findings and put the fixes on develop.
+
+How the output was used:
+Claude reviewed open PRs #111, #112, #114, #115 and the merges since 17/11 (flights, hotel bookings, itineraries, reference data, CI). It checked the reference CSVs against the official "Mock Data" sheet linked in the PDF (identical, so the GEN-12 seed is correct; only the outdated note in PROJECT_BREAKDOWN.md was fixed here). Following the branch rules, it opened fix PRs instead of committing to develop: #119 hotel bookings (no second refund on webhook replay after cancellation, failed refunds marked Failed, refund idempotency key), #122 itineraries (exchange-rate outage backoff, activity costs keep their currency, 400 for unsupported summary currency), and, against the owners' open branches, #120 for #112 (notifications provided to flights and admin) and #123 for #114 (uploads record their owner). Each fix has tests; lint, build, unit and e2e tests were run, and I read every diff before pushing.
+Follow-up ("finish all what's open"): closed my duplicate sync PR #117 in favour of #116; brought #112 up to date and added a stable notification sort (createdAt then _id) on it; updated #120 for the moved GEN-01 log entry; opened #127 (flight-bookings failed refunds marked Failed, like hotels), #128 (HTL-22 moderator reservations list for their own hotel; HTL-06/08 left out because they need the Room schema), #129 into #125 (Stripe payments: duplicate events processed once, no double refund, statuses can't go backwards, parallel create race), and ported the upload ownership fix onto develop for the blog module after #114 merged without it.
+================================================
+
+================================================
+Date: 2026-11-18
 Student: Habashi
 Tool: Claude Code
 Related Requirement: tooling (branch hygiene)
