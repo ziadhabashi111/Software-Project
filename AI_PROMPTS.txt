@@ -481,3 +481,15 @@ I am Ahmed Ismail. Read the README; the workflow is: create a branch for the iss
 How the output was used:
 Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: tooling (branch hygiene)
+Prompt:
+main was ahead of develop. Find out who merged what to main and bring develop up to date so develop is the one ahead.
+
+How the output was used:
+Found 4 commits only on main: the #88 release merge (merged by Yahia in the GitHub UI), a direct README edit by Ziad (no PR), and the merges of docs PRs #66 and #68 which targeted main. Merged main into develop on a branch (no conflicts), so develop now contains everything main has. Reviewed the diff.
+================================================
