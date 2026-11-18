@@ -79,11 +79,12 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `STRIPE_SECRET_KEY` | `backend/.env` | Shared Stripe **test** key (`sk_test_...`) from the team leader |
 | `STRIPE_WEBHOOK_SECRET` | `backend/.env` | Per developer, generated on your own machine (it cannot be shared). Install the Stripe CLI (`winget install Stripe.StripeCli`), run `stripe login`, then `stripe listen --forward-to localhost:3000/api/payments/webhook` and copy the `whsec_...` it prints. Only needed for payment work. |
 | `FXRATES_API_KEY` | `backend/.env` | Shared FXRatesAPI key from the team leader (backend only, never in the frontend) |
+| `UPLOAD_DIR`, `UPLOAD_PUBLIC_URL` | `backend/.env` | Optional (GEN-08). Defaults `uploads` and `http://localhost:3000/uploads`. At deployment, point `UPLOAD_DIR` at a persistent disk and set the public URL. See [docs/api/uploads.md](docs/api/uploads.md) |
 | `FLIGHT_HOLD_MINUTES` | `backend/.env` | `10` (flight and hotel holds both last 10 minutes: FLT-22, HTL-18) |
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |
 
-The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned additions: a platform-currency variable (PAY-04, Ziad) and, if the team wants a separate value, a hotel hold duration.
+The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned addition: a hotel hold duration, if the team wants a separate value. The platform currency (PAY-04) is not a variable: it is the constant PLATFORM_CURRENCY = 'USD' in backend/src/payments/platform-currency.ts, so it is identical on every machine.
 
 ## Seeding (GEN-12)
 

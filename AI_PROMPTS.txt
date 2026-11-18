@@ -472,6 +472,19 @@ Reviewed the merged flights, payments-interface, hotel-bookings and admin code f
 
 ================================================
 Date: 2026-11-18
+Student: Ziad Mohannad
+Tool: Claude Code
+Related Requirement: PAY-01, PAY-02
+Prompt:
+Do Issue 25 and Issue 26 (Stripe payments and webhook, policy view and acceptance): 
+POST /api/payments, retry, GET, and the verified webhook; only the webhook confirms a booking; handle failed and expired payments; use the flight and hotel payment hooks already in the repo.
+How the output was used:
+Claude wrote backend/src/payments/: Payment and PolicyAcceptance schemas, the Stripe provider, a gateway that hides the flight/hotel difference,
+PaymentsService (PaymentIntent create/reuse/retry, signature-verified webhook, refund of payments a booking cannot accept, cancelPendingPayment on hold expiry), the controller with Swagger, 
+the policies view and accept-policies endpoints, 19 unit tests, rawBody in main.ts and the stripe dependency. Ran lint and the full backend test suite.
+================================================
+
+================================================
 Student: Youssef Wahby
 Tool: Claude Code
 Related Requirement: FLT-05, FLT-06, FLT-03, FLT-29, FLT-30, GEN-06, ACC-15
@@ -516,4 +529,119 @@ Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete
 
 How the output was used:
 Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
+Prompt:
+Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
+
+How the output was used:
+Claude built backend/src/uploads/. The limits are in one file (JPG/PNG detected from the file bytes, 5 MB each, 5 per post/activity/hotel, 1 airline logo). UploadsService validates every file before writing anything, stores files under random names in UPLOAD_DIR, returns URLs from UPLOAD_PUBLIC_URL, and has a path-safe remove and isUploadedUrl. It added an @ImageUpload() decorator that keeps files in memory and turns Multer errors into clear field errors, an authenticated POST /api/uploads/images for the airline-logo flow, and read-only static serving at /uploads. It also wrote unit and e2e tests, a usage note in docs/api/uploads.md, and the .env.example and README variables. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-03, BLG-04, BLG-08, BLG-10 (GEN-08)
+Prompt:
+Yes, start 46 (blog posts, drafts, tags, images).
+
+How the output was used:
+Claude built the author side of the blog on the Post schema from #118 and the upload helper from #114. It added POST /api/posts (title and body required, draft by default, up to 5 normalised tags of 30 chars, image URLs only from the upload helper), GET /api/posts/mine (drafts included, counts, status filter), GET /api/posts/mine/:id, and author-only PATCH and DELETE (403 for others' published posts, 404 for drafts; delete removes comments and image files). It also added POST/DELETE /api/posts/:id/images with an atomic 5-image limit and the public GET /api/tags/:tag/posts. It wrote 11 e2e tests, including parallel uploads. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-05, BLG-06, BLG-07 (GEN-10, ACC-12)
+Prompt:
+Yes, start 47 (comments and likes).
+
+How the output was used:
+Claude added a Like schema with a unique { post, user } index and POST/DELETE /api/posts/:id/like (409 ALREADY_LIKED; likeCount changes only when a like is really added or removed). It added POST /api/posts/:id/comments (1-500 chars, published and visible posts only), a public GET /api/posts/:id/comments (oldest first; hidden comments only for their author and admins; "Deleted user" for deactivated accounts), and author-only PATCH/DELETE /api/comments/:id (403/404, editedAt). commentCount now counts visible comments only: admin hide/unhide adjust it once, and deleting a post also deletes its likes. It wrote 11 e2e tests, including parallel likes. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-08, GEN-12, PAY-01, PAY-03, HTL-17, HTL-21, ITN-10, ITN-14, ITN-18, FLT-05, FLT-06, ACC-15
+Prompt:
+Review all recent open PRs and merges, then fix all the findings and put the fixes on develop.
+
+How the output was used:
+Claude reviewed open PRs #111, #112, #114, #115 and the merges since 17/11 (flights, hotel bookings, itineraries, reference data, CI). It checked the reference CSVs against the official "Mock Data" sheet linked in the PDF (identical, so the GEN-12 seed is correct; only the outdated note in PROJECT_BREAKDOWN.md was fixed here). Following the branch rules, it opened fix PRs instead of committing to develop: #119 hotel bookings (no second refund on webhook replay after cancellation, failed refunds marked Failed, refund idempotency key), #122 itineraries (exchange-rate outage backoff, activity costs keep their currency, 400 for unsupported summary currency), and, against the owners' open branches, #120 for #112 (notifications provided to flights and admin) and #123 for #114 (uploads record their owner). Each fix has tests; lint, build, unit and e2e tests were run, and I read every diff before pushing.
+Follow-up ("finish all what's open"): closed my duplicate sync PR #117 in favour of #116; brought #112 up to date and added a stable notification sort (createdAt then _id) on it; updated #120 for the moved GEN-01 log entry; opened #127 (flight-bookings failed refunds marked Failed, like hotels), #128 (HTL-22 moderator reservations list for their own hotel; HTL-06/08 left out because they need the Room schema), #129 into #125 (Stripe payments: duplicate events processed once, no double refund, statuses can't go backwards, parallel create race), and ported the upload ownership fix onto develop for the blog module after #114 merged without it.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: tooling (branch hygiene)
+Prompt:
+main was ahead of develop. Find out who merged what to main and bring develop up to date so develop is the one ahead.
+
+How the output was used:
+Found 4 commits only on main: the #88 release merge (merged by Yahia in the GitHub UI), a direct README edit by Ziad (no PR), and the merges of docs PRs #66 and #68 which targeted main. Merged main into develop on a branch (no conflicts), so develop now contains everything main has. Reviewed the diff.
+================================================
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+Guide me step by step through issue 28 (in-app notifications): the Notification schema, the module,
+the service (notify, list, unread count, mark read, mark all read), and the controller with its query
+DTO, plus unit tests. Explain new NestJS and TypeScript terms (decorators, modules, dependency
+injection, ObjectId, index, DTO) as we go.
+
+How the output was used:
+Wrote the Notification schema and registered it in the module myself following the guidance (ObjectId
+userId with ref and index, read defaulting to false). The service, controller, query DTO and unit
+tests were provided by Claude when I asked for the code, and I reviewed them as well. markRead matches on both the notification id
+and the owner so a user cannot mark someone else's notification (404). Ran lint, tsc and the unit tests.
+================================================
+
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-05
+Prompt:
+Review Ziad's PR #112 (in-app notifications) and fix the gaps before merging.
+
+How the output was used:
+Reviewed the module (user-scoped queries, ownership inside the update filter, 404 for others) and found it correct. Fixed two gaps on his branch: the list used its own DTO with page size 20 instead of the shared GEN-05 pagination (10 by default), and the API returned raw Mongo documents. Added a NotificationView, switched to PaginationQueryDto/toPage, removed the now-unused DTO, and added an e2e spec (401 without login, per-user isolation, page size 10, no database internals, cross-user mark-read returns 404). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-12, ACC-09
+Prompt:
+What was the problem in GEN-12? Yes, fix it.
+
+How the output was used:
+Claude explained that ProfileService (ACC-09) asks for an optional CURRENCY_CATALOG hook that my GEN-12 module never provided. Without it, any three-letter code was accepted as a preferred currency. ReferenceDataModule now provides CURRENCY_CATALOG, backed by ReferenceDataService.isCurrency, and is @Global, which avoids a circular import with UsersModule. Claude added an e2e test (XYZ rejected, EUR accepted). I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+Date: 2026-11-18
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-08, BLG-01, BLG-10
+Prompt:
+CI for Yahia's upload-ownership PR #123 failed on lint after develop was merged in. Find out why and fix it.
+
+How the output was used:
+The lint error (no-misused-promises) exposed a real integration bug: #123 made the upload ownership check async and added an owner argument, but Ahmed's already-merged blog code still called the old synchronous isUploadedUrl(url), so the blog's image-URL check would have been silently bypassed (and saveImages/remove got the wrong arguments). Updated every blog call site to the new contract (assertOwnedUpload, remove(url, authorId), saveImages(files, 'post', authorId, existing)) and added an e2e case that another author cannot attach someone else's upload. Reviewed the diff.
 ================================================

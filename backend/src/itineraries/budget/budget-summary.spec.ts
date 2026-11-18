@@ -1,5 +1,10 @@
 import { BudgetCategory } from './budget-categories';
-import { foreignCurrencies, summarize } from './budget-summary';
+import { PLATFORM_CURRENCY } from '../../payments/platform-currency';
+import {
+  activityCurrency,
+  foreignCurrencies,
+  summarize,
+} from './budget-summary';
 import type { SummaryInput } from './budget-summary';
 
 const days = [
@@ -44,7 +49,7 @@ describe('budget summary (ITN-14)', () => {
   it('adds entries, activity costs under Activities and intercity transport', () => {
     expect(result.byDay[0]).toMatchObject({
       food: 130, // 30 + 90 EUR (= 100 USD)
-      activities: 30, // 20 USD + 10 without a currency (taken as the target)
+      activities: 30, // 20 USD + 10 legacy cost without a currency (USD)
       total: 160,
     });
     expect(result.byDay[1]).toMatchObject({
@@ -77,6 +82,21 @@ describe('budget summary (ITN-14)', () => {
       [1, '2027-03-01', 'cairo'],
       [2, '2027-03-02', 'luxor'],
     ]);
+  });
+
+  it('converts a legacy activity cost with no currency from the platform currency, not the display currency', () => {
+    // 1 USD = 50 EGP: shown in EGP, the legacy 10 must become 500, not stay 10.
+    const usdToEgp = (amount: number, from: string): number =>
+      from === 'EGP' ? amount : from === 'USD' ? amount * 50 : NaN;
+    const legacy: SummaryInput = {
+      days: [{ ...days[0], activities: [{ cost: 10 }, { cost: 0 }] }],
+      entries: [],
+      transportCosts: [],
+    };
+    expect(summarize(legacy, usdToEgp).totals.activities).toBe(500);
+    expect([...foreignCurrencies(legacy, 'EGP')]).toEqual(['USD']);
+    expect(activityCurrency({})).toBe(PLATFORM_CURRENCY);
+    expect(activityCurrency({ currency: 'EUR' })).toBe('EUR');
   });
 
   it('is all zeros for an itinerary with no budget', () => {

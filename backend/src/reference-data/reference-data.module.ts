@@ -1,7 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { FlightsModule } from '../flights/flights.module';
 import { ItinerariesModule } from '../itineraries/itineraries.module';
+import {
+  CURRENCY_CATALOG,
+  type CurrencyCatalog,
+} from '../users/currency-catalog';
 import { ReferenceDataController } from './reference-data.controller';
 import { ReferenceDataSeeder } from './reference-data.seeder';
 import { ReferenceDataService } from './reference-data.service';
@@ -19,7 +23,12 @@ import { Currency, CurrencySchema } from './schemas/currency.schema';
  * country, city and currency lists. Airports keep Youssef's schema and
  * `GET /api/airports` (FlightsModule); this module only fills them.
  * Inject `ReferenceDataService` to check `isCountry`, `isCity`, `isCurrency`.
+ *
+ * Global so the users module's `CURRENCY_CATALOG` hook (ACC-09 preferred
+ * currency) resolves without UsersModule importing this module, which would
+ * be circular (reference-data -> itineraries -> users).
  */
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -32,7 +41,17 @@ import { Currency, CurrencySchema } from './schemas/currency.schema';
     ItinerariesModule,
   ],
   controllers: [ReferenceDataController],
-  providers: [ReferenceDataService, ReferenceDataSeeder],
-  exports: [ReferenceDataService, MongooseModule],
+  providers: [
+    ReferenceDataService,
+    ReferenceDataSeeder,
+    {
+      provide: CURRENCY_CATALOG,
+      inject: [ReferenceDataService],
+      useFactory: (referenceData: ReferenceDataService): CurrencyCatalog => ({
+        isSupported: (code) => referenceData.isCurrency(code),
+      }),
+    },
+  ],
+  exports: [ReferenceDataService, MongooseModule, CURRENCY_CATALOG],
 })
 export class ReferenceDataModule {}

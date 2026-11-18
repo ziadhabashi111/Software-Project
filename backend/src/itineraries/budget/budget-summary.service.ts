@@ -1,10 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { Role } from '../../auth/auth.types';
 import type { AuthUser } from '../../auth/auth.types';
+import { fieldError } from '../../common/validation/validation-errors';
 import { PLATFORM_CURRENCY } from '../../payments/platform-currency';
+import { CURRENCY_CATALOG } from '../../users/currency-catalog';
+import type { CurrencyCatalog } from '../../users/currency-catalog';
 import { UsersService } from '../../users/users.service';
 import { addDays, formatDate } from '../itinerary-dates';
 import { ItineraryRepository } from '../itinerary.repository';
@@ -39,6 +42,9 @@ export class BudgetSummaryService {
     private readonly itineraries: ItineraryRepository,
     private readonly fx: FxService,
     private readonly users: UsersService,
+    @Optional()
+    @Inject(CURRENCY_CATALOG)
+    private readonly currencies?: CurrencyCatalog,
   ) {}
 
   async summary(
@@ -47,7 +53,13 @@ export class BudgetSummaryService {
     currency?: string,
   ): Promise<BudgetSummaryView> {
     const itinerary = await this.itineraries.loadOwned(itineraryId, user);
-    if (currency) assertCurrencyCode(currency);
+    if (currency) {
+      assertCurrencyCode(currency);
+      // An unsupported code is a bad request (400), not a missing rate (422).
+      if (this.currencies && !(await this.currencies.isSupported(currency))) {
+        throw fieldError('currency', `${currency} is not a supported currency`);
+      }
+    }
     const target = currency ?? (await this.preferredCurrency(user.id));
     return this.compute(itinerary, target);
   }

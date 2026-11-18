@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from '../../payments/platform-currency';
 import { BudgetCategory } from './budget-categories';
 import { round2 } from './fx/currency-math';
 
@@ -56,6 +57,15 @@ const emptyAmounts = (): CategoryAmounts => ({
   [INTERCITY_TRANSPORT]: 0,
 });
 
+/**
+ * The currency of an activity cost. New costs always carry one; a cost stored
+ * before that rule has none and is taken to be in the platform currency, never
+ * in the viewer's display currency (which would change its value per viewer).
+ */
+export const activityCurrency = (activity: {
+  currency?: string | null;
+}): string => activity.currency || PLATFORM_CURRENCY;
+
 /** The currencies that must be converted into `target` (empty means no rates are needed). */
 export function foreignCurrencies(
   input: SummaryInput,
@@ -69,7 +79,7 @@ export function foreignCurrencies(
   input.transportCosts.forEach((cost) => add(cost.currency));
   input.days.forEach((day) =>
     day.activities.forEach((activity) => {
-      if (activity.cost) add(activity.currency);
+      if (activity.cost) add(activityCurrency(activity));
     }),
   );
   return found;
@@ -79,7 +89,8 @@ export function foreignCurrencies(
  * ITN-14: the total budget by category and by day. Totals include budget
  * entries, activity costs (under Activities) and intercity transport entries.
  * Everything is converted into the target currency with `convert` (ITN-18);
- * an activity cost with no currency is taken to be in the target currency.
+ * a legacy activity cost with no currency is taken to be in the platform
+ * currency (see `activityCurrency`).
  * Entries of a day that no longer exists are ignored. Booking prices are not
  * part of the budget and are never converted (PAY-04).
  */
@@ -104,10 +115,11 @@ export function summarize(
   for (const day of input.days) {
     for (const activity of day.activities) {
       if (!activity.cost) continue;
-      const value = activity.currency
-        ? convert(activity.cost, activity.currency)
-        : activity.cost;
-      add(day.id, BudgetCategory.ACTIVITIES, value);
+      add(
+        day.id,
+        BudgetCategory.ACTIVITIES,
+        convert(activity.cost, activityCurrency(activity)),
+      );
     }
   }
 
