@@ -33,6 +33,13 @@ export interface FlightBookingLink {
   ): Promise<{ cancelled: number; notifiedUserIds: string[] }>;
 
   /**
+   * ACC-15 (optional): users with a Confirmed booking on a flight of this
+   * airline that has not departed yet. Asked when an admin deactivates the
+   * airline, so they can be told; their bookings stay valid.
+   */
+  getConfirmedUserIdsForAirline?(airlineId: string): Promise<string[]>;
+
+  /**
    * FLT-29: Confirmed and Cancelled bookings of the flight, newest first.
    * Without `page` returns all of them (CSV export).
    */
