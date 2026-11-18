@@ -321,11 +321,12 @@ injection, ObjectId, index, DTO) as we go.
 How the output was used:
 Wrote the Notification schema and registered it in the module myself following the guidance (ObjectId
 userId with ref and index, read defaulting to false). The service, controller, query DTO and unit
-as well. markRead matches on both the notification id 
+tests were provided by Claude when I asked for the code, and I reviewed them as well. markRead matches on both the notification id
 and the owner so a user cannot mark someone else's notification (404). Ran lint, tsc and the unit tests.
 ================================================
 
 ================================================
+Date: 2026-11-18
 Student: Amina
 Tool: Claude (Claude Code)
 Related Requirement: HTL-21, HTL-10, PAY-03 (Issue 40)
