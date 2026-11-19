@@ -1,4 +1,9 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
@@ -53,15 +58,32 @@ export class BudgetSummaryService {
     currency?: string,
   ): Promise<BudgetSummaryView> {
     const itinerary = await this.itineraries.loadOwned(itineraryId, user);
-    if (currency) {
-      assertCurrencyCode(currency);
-      // An unsupported code is a bad request (400), not a missing rate (422).
-      if (this.currencies && !(await this.currencies.isSupported(currency))) {
-        throw fieldError('currency', `${currency} is not a supported currency`);
-      }
-    }
+    if (currency) await this.assertSupportedCurrency(currency);
     const target = currency ?? (await this.preferredCurrency(user.id));
     return this.compute(itinerary, target);
+  }
+
+  /**
+   * ITN-21: the budget of a public itinerary, for any visitor, in `currency`
+   * (the platform currency when omitted). The caller has already checked that
+   * the itinerary is public, so there is no ownership check here.
+   */
+  async publicSummary(
+    itineraryId: string,
+    currency?: string,
+  ): Promise<BudgetSummaryView> {
+    const itinerary = await this.itineraries.findById(itineraryId);
+    if (!itinerary) throw new NotFoundException('Itinerary not found');
+    if (currency) await this.assertSupportedCurrency(currency);
+    return this.compute(itinerary, currency ?? PLATFORM_CURRENCY);
+  }
+
+  /** A well-formed but unsupported code is a bad request (400), not a missing rate (422). */
+  private async assertSupportedCurrency(currency: string): Promise<void> {
+    assertCurrencyCode(currency);
+    if (this.currencies && !(await this.currencies.isSupported(currency))) {
+      throw fieldError('currency', `${currency} is not a supported currency`);
+    }
   }
 
   /**

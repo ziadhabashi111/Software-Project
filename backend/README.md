@@ -171,7 +171,7 @@ Resolving a report and moderating content are audited (`REPORT_RESOLVED`, `CONTE
 - **Posts and comments (Ahmed), reviews (Amina), itineraries (Habashi):** inject `ContentModerators` and `register(ContentType.POST | COMMENT | REVIEW | ITINERARY, handler)`. The handler has `hide(id)` and `delete(id)`, each returning `{ authorId?, title? }` or `null` for an unknown id, and both must be safe to call twice. `hide` sets `isHidden`.
 - **Showing hidden content:** use `canViewContent(content, user)` or `assertContentVisible(content, user)` from `common/security/content-visibility.ts` wherever you read or list content. Hidden content is visible only to its author and to admins (everyone else gets a `404`).
 
-## Itineraries (ITN-01, 03, 05, 07, 08, 09, 10, 20; issue 7)
+## Itineraries (ITN-01, 03, 05, 07, 08, 09, 10, 20, 21, 25; issues 7 and 8)
 
 Regular users only (`403` for admins and moderators). An itinerary belongs to its owner: anyone else gets `404` (ACC-11).
 
@@ -188,15 +188,21 @@ Regular users only (`403` for admins and moderators). An itinerary belongs to it
 | `PATCH /api/itineraries/:id/days/reorder` | `{ dayId, position }` moves one day (1 to the number of days) |
 | `POST /api/itineraries/:id/days/:dayId/activities` | `name`, optional `description`, `time` (`HH:mm`), `cost`, `currency` |
 | `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity |
+| `GET /api/itineraries/public/search` | **open to everyone (ITN-21).** Only public itineraries; `q` (title, or the name/code of a country or city), `country`, `city`, `minDays`, `maxDays`, newest first, 10 per page |
+| `GET /api/itineraries/public/:id` | **open to everyone (ITN-21).** Read-only: author, days, activities, groups and the `budget` in `?currency=` (USD by default). `404` for private, hidden or deactivated-author itineraries |
+| `POST /api/itineraries/:id/clone` | copy a public itinerary (or your own) into a **new private one of yours** (ITN-21): days, activities and budget entries; credits the original author in `clonedFrom`; independent of the original; activity images are not copied |
+| `GET /api/itineraries/:id/hotels` | hotels for a city group of **my** itinerary (ITN-25): `group` (from 1), `guests`, `rooms`; check-in = first day of the group, check-out = the day after its last. `503` until the hotels module registers its search |
 
 A day has no stored number or date: both follow from its position and the start date, so deleting or moving a day can never leave them wrong. `groups` lists consecutive days in the same city with `startDay`, `endDay`, `dayCount`, dates and a `subtotal`. Days and activities are embedded in the itinerary, saved with optimistic concurrency, so parallel requests never push an itinerary past 60 days or lose a day.
 
-Admins can hide or delete any itinerary through `DELETE /api/admin/content/itinerary/:id` (GEN-10). A hidden itinerary (`isHidden: true`) stays visible to its owner and admins. The public search and the public view (issue 8) must leave out hidden itineraries and those of deactivated owners, and may use `canViewContent`.
+Admins can hide or delete any itinerary through `DELETE /api/admin/content/itinerary/:id` (GEN-10). A hidden itinerary (`isHidden: true`) stays visible to its owner and admins. The public search, the public view and the clone leave out hidden itineraries and those of deactivated owners (the owner is checked in the database query, not after the page is cut, so paging stays correct).
 
 **Hooks for the other modules** (import `ItinerariesModule` and register in `onModuleInit`):
 
-- **Countries and cities (Ahmed, GEN-12):** inject `PlaceCatalog` and `register({ isCountry(code), isCity(id) })`. Until then a country only has to look like `EG` and a city like `cairo`.
-- **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
+- **Countries and cities (Ahmed, GEN-12):** inject `PlaceCatalog` and `register({ isCountry(code), isCity(id), matchKeyword? })`. `matchKeyword(keyword)` returns the `countryCodes` and `cityIds` whose code, id or name contains the keyword, so the public search finds "egypt" or "cairo" (already done by `ReferenceDataService`). Until then a country only has to look like `EG` and a city like `cairo`.
+- **Hotel search (Noureldin, HTL-11, ITN-25):** inject `HotelSearchHook` and `register(port)` with `search({ city, checkIn, checkOut, guests, rooms, page, limit })` returning `Paginated<hotel>`. `GET /api/itineraries/:id/hotels` calls it for the dates of the chosen city group, so you do not build anything itinerary-specific; until you register it answers `503`.
+- **Blog author page (Ahmed, BLG-12):** the itinerary module registers itself with the blog's `AuthorItineraries`, so an author's public itineraries need nothing from you.
+- **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. Optional `cloneBudgets(from, to, dayIdMap)` copies the budget onto a clone (ITN-21) and `publicSummary(itineraryId, currency?)` gives the budget of a public itinerary (both done by `BudgetProvider`). An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
 - **Activity images (ITN-12):** `images` is in the schema; the upload and delete endpoints follow once Ahmed's shared upload helper (GEN-08) exists.
 
 ## Platform currency (PAY-04; issue 29)

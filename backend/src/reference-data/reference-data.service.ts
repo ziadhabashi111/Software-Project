@@ -52,7 +52,29 @@ export class ReferenceDataService implements OnModuleInit {
     this.places.register({
       isCountry: (code) => this.isCountry(code),
       isCity: (id) => this.isCity(id),
+      matchKeyword: (keyword) => this.matchKeyword(keyword),
     });
+  }
+
+  /** Countries and cities whose code, id or name contains the keyword (ITN-21 search). */
+  async matchKeyword(
+    keyword: string,
+  ): Promise<{ countryCodes: string[]; cityIds: string[] }> {
+    const pattern = new RegExp(escapeRegex(keyword), 'i');
+    const [countries, cities] = await Promise.all([
+      this.countries
+        .find({ $or: [{ code: pattern }, { name: pattern }] })
+        .select('code')
+        .limit(50),
+      this.cities
+        .find({ $or: [{ cityId: pattern }, { name: pattern }] })
+        .select('cityId')
+        .limit(50),
+    ]);
+    return {
+      countryCodes: countries.map((c) => c.code),
+      cityIds: cities.map((c) => c.cityId),
+    };
   }
 
   async listCountries(

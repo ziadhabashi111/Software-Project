@@ -14,6 +14,7 @@ import type { CurrencyCatalog } from '../../users/currency-catalog';
 import { ItineraryRepository } from '../itinerary.repository';
 import { PlaceCatalog } from '../places';
 import type { ItineraryDocument } from '../schemas/itinerary.schema';
+import { remapToClone } from './budget-clone';
 import { toBudgetEntryView, toTransportCostView } from './budget-view';
 import type {
   BudgetEntryView,
@@ -183,6 +184,24 @@ export class BudgetService {
     await Promise.all([
       this.entries.deleteMany(filter),
       this.transport.deleteMany(filter),
+    ]);
+  }
+
+  /** ITN-21: copies this itinerary's budget entries and transport costs onto its clone. */
+  async cloneInto(
+    fromItineraryId: string,
+    toItineraryId: string,
+    dayIdMap: Record<string, string>,
+  ): Promise<void> {
+    const source = { itineraryId: new Types.ObjectId(fromItineraryId) };
+    const target = new Types.ObjectId(toItineraryId);
+    const [entries, transportCosts] = await Promise.all([
+      this.entries.find(source).lean(),
+      this.transport.find(source).lean(),
+    ]);
+    await Promise.all([
+      this.entries.insertMany(remapToClone(entries, dayIdMap, target)),
+      this.transport.insertMany(remapToClone(transportCosts, dayIdMap, target)),
     ]);
   }
 

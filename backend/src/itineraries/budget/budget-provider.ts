@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ItineraryBudgets } from '../itinerary-budgets';
 import type { ItineraryBudgetProvider } from '../itinerary-budgets';
 import { BudgetSummaryService } from './budget-summary.service';
+import type { BudgetSummaryView } from './budget-summary.service';
 import { BudgetService } from './budget.service';
 
 /**
@@ -34,5 +35,20 @@ export class BudgetProvider implements OnModuleInit, ItineraryBudgetProvider {
 
   removeItinerary(itineraryId: string): Promise<void> {
     return this.budget.removeItinerary(itineraryId);
+  }
+
+  cloneBudgets(
+    fromItineraryId: string,
+    toItineraryId: string,
+    dayIdMap: Record<string, string>,
+  ): Promise<void> {
+    return this.budget.cloneInto(fromItineraryId, toItineraryId, dayIdMap);
+  }
+
+  publicSummary(
+    itineraryId: string,
+    currency?: string,
+  ): Promise<BudgetSummaryView> {
+    return this.summary.publicSummary(itineraryId, currency);
   }
 }
