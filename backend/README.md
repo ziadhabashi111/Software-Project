@@ -207,6 +207,28 @@ Admins can hide or delete any itinerary through `DELETE /api/admin/content/itine
 - **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. Optional `cloneBudgets(from, to, dayIdMap)` copies the budget onto a clone (ITN-21) and `publicSummary(itineraryId, currency?)` gives the budget of a public itinerary (both done by `BudgetProvider`). An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
 - **Activity images (ITN-12):** done with Ahmed's upload helper (GEN-08). The files belong to the traveller who uploaded them, so only the itinerary's owner can add or remove them, and deleting an activity, a day or the whole itinerary (also by an admin) deletes the files. A clone does not copy images: the files belong to the original author.
 
+## Hotels, rooms and availability (HTL-01 to HTL-10; issues 31 to 33)
+
+Done in `src/hotels/`. A hotel has a profile, rooms, and per-room availability and blocked ranges (embedded in the room, both ends included, saved with optimistic concurrency so parallel requests never leave overlapping ranges).
+
+| Endpoint | Notes |
+| --- | --- |
+| `POST /api/hotels` | **admin only (HTL-01).** `name`, `address`, `city` (id from the cities list), `country` (code), `description`, `starClass` (1 to 5), `amenities`. Create its moderator afterwards with `POST /api/admin/moderators` |
+| `GET /api/hotels/:id` | **open to everyone (HTL-02, 09, 10).** Profile, photos, amenities, check-in/out times (default 14:00 / 12:00), `cancellationPolicy` (longest notice first) and `rating`. A deactivated hotel answers `404` except to admins and its own moderator |
+| `PATCH /api/hotels/:id` | the hotel's own moderator only (`403` for any other moderator and for admins) |
+| `PUT /api/hotels/:id/policies` | check-in/out times and/or the whole list of cancellation tiers (HTL-09, 10); same tier rule as flights |
+| `POST` / `GET /api/hotels/:id/rooms` | **HTL-03.** Room `name` is unique within the hotel (`409`), `beds`, `maxOccupancy`, `pricePerNight`, optional `type` |
+| `PATCH` / `DELETE /api/hotels/:id/rooms/:roomId` | edit (the name cannot change), or delete a room nobody ever reserved (`409 ROOM_HAS_RESERVATIONS`) |
+| `PATCH /api/hotels/:id/rooms/:roomId/deactivate` / `reactivate` | deactivating is refused while a room has an upcoming reservation (`409 ROOM_RESERVED`) |
+| `POST /api/hotels/:id/rooms/:roomId/availability` | **HTL-04.** `{ from, to }`, both days included; ranges of one room may not overlap (`400`) and dates must exist (no 30 February) |
+| `PATCH` / `DELETE .../availability/:rangeId` | move or remove a range; refused (`409 AVAILABILITY_IN_USE`) if it would remove a night a reservation holds |
+| `POST .../blocks`, `DELETE .../blocks/:blockId` | **HTL-05.** Block nights (maintenance); refused (`409 ROOM_RESERVED`) over a held night |
+| `GET /api/hotels/:id/availability?from&to` | **HTL-08.** Every room, every night: `Available`, `Booked` (with `reservationId` and the booking `reference`, `null` until paid) or `Blocked`. At most 62 days |
+
+A room can be booked for a stay only if the room and hotel are active, every night lies inside an availability range and no night is blocked (check-out day excluded). `HotelCatalog` is what the booking module and the admin see: it registers with `HotelInventoryRegistry` (so `POST /api/hotel-bookings` stops answering `503`) and `ProviderDirectory` (so a hotel moderator can be linked to a hotel and a hotel can be deactivated; confirmed guests are notified).
+
+**For hotel search (Noureldin):** `GET hotels/:id` matches any single path segment, so `GET hotels/search` must be declared in a controller listed **before** `HotelsController` in `HotelsModule` (see the comment there). Read rooms and availability through `HotelCatalog`/`Room`, and register your search with `HotelSearchHook`.
+
 ## Platform currency (PAY-04; issue 29)
 
 All flight and hotel prices, payments and refunds use one currency: `PLATFORM_CURRENCY` (`'USD'`, a Stripe-supported currency) from `payments/platform-currency.ts`. It is a constant, not an environment variable, so it cannot differ between environments. Import it wherever you store or charge a price; never hard-code a currency code.

@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Role } from '../auth/auth.types';
 import {
   assertCanViewHotelReservations,
+  assertOwnHotel,
   isOwnHotelModerator,
 } from './hotel-access';
 
@@ -41,5 +42,27 @@ describe('hotel reservations access (HTL-22, ACC-11)', () => {
 
   it('does not treat a guest as the hotel moderator', () => {
     expect(isOwnHotelModerator(undefined, 'h1')).toBe(false);
+  });
+});
+
+describe('managing a hotel (HTL-01, 03..06: a moderator manages only their own hotel)', () => {
+  it('lets the moderator of that hotel manage it', () => {
+    expect(() => assertOwnHotel(moderator, 'h1')).not.toThrow();
+  });
+
+  it('blocks everyone else, admins included: the catalogue is the moderator’s', () => {
+    expect(() => assertOwnHotel(moderator, 'h2')).toThrow(ForbiddenException);
+    expect(() => assertOwnHotel({ role: Role.ADMIN }, 'h1')).toThrow(
+      ForbiddenException,
+    );
+    expect(() => assertOwnHotel({ role: Role.USER }, 'h1')).toThrow(
+      ForbiddenException,
+    );
+    expect(() =>
+      assertOwnHotel({ role: Role.AIRLINE_MODERATOR, providerId: 'h1' }, 'h1'),
+    ).toThrow(ForbiddenException);
+    expect(() => assertOwnHotel({ role: Role.HOTEL_MODERATOR }, 'h1')).toThrow(
+      ForbiddenException,
+    );
   });
 });

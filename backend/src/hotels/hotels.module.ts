@@ -1,20 +1,53 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { AdminModule } from '../admin/admin.module';
 import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
+import { ItinerariesModule } from '../itineraries/itineraries.module';
+import { HotelCatalog } from './hotel-catalog';
+import { HotelsController } from './hotels.controller';
+import { HotelsService } from './hotels.service';
+import { RoomsController } from './rooms.controller';
+import { RoomsService } from './rooms.service';
+import { Hotel, HotelSchema } from './schemas/hotel.schema';
+import { Room, RoomSchema } from './schemas/room.schema';
 import { ModeratorReservationsController } from './search/moderator-reservations.controller';
 import { ModeratorReservationsService } from './search/moderator-reservations.service';
 
 /**
- * Owner: Abdelrahman (hotels, rooms, availability, policies)
- * Requirements: HTL-01..12, HTL-15, HTL-22
- * Add controllers, services, schemas/ and dto/ in this folder.
+ * Hotels, rooms, availability and policies (HTL-01 to 10; the moderator's
+ * reservation list is HTL-22).
  *
- * `search/` is the read side (Noureldin: HTL-11, 12, 15, 22). The moderator
- * reservation list (HTL-22) reads reservations through the hotel-bookings
- * module's exported `HotelReservationQueries`, never its collections.
+ * `HotelCatalog` registers the catalogue with the booking module (so hotels
+ * can be reserved) and with the admin (so a hotel can be deactivated and a
+ * moderator linked to it). `search/` is the read side (HTL-11, 12, 15, 22).
+ * Reservations are read through the booking module's `HotelReservationQueries`,
+ * never its collections.
+ *
+ * Controller order matters: `HotelsController` has `GET hotels/:id`, which
+ * matches any single segment, so a route like `GET hotels/search` must come
+ * from a controller listed **before** it.
  */
 @Module({
-  imports: [HotelBookingsModule],
-  controllers: [ModeratorReservationsController],
-  providers: [ModeratorReservationsService],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Hotel.name, schema: HotelSchema },
+      { name: Room.name, schema: RoomSchema },
+    ]),
+    AdminModule,
+    HotelBookingsModule,
+    ItinerariesModule,
+  ],
+  controllers: [
+    ModeratorReservationsController,
+    RoomsController,
+    HotelsController,
+  ],
+  providers: [
+    HotelCatalog,
+    HotelsService,
+    RoomsService,
+    ModeratorReservationsService,
+  ],
+  exports: [MongooseModule, HotelCatalog],
 })
 export class HotelsModule {}

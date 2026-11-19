@@ -681,3 +681,15 @@ Finish issue 7: the activity images (POST /api/activities/:id/images, DELETE ...
 How the output was used:
 Wrote the specs first, then ActivityImagesService on top of the upload helper and the repository's optimistic-concurrency change(): ownership is checked before anything is stored (non-owners get 404 and no file is written), the 5-image cap is re-checked on the latest state so parallel uploads cannot exceed it and the stored files are removed if the attach fails, and removing an image deletes its file. Deleting an activity, a day, an itinerary (also an admin delete) now deletes the image files so nothing is orphaned. Added an e2e spec (limits, fake files, ownership, cleanup in every delete path, parallel uploads) and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-01, HTL-02, HTL-03, HTL-04, HTL-05, HTL-06, HTL-08, HTL-09, HTL-10 (issues 31, 32, 33)
+Prompt:
+Abdelrahman has pushed nothing and Milestone 1 is due today: implement the hotel catalogue (hotel profile, rooms, availability, blocked dates, check-in/out times, cancellation tiers) so hotel booking and the admin provider directory work.
+
+How the output was used:
+Built test-first as small pure pieces plus services: date-range rules (real calendar dates, overlap, covers, nights removed), room night status (Available/Booked/Blocked), HotelsService (admin creates, own moderator edits, policies reuse the flight tier rules), RoomsService (unique room name, availability/blocks with optimistic-concurrency retries, refusals that protect existing reservations) and HotelCatalog, which registers with the booking inventory and the admin provider directory. Reservations are read through the booking module's queries, never its collections. Added an e2e spec (profile, policies, admin link, rooms, availability, parallel ranges, booking through the catalogue, reservation protection, room status view) and README rows. Reviewed the diff.
+================================================
