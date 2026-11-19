@@ -88,6 +88,7 @@ function setup() {
       return Promise.resolve({});
     }),
   };
+  const refunds = { onStripeRefund: jest.fn().mockResolvedValue(undefined) };
   const service = new PaymentsService(
     stripe as unknown as Stripe,
     config,
@@ -95,6 +96,7 @@ function setup() {
     gateway as unknown as BookingPaymentGateway,
     policies as unknown as PolicyAcceptanceService,
     processedEvents as never,
+    refunds as never,
   );
   return {
     service,
@@ -104,6 +106,7 @@ function setup() {
     policies,
     processedEvents,
     paymentDoc,
+    refunds,
   };
 }
 

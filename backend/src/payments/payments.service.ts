@@ -13,8 +13,10 @@ import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { BookingPaymentGateway } from './booking-payment-gateway';
 import type { PaymentService } from './payment.service.interface';
+import { toMinorUnits } from './money';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import type { BookingType } from './refund.service.interface';
+import { RefundsService } from './refunds.service';
 import { Payment, PaymentDocument } from './schemas/payment.schema';
 import {
   ProcessedStripeEvent,
@@ -27,6 +29,8 @@ const HANDLED_EVENTS = new Set([
   'payment_intent.succeeded',
   'payment_intent.payment_failed',
   'payment_intent.canceled',
+  'refund.updated',
+  'refund.failed',
 ]);
 
 /** Final payment states: only succeeded -> refunded may leave one of them. */
@@ -51,10 +55,7 @@ const PAYABLE_STATES = new Set([
   'requires_action',
 ]);
 
-/** Stripe wants the smallest currency unit (cents). */
-export function toMinorUnits(amount: number): number {
-  return Math.round(amount * 100);
-}
+export { toMinorUnits };
 
 /**
  * PAY-01: Stripe PaymentIntents. Card data goes from the browser to Stripe
@@ -73,6 +74,7 @@ export class PaymentsService implements PaymentService {
     private readonly policies: PolicyAcceptanceService,
     @InjectModel(ProcessedStripeEvent.name)
     private readonly processedEvents: Model<ProcessedStripeEventDocument>,
+    private readonly refunds: RefundsService,
   ) {}
 
   /** POST /payments: starts (or reuses) the PaymentIntent of the user's own hold. */
@@ -237,7 +239,7 @@ export class PaymentsService implements PaymentService {
     }
 
     if (!HANDLED_EVENTS.has(event.type)) {
-      return { received: true }; // other events are not needed for PAY-01
+      return { received: true }; // other events are not needed for PAY-01/PAY-03
     }
     // Atomic claim (unique eventId): a redelivered or concurrent duplicate of
     // this event is acknowledged with 2xx and not processed again.
@@ -254,6 +256,10 @@ export class PaymentsService implements PaymentService {
           break;
         case 'payment_intent.canceled':
           await this.setStatus(event.data.object, 'canceled');
+          break;
+        case 'refund.updated':
+        case 'refund.failed':
+          await this.refunds.onStripeRefund(event.data.object);
           break;
         default:
           break;

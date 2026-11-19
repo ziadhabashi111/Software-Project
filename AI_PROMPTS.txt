@@ -681,3 +681,15 @@ Finish issue 7: the activity images (POST /api/activities/:id/images, DELETE ...
 How the output was used:
 Wrote the specs first, then ActivityImagesService on top of the upload helper and the repository's optimistic-concurrency change(): ownership is checked before anything is stored (non-owners get 404 and no file is written), the 5-image cap is re-checked on the latest state so parallel uploads cannot exceed it and the stored files are removed if the attach fails, and removing an image deletes its file. Deleting an activity, a day, an itinerary (also an admin delete) now deletes the image files so nothing is orphaned. Added an e2e spec (limits, fake files, ownership, cleanup in every delete path, parallel uploads) and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-03 (issue 27)
+Prompt:
+Write the refunds for Issue 27: RefundService preview and issue through the Stripe Refunds API, refund status updated by webhook, GET /api/refunds/:id and the refund notification.
+
+How the output was used:
+RefundsService (preview, issue, refund webhook), a Refund schema, gateway methods, GET /api/refunds/:id and 20 unit tests. The tier rule is reused from refundPercentFor. Applied as a patch and checked with lint and npm test.
+================================================
