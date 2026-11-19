@@ -417,8 +417,10 @@ describe('Public itineraries, cloning and hotels (ITN-21, ITN-25, BLG-12; real M
         .send({ city: 'giza' })
         .expect(201);
       await author.client
-        .delete(`/api/itineraries/${original.id}/days/${original.days[0].id}`)
-        .expect(204);
+        .delete(
+          `/api/itineraries/${original.id}/days/${original.days[0].id}?confirm=true`,
+        )
+        .expect(200);
 
       const originalNow = (
         await author.client.get(`/api/itineraries/${original.id}`).expect(200)
