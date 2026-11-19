@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { BudgetSummaryView } from './budget/budget-summary.service';
 
 /**
  * Implemented by the budget module (Youssef: budget entries, transport costs
@@ -19,6 +20,24 @@ export interface ItineraryBudgetProvider {
   removeDay(itineraryId: string, dayId: string): Promise<void>;
   /** The itinerary was deleted: remove everything that belongs to it. */
   removeItinerary(itineraryId: string): Promise<void>;
+  /**
+   * ITN-21: an itinerary was cloned. Copy its budget entries and transport
+   * costs to the clone; `dayIdMap` says which new day each old day became.
+   */
+  cloneBudgets?(
+    fromItineraryId: string,
+    toItineraryId: string,
+    dayIdMap: Record<string, string>,
+  ): Promise<void>;
+  /**
+   * ITN-21: the budget summary shown on a public itinerary, in `currency`
+   * (the platform currency when omitted). No ownership check: the itinerary
+   * module has already decided that the itinerary is public.
+   */
+  publicSummary?(
+    itineraryId: string,
+    currency?: string,
+  ): Promise<BudgetSummaryView>;
 }
 
 @Injectable()

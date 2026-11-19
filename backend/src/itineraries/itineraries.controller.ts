@@ -34,6 +34,7 @@ import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
+import { ItineraryCloneService } from './itinerary-clone.service';
 import type { ItinerarySummary, ItineraryView } from './itinerary-view';
 
 /** Itineraries belong to regular users; everyone else gets 403 (ITN-11). */
@@ -43,7 +44,10 @@ import type { ItinerarySummary, ItineraryView } from './itinerary-view';
 @ApiForbiddenResponse({ description: 'Only regular users plan itineraries' })
 @Controller('itineraries')
 export class ItinerariesController {
-  constructor(private readonly itineraries: ItinerariesService) {}
+  constructor(
+    private readonly itineraries: ItinerariesService,
+    private readonly cloning: ItineraryCloneService,
+  ) {}
 
   @Post()
   @ApiReq(
@@ -71,6 +75,22 @@ export class ItinerariesController {
     @Query() query: PaginationQueryDto,
   ): Promise<Paginated<ItinerarySummary>> {
     return this.itineraries.list(user, query);
+  }
+
+  @Post(':id/clone')
+  @ApiReq(
+    'ITN-21',
+    'Clone an itinerary',
+    'Copies the days, activities and budget entries of a public itinerary (or one of your own) into a new private itinerary of yours. The copy credits the original author (`clonedFrom`) and is independent of the original: later changes to either do not affect the other. Activity images are not copied. A private or hidden itinerary of someone else answers 404.',
+  )
+  @ApiParam({ name: 'id', description: 'Itinerary id to copy' })
+  @ApiCreatedResponse({ description: 'Your new private copy' })
+  @ApiNotFoundResponse({ description: 'Not found, or not public' })
+  clone(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<ItineraryView> {
+    return this.cloning.clone(user, id);
   }
 
   @Get(':id')
