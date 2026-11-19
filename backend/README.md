@@ -187,7 +187,9 @@ Regular users only (`403` for admins and moderators). An itinerary belongs to it
 | `DELETE /api/itineraries/:id/days/:dayId?confirm=true` | the rest are renumbered and re-dated; returns the itinerary |
 | `PATCH /api/itineraries/:id/days/reorder` | `{ dayId, position }` moves one day (1 to the number of days) |
 | `POST /api/itineraries/:id/days/:dayId/activities` | `name`, optional `description`, `time` (`HH:mm`), `cost`, `currency` |
-| `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity |
+| `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity (its image files are deleted too) |
+| `POST /api/activities/:id/images` | **ITN-12.** Multipart field `images`: JPG or PNG (the real format is checked), <= 5 MB each, at most 5 per activity in total; all or nothing. Returns the activity |
+| `DELETE /api/activities/:id/images/:imageId` | removes the image and deletes its file; returns the activity |
 | `GET /api/itineraries/public/search` | **open to everyone (ITN-21).** Only public itineraries; `q` (title, or the name/code of a country or city), `country`, `city`, `minDays`, `maxDays`, newest first, 10 per page |
 | `GET /api/itineraries/public/:id` | **open to everyone (ITN-21).** Read-only: author, days, activities, groups and the `budget` in `?currency=` (USD by default). `404` for private, hidden or deactivated-author itineraries |
 | `POST /api/itineraries/:id/clone` | copy a public itinerary (or your own) into a **new private one of yours** (ITN-21): days, activities and budget entries; credits the original author in `clonedFrom`; independent of the original; activity images are not copied |
@@ -203,7 +205,7 @@ Admins can hide or delete any itinerary through `DELETE /api/admin/content/itine
 - **Hotel search (Noureldin, HTL-11, ITN-25):** inject `HotelSearchHook` and `register(port)` with `search({ city, checkIn, checkOut, guests, rooms, page, limit })` returning `Paginated<hotel>`. `GET /api/itineraries/:id/hotels` calls it for the dates of the chosen city group, so you do not build anything itinerary-specific; until you register it answers `503`.
 - **Blog author page (Ahmed, BLG-12):** the itinerary module registers itself with the blog's `AuthorItineraries`, so an author's public itineraries need nothing from you.
 - **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. Optional `cloneBudgets(from, to, dayIdMap)` copies the budget onto a clone (ITN-21) and `publicSummary(itineraryId, currency?)` gives the budget of a public itinerary (both done by `BudgetProvider`). An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
-- **Activity images (ITN-12):** `images` is in the schema; the upload and delete endpoints follow once Ahmed's shared upload helper (GEN-08) exists.
+- **Activity images (ITN-12):** done with Ahmed's upload helper (GEN-08). The files belong to the traveller who uploaded them, so only the itinerary's owner can add or remove them, and deleting an activity, a day or the whole itinerary (also by an admin) deletes the files. A clone does not copy images: the files belong to the original author.
 
 ## Platform currency (PAY-04; issue 29)
 

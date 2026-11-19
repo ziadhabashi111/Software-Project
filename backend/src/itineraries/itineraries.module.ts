@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { BlogModule } from '../blog/blog.module';
 import { FlightsModule } from '../flights/flights.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { BudgetController } from './budget/budget.controller';
@@ -23,6 +24,7 @@ import {
   TransportCostSchema,
 } from './budget/schemas/transport-cost.schema';
 import { ActivitiesService } from './activities.service';
+import { ActivityImagesService } from './activity-images.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { HotelSearchHook } from './hotel-search';
@@ -41,11 +43,11 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 
 /**
  * Owner: Habashi (structure), Youssef Wahby (budgets / exchange rates)
- * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 20, 21, 25 (and ITN-12 once
- * the upload helper exists)
+ * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25
  *
- * Itineraries with their days and activities, public itineraries and cloning
- * (ITN-21), and hotels for a city group (ITN-25). Other modules plug in
+ * Itineraries with their days and activities, activity images (ITN-12, through
+ * the shared upload helper), public itineraries and cloning (ITN-21), and
+ * hotels for a city group (ITN-25). Other modules plug in
  * through hooks (import this module and inject them): `PlaceCatalog` (the
  * predefined country and city lists, from the reference-data module),
  * `ItineraryBudgets` (day budget totals, cloning and cleanup, from the budget
@@ -64,6 +66,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     AdminModule,
     BlogModule,
     FlightsModule,
+    UploadsModule,
     UsersModule,
   ],
   controllers: [
@@ -80,6 +83,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     ItineraryCloneService,
     PublicItinerariesService,
     ActivitiesService,
+    ActivityImagesService,
     BudgetService,
     BudgetSummaryService,
     BudgetProvider,
