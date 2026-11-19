@@ -669,3 +669,15 @@ Finish my issue 8: public itineraries (search and read-only view), clone, hotels
 How the output was used:
 Built test-first: pure, unit-tested pieces (cloneDays deep copy with a day-id map, the public-search filter, hotelCriteriaFor, remapToClone for budgets) and services around them. Public search/view are open to visitors and only show public, not-hidden itineraries of non-deactivated owners (checked in the database query so paging stays right; everything else answers 404). Clone makes a private copy that credits the author, copies days, activities and budget entries (no images), and removes the half-made copy if the budget copy fails. GET /api/itineraries/:id/hotels reuses the hotel search through a HotelSearchHook for Noureldin to register (503 until then). The itinerary module registers as the blog's AuthorItineraries source. Added optional cloneBudgets/publicSummary to the budget hook, matchKeyword to PlaceCatalog (implemented by ReferenceDataService), an e2e spec, and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-19
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-12, GEN-08
+Prompt:
+Finish issue 7: the activity images (POST /api/activities/:id/images, DELETE .../images/:imageId) now that Ahmed's upload helper exists.
+
+How the output was used:
+Wrote the specs first, then ActivityImagesService on top of the upload helper and the repository's optimistic-concurrency change(): ownership is checked before anything is stored (non-owners get 404 and no file is written), the 5-image cap is re-checked on the latest state so parallel uploads cannot exceed it and the stored files are removed if the attach fails, and removing an image deletes its file. Deleting an activity, a day, an itinerary (also an admin delete) now deletes the image files so nothing is orphaned. Added an e2e spec (limits, fake files, ownership, cleanup in every delete path, parallel uploads) and README rows. Reviewed the diff.
+================================================
