@@ -3,7 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
 import { ItinerariesModule } from '../itineraries/itineraries.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { HotelCatalog } from './hotel-catalog';
+import { HotelPhotosController } from './hotel-photos.controller';
+import { HotelPhotosService } from './hotel-photos.service';
 import { HotelsController } from './hotels.controller';
 import { HotelsService } from './hotels.service';
 import { RoomsController } from './rooms.controller';
@@ -36,16 +39,19 @@ import { ModeratorReservationsService } from './search/moderator-reservations.se
     AdminModule,
     HotelBookingsModule,
     ItinerariesModule,
+    UploadsModule,
   ],
   controllers: [
     ModeratorReservationsController,
     RoomsController,
+    HotelPhotosController,
     HotelsController,
   ],
   providers: [
     HotelCatalog,
     HotelsService,
     RoomsService,
+    HotelPhotosService,
     ModeratorReservationsService,
   ],
   exports: [MongooseModule, HotelCatalog],

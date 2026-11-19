@@ -217,6 +217,8 @@ Done in `src/hotels/`. A hotel has a profile, rooms, and per-room availability a
 | `GET /api/hotels/:id` | **open to everyone (HTL-02, 09, 10).** Profile, photos, amenities, check-in/out times (default 14:00 / 12:00), `cancellationPolicy` (longest notice first) and `rating`. A deactivated hotel answers `404` except to admins and its own moderator |
 | `PATCH /api/hotels/:id` | the hotel's own moderator only (`403` for any other moderator and for admins) |
 | `PUT /api/hotels/:id/policies` | check-in/out times and/or the whole list of cancellation tiers (HTL-09, 10); same tier rule as flights |
+| `POST /api/hotels/:id/images` | **HTL-01, GEN-08.** The hotel's own moderator only. Multipart field `images`: JPG or PNG (the real format is checked), <= 5 MB each, at most 5 photos per hotel in total (checked inside the database write, so parallel uploads cannot exceed it); all or nothing. Returns the hotel |
+| `DELETE /api/hotels/:id/images/:imageId` | removes the photo and deletes its file; returns the hotel |
 | `POST` / `GET /api/hotels/:id/rooms` | **HTL-03.** Room `name` is unique within the hotel (`409`), `beds`, `maxOccupancy`, `pricePerNight`, optional `type` |
 | `PATCH` / `DELETE /api/hotels/:id/rooms/:roomId` | edit (the name cannot change), or delete a room nobody ever reserved (`409 ROOM_HAS_RESERVATIONS`) |
 | `PATCH /api/hotels/:id/rooms/:roomId/deactivate` / `reactivate` | deactivating is refused while a room has an upcoming reservation (`409 ROOM_RESERVED`) |

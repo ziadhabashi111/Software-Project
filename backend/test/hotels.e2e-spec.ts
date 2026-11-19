@@ -1,3 +1,6 @@
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import request from 'supertest';
 import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
@@ -9,6 +12,7 @@ import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
 const PASSWORD = 'Passw0rdOk';
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3, 3]);
 
 interface ErrorBody {
   code?: string;
@@ -67,11 +71,15 @@ const day = (offset: number): string =>
 
 describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10; real MongoDB replica set in memory)', () => {
   let ctx: TestApp;
+  let dir: string;
   let users: UsersService;
   let passwords: PasswordService;
   let counter = 0;
 
   beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'hotel-photos-e2e-'));
+    process.env.UPLOAD_DIR = dir;
+    process.env.UPLOAD_PUBLIC_URL = 'http://localhost:3000/uploads';
     ctx = await createTestApp({
       replSet: true,
       extraModules: [AuditModule, AdminModule, HotelsModule],
@@ -82,6 +90,9 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
 
   afterAll(async () => {
     await ctx.close();
+    delete process.env.UPLOAD_DIR;
+    delete process.env.UPLOAD_PUBLIC_URL;
+    await rm(dir, { recursive: true, force: true });
   });
 
   async function loggedInAs(
@@ -692,6 +703,88 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
         .get(`${url}?from=${day(5)}&to=${day(1)}`)
         .expect(400);
       await moderator.client.get(`${url}?from=oops&to=${day(1)}`).expect(400);
+    });
+  });
+  describe('hotel photos (HTL-01, GEN-08)', () => {
+    const upload = (client: Agent, hotelId: string, count = 1) => {
+      const req = client.post(`/api/hotels/${hotelId}/images`);
+      for (let i = 0; i < count; i += 1) req.attach('images', PNG, `p${i}.png`);
+      return req;
+    };
+
+    it('lets the hotel’s moderator add and remove photos, and deletes the file with the photo', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      const before = (await readdir(dir)).length;
+
+      const added = (await upload(moderator.client, hotel.id, 2).expect(201))
+        .body as HotelBody & { photos: { id: string; url: string }[] };
+      expect(added.photos).toHaveLength(2);
+      expect((await readdir(dir)).length).toBe(before + 2);
+      const seen = (await guest().get(`/api/hotels/${hotel.id}`).expect(200))
+        .body as typeof added;
+      expect(seen.photos.map((p) => p.url)).toEqual(
+        added.photos.map((p) => p.url),
+      );
+
+      const removed = (
+        await moderator.client
+          .delete(`/api/hotels/${hotel.id}/images/${added.photos[0].id}`)
+          .expect(200)
+      ).body as typeof added;
+      expect(removed.photos.map((p) => p.id)).toEqual([added.photos[1].id]);
+      expect((await readdir(dir)).length).toBe(before + 1);
+      await moderator.client
+        .delete(`/api/hotels/${hotel.id}/images/${added.photos[0].id}`)
+        .expect(404);
+    });
+
+    it('keeps everyone else out, and stores nothing for them', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      const other = await hotelWithModerator();
+      const traveller = await loggedInAs();
+      const before = (await readdir(dir)).length;
+
+      await upload(other.moderator.client, hotel.id).expect(403);
+      await upload(other.admin.client, hotel.id).expect(403);
+      await upload(traveller.client, hotel.id).expect(403);
+      await guest()
+        .post(`/api/hotels/${hotel.id}/images`)
+        .attach('images', PNG, 'p.png')
+        .expect(401);
+      expect((await readdir(dir)).length).toBe(before);
+
+      const photo = (await upload(moderator.client, hotel.id).expect(201))
+        .body as {
+        photos: { id: string }[];
+      };
+      await other.moderator.client
+        .delete(`/api/hotels/${hotel.id}/images/${photo.photos[0].id}`)
+        .expect(403);
+    });
+
+    it('accepts only real JPG/PNG files, at most 5 per hotel, and never exceeds that in parallel', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      const fake = await moderator.client
+        .post(`/api/hotels/${hotel.id}/images`)
+        .attach('images', Buffer.from('<script>alert(1)</script>'), 'x.png')
+        .expect(400);
+      expect(fieldsOf(fake)).toContain('images');
+      await moderator.client.post(`/api/hotels/${hotel.id}/images`).expect(400);
+
+      await upload(moderator.client, hotel.id, 4).expect(201);
+      const before = (await readdir(dir)).length;
+      await upload(moderator.client, hotel.id, 2).expect(400);
+      expect((await readdir(dir)).length).toBe(before);
+
+      const racing = await Promise.all(
+        [0, 1, 2].map(() => upload(moderator.client, hotel.id)),
+      );
+      expect(racing.filter((r) => r.status === 201)).toHaveLength(1);
+      const final = (await guest().get(`/api/hotels/${hotel.id}`).expect(200))
+        .body as { photos: unknown[] };
+      expect(final.photos).toHaveLength(5);
+      // The files of the refused uploads were deleted again.
+      expect((await readdir(dir)).length).toBe(before + 1);
     });
   });
 });
