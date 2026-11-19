@@ -7,7 +7,11 @@ import {
   HotelReservation,
   HotelReservationDocument,
 } from '../hotel-bookings/schemas/hotel-reservation.schema';
-import type { BookingType } from './refund.service.interface';
+import type {
+  BookingType,
+  RefundPreview,
+  RefundResult,
+} from './refund.service.interface';
 
 /** What every booking type must tell us to start a PaymentIntent. */
 export interface PayableBooking {
@@ -37,6 +41,23 @@ export interface BookingPoliciesView {
   };
   /** Hotels: the stay dates (check-in/out times come from the hotels module). */
   stay?: { checkIn: Date; checkOut: Date };
+}
+
+/** PAY-03: what is needed to refund a cancelled booking, for either type. */
+export interface RefundBasisView {
+  bookingId: string;
+  userId: string;
+  paymentIntentId: string;
+  amount: number;
+  percentage: number;
+  currency: string;
+  /** PENDING, REFUNDED or FAILED, as stored on the booking. */
+  status: string;
+  /** The Stripe refund already created for this cancellation, if any. */
+  stripeRefundId: string | null;
+  /** Stable per booking; Stripe's `Idempotency-Key` when creating the refund. */
+  idempotencyKey: string;
+  failureReason: string | null;
 }
 
 export type ConfirmOutcome =
@@ -145,5 +166,48 @@ export class BookingPaymentGateway {
         ? await this.flights.confirmPaid(bookingId, paid)
         : await this.hotels.confirmPaid(bookingId, paid);
     return result.outcome;
+  }
+
+  /** PAY-03: what cancelling now would refund; `null` if it cannot be cancelled. */
+  async refundQuote(
+    type: BookingType,
+    bookingId: string,
+  ): Promise<RefundPreview | null> {
+    const quote =
+      type === 'flight'
+        ? await this.flights.refundQuote(bookingId)
+        : await this.hotels.refundQuote(bookingId);
+    if (!quote) return null;
+    return {
+      refundPercent: quote.refundPercent,
+      refundAmount: quote.refundAmount,
+      currency: quote.currency,
+    };
+  }
+
+  /** PAY-03: the amount fixed at cancellation and the PaymentIntent to refund. */
+  async refundBasis(
+    type: BookingType,
+    bookingId: string,
+  ): Promise<RefundBasisView | null> {
+    if (type === 'flight') {
+      const b = await this.flights.refundBasis(bookingId);
+      return b;
+    }
+    const b = await this.hotels.refundBasis(bookingId);
+    return b && { ...b, bookingId: b.reservationId };
+  }
+
+  /** PAY-03: stores the refund outcome on the booking. */
+  async recordRefund(
+    type: BookingType,
+    bookingId: string,
+    result: RefundResult,
+  ): Promise<void> {
+    if (type === 'flight') {
+      await this.flights.recordRefundResult(bookingId, result);
+    } else {
+      await this.hotels.recordRefundResult(bookingId, result);
+    }
   }
 }

@@ -684,6 +684,18 @@ Wrote the specs first, then ActivityImagesService on top of the upload helper an
 
 ================================================
 Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-03 (issue 27)
+Prompt:
+Write the refunds for Issue 27: RefundService preview and issue through the Stripe Refunds API, refund status updated by webhook, GET /api/refunds/:id and the refund notification.
+
+How the output was used:
+RefundsService (preview, issue, refund webhook), a Refund schema, gateway methods, GET /api/refunds/:id and 20 unit tests. The tier rule is reused from refundPercentFor. Applied as a patch and checked with lint and npm test.
+================================================
+
+================================================
+Date: 2026-11-20
 Student: Habashi
 Tool: Claude Code
 Related Requirement: HTL-01, HTL-02, HTL-03, HTL-04, HTL-05, HTL-06, HTL-08, HTL-09, HTL-10 (issues 31, 32, 33)
