@@ -29,3 +29,16 @@ export function assertCanViewHotelReservations(
     );
   }
 }
+
+/**
+ * HTL-01, HTL-03..06, HTL-10: a hotel moderator manages exactly one hotel, the
+ * one they are linked to. Admins create hotels but do not edit their rooms.
+ */
+export function assertOwnHotel(
+  user: Pick<AuthUser, 'role' | 'providerId'>,
+  hotelId: string,
+): void {
+  if (!isOwnHotelModerator(user, hotelId)) {
+    throw new ForbiddenException('You can only manage your own hotel');
+  }
+}

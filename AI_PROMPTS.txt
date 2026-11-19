@@ -693,3 +693,15 @@ Write the refunds for Issue 27: RefundService preview and issue through the Stri
 How the output was used:
 RefundsService (preview, issue, refund webhook), a Refund schema, gateway methods, GET /api/refunds/:id and 20 unit tests. The tier rule is reused from refundPercentFor. Applied as a patch and checked with lint and npm test.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-01, HTL-02, HTL-03, HTL-04, HTL-05, HTL-06, HTL-08, HTL-09, HTL-10 (issues 31, 32, 33)
+Prompt:
+Abdelrahman has pushed nothing and Milestone 1 is due today: implement the hotel catalogue (hotel profile, rooms, availability, blocked dates, check-in/out times, cancellation tiers) so hotel booking and the admin provider directory work.
+
+How the output was used:
+Built test-first as small pure pieces plus services: date-range rules (real calendar dates, overlap, covers, nights removed), room night status (Available/Booked/Blocked), HotelsService (admin creates, own moderator edits, policies reuse the flight tier rules), RoomsService (unique room name, availability/blocks with optimistic-concurrency retries, refusals that protect existing reservations) and HotelCatalog, which registers with the booking inventory and the admin provider directory. Reservations are read through the booking module's queries, never its collections. Added an e2e spec (profile, policies, admin link, rooms, availability, parallel ranges, booking through the catalogue, reservation protection, room status view) and README rows. Reviewed the diff.
+================================================

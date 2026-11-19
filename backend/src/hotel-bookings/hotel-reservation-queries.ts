@@ -86,6 +86,23 @@ export class HotelReservationQueries {
   }
 
   /**
+   * ACC-15: the guests with a Confirmed reservation at this hotel that has not
+   * ended yet, so they can be told when the hotel is deactivated or restored.
+   */
+  async confirmedGuestIds(
+    hotelId: string,
+    now: Date = new Date(),
+  ): Promise<string[]> {
+    if (!Types.ObjectId.isValid(hotelId)) return [];
+    const guests = await this.reservations.distinct('user', {
+      hotel: new Types.ObjectId(hotelId),
+      status: ReservationStatus.CONFIRMED,
+      checkOut: { $gte: startOfUtcDay(now) },
+    });
+    return guests.map((guest) => guest.toString());
+  }
+
+  /**
    * HTL-06: deactivating a room is refused while it is taken tonight or on
    * any later night.
    */
