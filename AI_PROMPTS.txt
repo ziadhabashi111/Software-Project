@@ -693,3 +693,15 @@ Abdelrahman has pushed nothing and Milestone 1 is due today: implement the hotel
 How the output was used:
 Built test-first as small pure pieces plus services: date-range rules (real calendar dates, overlap, covers, nights removed), room night status (Available/Booked/Blocked), HotelsService (admin creates, own moderator edits, policies reuse the flight tier rules), RoomsService (unique room name, availability/blocks with optimistic-concurrency retries, refusals that protect existing reservations) and HotelCatalog, which registers with the booking inventory and the admin provider directory. Reservations are read through the booking module's queries, never its collections. Added an e2e spec (profile, policies, admin link, rooms, availability, parallel ranges, booking through the catalogue, reservation protection, room status view) and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-01, GEN-08 (issue 31, hotel photos)
+Prompt:
+Add the hotel photos on top of the hotel catalogue: POST /api/hotels/:id/images and DELETE /api/hotels/:id/images/:imageId with the shared upload helper.
+
+How the output was used:
+Wrote the service spec first (ownership before any file is written, files stored as the moderator, the 5-photo limit inside the database write so parallel uploads cannot exceed it, files deleted when the write fails or the photo is removed, best-effort file deletion). HotelPhotosService and HotelPhotosController follow the same upload pattern as the activity images. Added e2e tests (add/remove with files on disk, other moderators/admins/travellers/guests refused with nothing stored, fake files, the limit, parallel uploads) and README rows. Reviewed the diff.
+================================================
