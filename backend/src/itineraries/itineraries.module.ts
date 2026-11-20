@@ -38,6 +38,8 @@ import { ItineraryHotelsService } from './itinerary-hotels.service';
 import { ItineraryBookingsController } from './itinerary-bookings.controller';
 import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ItineraryBudgets } from './itinerary-budgets';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
 import { ItineraryModerator } from './itinerary-moderator';
 import { ItineraryRepository } from './itinerary.repository';
 import { PlaceCatalog } from './places';
@@ -51,12 +53,13 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 
 /**
  * Owner: Habashi (structure), Youssef Wahby (budgets / exchange rates)
- * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25, 27
+ * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25, 27, 28
  *
  * Itineraries with their days and activities, activity images (ITN-12, through
  * the shared upload helper), public itineraries and cloning (ITN-21), and
  * hotels for a city group (ITN-25) and the traveller's own bookings linked to
- * its days (ITN-27, read through the booking modules). Other modules plug in
+ * its days (ITN-27, read through the booking modules), and the PDF export
+ * (ITN-28). Other modules plug in
  * through hooks (import this module and inject them): `PlaceCatalog` (the
  * predefined country and city lists, from the reference-data module),
  * `ItineraryBudgets` (day budget totals, cloning and cleanup, from the budget
@@ -90,6 +93,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     ItineraryFlightsController,
     ItineraryHotelsController,
     ItineraryBookingsController,
+    ItineraryPdfController,
   ],
   providers: [
     ItinerariesService,
@@ -104,6 +108,7 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     ItineraryFlightsService,
     ItineraryHotelsService,
     ItineraryBookingsService,
+    ItineraryPdfService,
     ItineraryRepository,
     ItineraryModerator,
     PlaceCatalog,
