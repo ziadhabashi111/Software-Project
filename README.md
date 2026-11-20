@@ -80,6 +80,7 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `STRIPE_WEBHOOK_SECRET` | `backend/.env` | Per developer, generated on your own machine (it cannot be shared). Install the Stripe CLI (`winget install Stripe.StripeCli`), run `stripe login`, then `stripe listen --forward-to localhost:3000/api/payments/webhook` and copy the `whsec_...` it prints. Only needed for payment work. |
 | `FXRATES_API_KEY` | `backend/.env` | Shared FXRatesAPI key from the team leader (backend only, never in the frontend) |
 | `UPLOAD_DIR`, `UPLOAD_PUBLIC_URL` | `backend/.env` | Optional (GEN-08). Defaults `uploads` and `http://localhost:3000/uploads`. At deployment, point `UPLOAD_DIR` at a persistent disk and set the public URL. See [docs/api/uploads.md](docs/api/uploads.md) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `MAIL_FROM` | `backend/.env` | Optional (GEN-01-B, ACC-07). With no `SMTP_HOST` nothing is sent and the email is written to the server log (outside production), so a reset link can be copied from there. In development use a test inbox such as Ethereal or Mailtrap. Port defaults to 587; `SMTP_SECURE=true` for TLS from the start |
 | `FLIGHT_HOLD_MINUTES` | `backend/.env` | `10` (flight and hotel holds both last 10 minutes: FLT-22, HTL-18) |
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |

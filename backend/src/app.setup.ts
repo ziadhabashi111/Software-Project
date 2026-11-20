@@ -86,6 +86,20 @@ function AUTH_AND_UPLOAD_LIMITS(): RouteRateLimit[] {
       limiter: new RateLimiter(5, MINUTE),
     },
     {
+      // Sends an email each time, so it cannot be used to flood an inbox.
+      method: 'POST',
+      path: /^\/api\/auth\/forgot-password$/,
+      name: 'forgot-password',
+      limiter: new RateLimiter(10, MINUTE),
+    },
+    {
+      // Takes a secret token, so guessing is limited.
+      method: 'POST',
+      path: /^\/api\/auth\/reset-password$/,
+      name: 'reset-password',
+      limiter: new RateLimiter(10, MINUTE),
+    },
+    {
       method: 'POST',
       path: /^\/api\/(uploads\/images|(posts|hotels|activities)\/[^/]+\/images)$/,
       name: 'uploads',

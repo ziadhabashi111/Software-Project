@@ -843,3 +843,15 @@ Make sure all of Milestone 1 is done: compare every mandatory requirement and ev
 How the output was used:
 All mandatory backend requirements are implemented; the only ones without backend code are frontend requirements for Milestone 2 (ACC-10, GEN-04, GEN-14..17). The one documented endpoint that did not exist, PATCH /api/hotels/:id/rooms/:roomId/availability, was added test-first: it replaces a room's bookable ranges, rejects overlaps and refuses to drop nights a reservation holds (409). The full-app wiring test now builds the Swagger document for the whole AppModule and fails if any operation lacks a requirement ID. docs/erd.md was rewritten from the real Mongoose schemas (collections, references, embedded documents, booking lifecycle). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01-B, ACC-07 (issues 53, 55; bonus)
+Prompt:
+Start the bonuses: build the email sender (needed by ACC-02 and ACC-07) and the forgot and reset password by email (ACC-07).
+
+How the output was used:
+Built test-first. MailService sends through nodemailer from SMTP_* variables, and with no SMTP_HOST logs the email (never its body in production) so local runs work without a mail server. An email token store keeps only the SHA-256 hash of a 32-byte random token, one live link per user and purpose (a newer one overwrites the older), and deletes it as it is read so it works once even under parallel requests. PasswordResetService answers forgot-password identically for known, unknown and suspended addresses and sends the email in the background so timing does not reveal the account; reset-password sets the password, signs the account out everywhere and clears a login lock and a forced password change. Added per-IP rate limits for both routes, e2e tests (17 for the reset flow, 2 for the limits), README rows and the SMTP names in .env.example. Reviewed the diff.
+================================================

@@ -105,6 +105,8 @@ await this.audit.log({ actorId: admin.id, action: AuditAction.ACCOUNT_SUSPENDED,
 | `POST /api/auth/logout` | anyone | clears the cookies and revokes the session, `204` |
 | `GET /api/auth/me` | logged in | the current user (this is how the frontend learns who is logged in) |
 | `PATCH /api/auth/change-password` | logged in | `currentPassword` + `newPassword`; signs out other devices, keeps this one, `204` |
+| `POST /api/auth/forgot-password` | guest | **ACC-07 (optional).** `email`. Emails a reset link when the address belongs to an active account; the answer is always the same, so it never reveals whether the address is registered. The link works once, for 30 minutes, and a newer request replaces an older link. 10 requests per minute per address |
+| `POST /api/auth/reset-password` | guest | **ACC-07 (optional).** `token` (from the email) + `newPassword` (password rules). Single-use and expires after 30 minutes (`400` field `token` otherwise). Signs the account out everywhere, clears a login lock and a forced password change. 10 requests per minute per address |
 
 **For the frontend (Milestone 2):** tokens are never in the response body or readable by JavaScript; send requests with `credentials: 'include'`. The access token lives 15 minutes (`JWT_EXPIRES_IN`). On a `401`, call `POST /api/auth/refresh` once and retry; if that also fails, go to login (and return to the page afterwards, ACC-10). A `403` with `code: "PASSWORD_CHANGE_REQUIRED"` means a temporary password: send the user to the change-password page (only `me`, `change-password` and `logout` work until then).
 
