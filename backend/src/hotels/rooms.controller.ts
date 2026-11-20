@@ -31,7 +31,7 @@ import type { Paginated } from '../common/pagination/pagination';
 import { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { ListRoomsQueryDto } from './dto/list-rooms-query.dto';
 import { CreateRoomDto, UpdateRoomDto } from './dto/create-room.dto';
-import { DateRangeDto } from './dto/date-range.dto';
+import { DateRangeDto, ReplaceAvailabilityDto } from './dto/date-range.dto';
 import type { RoomView } from './room-view';
 import { RoomsService } from './rooms.service';
 import type { AvailabilityView } from './rooms.service';
@@ -203,6 +203,31 @@ export class RoomsController {
     @Body() dto: DateRangeDto,
   ): Promise<RoomView> {
     return this.rooms.addAvailability(user, id, roomId, dto);
+  }
+
+  @Patch('rooms/:roomId/availability')
+  @ApiReq(
+    ['HTL-05', 'HTL-06'],
+    'Replace all bookable date ranges',
+    "Sets the room's complete list of bookable ranges in one call (they must not overlap). Nights held by a Confirmed reservation or a live hold cannot be left out (409 AVAILABILITY_IN_USE). Blocked dates are managed with POST/DELETE .../blocks (HTL-06); single ranges with POST .../availability and PATCH/DELETE .../availability/:rangeId.",
+  )
+  @ApiParam({ name: 'id', description: 'Hotel id' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiOkResponse({ schema: { example: ROOM_EXAMPLE } })
+  @ApiBadRequestResponse({
+    description: 'Not a real date, end before start, or ranges overlap',
+  })
+  @ApiConflictResponse({
+    description: 'A reservation holds a night the new ranges leave out',
+  })
+  @ApiNotFoundResponse({ description: 'Room not found in this hotel' })
+  replaceAvailability(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Param('roomId', ParseObjectIdPipe) roomId: string,
+    @Body() dto: ReplaceAvailabilityDto,
+  ): Promise<RoomView> {
+    return this.rooms.replaceAvailability(user, id, roomId, dto);
   }
 
   @Patch('rooms/:roomId/availability/:rangeId')
