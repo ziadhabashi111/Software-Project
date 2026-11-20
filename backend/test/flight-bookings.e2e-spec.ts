@@ -553,6 +553,34 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
+    it('completes every landed booking even when more Confirmed bookings exist than one batch', async () => {
+      const confirm = (id: string) =>
+        bookings.updateOne(
+          { _id: new Types.ObjectId(id) },
+          { $set: { status: 'CONFIRMED' } },
+        );
+      // Two upcoming Confirmed bookings fill a batch of 2 on their own.
+      const upcoming = await makeFlight();
+      await confirm((await heldBooking(upcoming)).booking.id);
+      await confirm((await heldBooking(upcoming)).booking.id);
+      const landed = await makeFlight();
+      const { booking } = await heldBooking(landed);
+      await confirm(booking.id);
+      await flights.updateOne(
+        { _id: landed._id },
+        {
+          $set: {
+            departureUtc: new Date(Date.now() - 5 * 3_600_000),
+            arrivalUtc: new Date(Date.now() - 1 * 3_600_000),
+          },
+        },
+      );
+      await expiry().completeDue(new Date(), 2);
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'COMPLETED',
+      );
+    });
+
     it('leaves a live hold alone', async () => {
       const flight = await makeFlight();
       const { booking } = await heldBooking(flight);

@@ -146,14 +146,41 @@ export class FlightBookingExpiryService {
     );
   }
 
-  /** Confirmed bookings whose last flight has landed become Completed. */
-  async completeDue(now: Date = new Date()): Promise<number> {
-    const confirmed = await this.bookings
-      .find({ status: BookingStatus.CONFIRMED })
-      .select('_id segments.flight')
-      .limit(BATCH)
-      .lean();
-    if (confirmed.length === 0) return 0;
+  /**
+   * Confirmed bookings whose last flight has landed become Completed. Pages
+   * through every Confirmed booking (by `_id`, `batchSize` at a time), so
+   * upcoming bookings never hide landed ones behind a fixed limit.
+   */
+  async completeDue(
+    now: Date = new Date(),
+    batchSize: number = BATCH,
+  ): Promise<number> {
+    let completed = 0;
+    let after: Types.ObjectId | undefined;
+    for (;;) {
+      const page = await this.bookings
+        .find({
+          status: BookingStatus.CONFIRMED,
+          ...(after ? { _id: { $gt: after } } : {}),
+        })
+        .select('_id segments.flight')
+        .sort({ _id: 1 })
+        .limit(batchSize)
+        .lean();
+      if (page.length === 0) return completed;
+      completed += await this.completeLanded(page, now);
+      if (page.length < batchSize) return completed;
+      after = page[page.length - 1]._id;
+    }
+  }
+
+  private async completeLanded(
+    confirmed: {
+      _id: Types.ObjectId;
+      segments: { flight: Types.ObjectId }[];
+    }[],
+    now: Date,
+  ): Promise<number> {
     const flightIds = confirmed.flatMap((b) => b.segments.map((s) => s.flight));
     const landed = new Set(
       (
