@@ -1191,22 +1191,25 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       const flight = await makeFlight();
       const { booking } = await confirmed(flight);
       const admin = await loggedInAs(Role.ADMIN);
-      const res = await admin.client
-        .get('/api/admin/bookings')
-        .query({ type: 'flight', status: 'Confirmed', limit: 100 })
-        .expect(200);
-      const items = (
-        res.body as {
-          items: {
-            id: string;
-            type: string;
-            reference: string;
-            provider: { name: string };
-            amount: number;
-            status: string;
-          }[];
-        }
-      ).items;
+      type Row = {
+        id: string;
+        type: string;
+        reference: string;
+        provider: { name: string };
+        amount: number;
+        status: string;
+      };
+      // Page size is fixed at 10 (GEN-05): walk every page.
+      const items: Row[] = [];
+      for (let page = 1; ; page += 1) {
+        const res = await admin.client
+          .get('/api/admin/bookings')
+          .query({ type: 'flight', status: 'Confirmed', page })
+          .expect(200);
+        const body = res.body as { items: Row[]; total: number };
+        items.push(...body.items);
+        if (items.length >= body.total || body.items.length === 0) break;
+      }
       const row = items.find((i) => i.id === booking.id);
       expect(row).toMatchObject({
         type: 'flight',

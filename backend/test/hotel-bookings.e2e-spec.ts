@@ -1602,12 +1602,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           ).expect(201)
         ).body as HotelReservationView;
         const admin = await loggedInAs(Role.ADMIN);
-        const list = async (query: string) =>
-          (
-            await admin.client
-              .get(`/api/admin/bookings?type=hotel&limit=100${query}`)
-              .expect(200)
-          ).body as { items: Row[]; total: number };
+        // Page size is fixed at 10 (GEN-05): walk every page.
+        const list = async (query: string) => {
+          const items: Row[] = [];
+          let total = 0;
+          for (let page = 1; ; page += 1) {
+            const body = (
+              await admin.client
+                .get(`/api/admin/bookings?type=hotel&page=${page}${query}`)
+                .expect(200)
+            ).body as { items: Row[]; total: number };
+            total = body.total;
+            items.push(...body.items);
+            if (items.length >= total || body.items.length === 0) break;
+          }
+          return { items, total };
+        };
 
         const all = await list('&from=2029-05-01&to=2029-05-31');
         const row = all.items.find((r) => r.id === confirmed.id);
