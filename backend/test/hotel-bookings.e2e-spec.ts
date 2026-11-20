@@ -7,6 +7,7 @@ import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { BlogModule } from '../src/blog/blog.module';
 import { HotelBookingsModule } from '../src/hotel-bookings/hotel-bookings.module';
 import {
   HotelInventoryRegistry,
@@ -134,6 +135,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       extraModules: [
         AuditModule,
         AdminModule,
+        BlogModule,
         HotelBookingsModule,
         FakeSharedServicesModule,
       ],
@@ -1324,6 +1326,31 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       );
       expect((again.body as ErrorBody).code).toBe('REVIEW_EXISTS');
       expect((await reviewsOf(hotel.id)).ratingCount).toBe(1);
+    });
+
+    it('reports on reviews need a visible review by someone else (GEN-09)', async () => {
+      const guest = await loggedInAs();
+      const reporter = await loggedInAs();
+      const stay = await completedStay(guest.client, newHotel());
+      const created = (
+        await review(guest.client, stay.id, { rating: 2 }).expect(201)
+      ).body as HotelReviewView;
+      const report = (client: Client, contentId: string) =>
+        client.post('/api/reports').send({
+          contentType: 'review',
+          contentId,
+          reason: 'Fake review',
+        });
+
+      await report(reporter.client, new Types.ObjectId().toHexString()).expect(
+        404,
+      );
+      await report(guest.client, created.id).expect(400);
+      await report(reporter.client, created.id).expect(201);
+
+      await ctx.moduleRef.get(ReviewModerator).hide(created.id);
+      const other = await loggedInAs();
+      await report(other.client, created.id).expect(404);
     });
 
     it('two reviews of one stay at once: exactly one is stored', async () => {
