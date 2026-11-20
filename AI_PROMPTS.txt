@@ -855,3 +855,15 @@ Start the bonuses: build the email sender (needed by ACC-02 and ACC-07) and the 
 How the output was used:
 Built test-first. MailService sends through nodemailer from SMTP_* variables, and with no SMTP_HOST logs the email (never its body in production) so local runs work without a mail server. An email token store keeps only the SHA-256 hash of a 32-byte random token, one live link per user and purpose (a newer one overwrites the older), and deletes it as it is read so it works once even under parallel requests. PasswordResetService answers forgot-password identically for known, unknown and suspended addresses and sends the email in the background so timing does not reveal the account; reset-password sets the password, signs the account out everywhere and clears a login lock and a forced password change. Added per-IP rate limits for both routes, e2e tests (17 for the reset flow, 2 for the limits), README rows and the SMTP names in .env.example. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ACC-02 (issue 54; bonus)
+Prompt:
+Build email verification (ACC-02): a verification link at registration, GET /api/auth/verify-email, a resend option, and booking blocked until the email is verified, behind an environment switch that is off by default so graders can still book locally.
+
+How the output was used:
+Built test-first on the token store and MailService from ACC-07. Registration now creates the user as unverified (older, seeded and admin-made accounts count as verified) and emails a 24-hour single-use link in the background, so a mail failure never fails registration. verify-email and resend-verification are rate limited. A VerifiedEmailGuard acts on routes marked @RequireVerifiedEmail() (flight booking hold, hotel reservation) only when EMAIL_VERIFICATION_REQUIRED is exactly "true", and answers 401 instead of passing if it ever runs without a logged-in user. A unit test pins the marks on the real booking routes. My first version registered the guard in the global AuthModule, which broke the no-database foundations e2e suite; I moved it to AuthApiModule. Added e2e tests (16 for the flow and the switch), README rows and the new variable name in .env.example. Reviewed the diff.
+================================================

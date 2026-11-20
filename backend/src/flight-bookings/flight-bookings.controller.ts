@@ -26,6 +26,7 @@ import type { Response } from 'express';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { Paginated } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
@@ -77,6 +78,7 @@ export class FlightBookingsController {
 
   @Post('hold')
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiReq(
     ['FLT-22', 'FLT-12'],
     `Proceed to payment: hold the seats for ${HOLD_MINUTES} minutes`,

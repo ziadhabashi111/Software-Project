@@ -22,6 +22,7 @@ import {
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { HOLD_MINUTES } from '../common/booking-status/hold';
 import type { Paginated } from '../common/pagination/pagination';
@@ -54,6 +55,7 @@ export class HotelBookingsController {
 
   @Post()
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiReq(
     ['HTL-16', 'HTL-18'],
     `Reserve rooms (${HOLD_MINUTES}-minute hold)`,

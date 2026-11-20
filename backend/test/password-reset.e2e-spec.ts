@@ -38,11 +38,12 @@ describe('Forgot and reset password by email (ACC-07, GEN-01-B; real MongoDB in 
     tokenModel = ctx.moduleRef.get<Model<EmailTokenDocument>>(
       getModelToken(EmailToken.name),
     );
-    // Capture the emails instead of sending them.
+    // Capture the emails instead of sending them. Registration also sends a
+    // verification email (ACC-02); only the reset emails matter here.
     jest
       .spyOn(ctx.moduleRef.get(MailService), 'send')
       .mockImplementation((message) => {
-        sent.push(message);
+        if (message.subject === 'Reset your password') sent.push(message);
         return Promise.resolve();
       });
   }, 180_000);
