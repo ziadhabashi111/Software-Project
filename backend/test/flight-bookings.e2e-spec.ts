@@ -719,6 +719,21 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       ).rejects.toMatchObject({ status: 404 });
     });
 
+    it('answers 409 HOLD_EXPIRED (same code as hotels) for an expired hold', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 1_000) } },
+      );
+      await expect(
+        payments().forPayment(booking.id, user.id),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'HOLD_EXPIRED' },
+      });
+    });
+
     it('records the PaymentIntent and a failed attempt without ending the hold', async () => {
       const flight = await makeFlight();
       const { user, booking } = await heldBooking(flight);

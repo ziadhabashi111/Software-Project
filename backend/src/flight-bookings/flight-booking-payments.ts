@@ -157,7 +157,8 @@ export class FlightBookingPayments {
 
   /**
    * The amount to charge for the user's own live hold. 404 when it is not
-   * theirs; 409 NOT_PAYABLE once it is expired, paid or cancelled.
+   * theirs; 409 HOLD_EXPIRED once the hold ran out, 409 NOT_PAYABLE once it
+   * is paid, cancelled or otherwise not waiting for payment.
    */
   async forPayment(
     bookingId: string,
@@ -171,7 +172,7 @@ export class FlightBookingPayments {
       doc.holdExpiresAt.getTime() <= now.getTime()
     ) {
       await this.expiry.expireOne(doc._id, now);
-      throw notPayable('The 10-minute hold has expired. Start a new booking.');
+      throw holdExpired();
     }
     if (doc.status !== BookingStatus.PENDING_PAYMENT || !doc.holdExpiresAt) {
       throw notPayable('This booking is not waiting for payment.');
@@ -529,6 +530,16 @@ function notPayable(message: string): ConflictException {
     error: 'Conflict',
     message,
     code: 'NOT_PAYABLE',
+  });
+}
+
+/** Same 409 code as hotel reservations and the PAY-01 Swagger text. */
+function holdExpired(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    message: 'The 10-minute hold has expired. Start a new booking.',
+    code: 'HOLD_EXPIRED',
   });
 }
 
