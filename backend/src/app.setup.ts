@@ -1,8 +1,10 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { buildValidationException } from './common/validation/validation-errors';
+import { corsOrigin } from './config/cors';
 
 /**
  * Shared HTTP setup. Used by main.ts and by the e2e tests so tests run
@@ -24,7 +26,7 @@ export function configureApp(app: INestApplication): void {
   app.useGlobalFilters(new AllExceptionsFilter());
 
   app.enableCors({
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:3001',
+    origin: corsOrigin(app.get(ConfigService)),
     credentials: true, // httpOnly auth cookies
   });
 }

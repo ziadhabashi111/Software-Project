@@ -28,8 +28,7 @@ import type {
   ItineraryDay,
   ItineraryDocument,
 } from './schemas/itinerary.schema';
-
-export const MAX_DAYS = 60;
+import { MAX_DAYS } from './itinerary-limits';
 
 type Caller = Pick<AuthUser, 'id' | 'role'>;
 

@@ -58,6 +58,25 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...ok, COOKIE_SAMESITE: 'none' })).not.toThrow();
   });
 
+  it('requires FRONTEND_URL in production (the only CORS origin)', () => {
+    expect(() => validateEnv({ ...ok, NODE_ENV: 'production' })).toThrow(
+      /FRONTEND_URL/,
+    );
+    expect(() =>
+      validateEnv({
+        ...ok,
+        NODE_ENV: 'production',
+        FRONTEND_URL: 'https://travel.example.com',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a FRONTEND_URL that is not an http(s) URL', () => {
+    expect(() =>
+      validateEnv({ ...ok, FRONTEND_URL: 'travel.example.com' }),
+    ).toThrow(/FRONTEND_URL/);
+  });
+
   it('rejects malformed token lifetimes', () => {
     expect(() => validateEnv({ ...ok, JWT_EXPIRES_IN: 'soon' })).toThrow(
       /JWT_EXPIRES_IN/,

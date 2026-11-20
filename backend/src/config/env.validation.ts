@@ -37,6 +37,21 @@ export function validateEnv(
     }
   }
 
+  // The only CORS origin (credentials: true), so it is never guessed in production.
+  const frontend = config.FRONTEND_URL;
+  if (frontend === undefined || frontend === '') {
+    if (config.NODE_ENV === 'production') {
+      problems.push('FRONTEND_URL is required when NODE_ENV is production');
+    }
+  } else if (
+    typeof frontend !== 'string' ||
+    !/^https?:\/\/[^\s/]+/.test(frontend)
+  ) {
+    problems.push(
+      'FRONTEND_URL must be an http(s) URL such as http://localhost:3001',
+    );
+  }
+
   for (const key of ['JWT_EXPIRES_IN', 'JWT_REFRESH_EXPIRES_IN'] as const) {
     const value = config[key];
     if (

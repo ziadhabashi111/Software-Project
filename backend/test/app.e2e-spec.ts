@@ -5,6 +5,7 @@ import {
   Module,
   Post,
 } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { IsEmail } from 'class-validator';
 import request from 'supertest';
@@ -33,7 +34,15 @@ describe('HTTP setup (e2e, no database)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [HealthModule, ProbeModule],
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [() => ({ FRONTEND_URL: 'https://travel.example.com' })],
+        }),
+        HealthModule,
+        ProbeModule,
+      ],
     }).compile();
     app = moduleRef.createNestApplication();
     configureApp(app);
@@ -42,6 +51,18 @@ describe('HTTP setup (e2e, no database)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('allows only the configured frontend origin, with credentials', async () => {
+    const res = await request(server())
+      .options('/api/health')
+      .set('Origin', 'https://travel.example.com')
+      .set('Access-Control-Request-Method', 'GET')
+      .expect(204);
+    expect(res.headers['access-control-allow-origin']).toBe(
+      'https://travel.example.com',
+    );
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
   });
 
   it('GET /api/health returns ok', async () => {

@@ -10,6 +10,7 @@ import {
   Max,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
+import { MAX_DAYS } from '../itinerary-limits';
 import { CITY_ID, COUNTRY_CODE, lower, trim, upper } from './transforms';
 
 /** Query for `GET /api/itineraries/public/search` (ITN-21). */
@@ -44,7 +45,7 @@ export class PublicSearchQueryDto extends PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(60)
+  @Max(MAX_DAYS)
   minDays?: number;
 
   @ApiPropertyOptional({ example: 10, description: 'Most days, inclusive' })
@@ -52,6 +53,6 @@ export class PublicSearchQueryDto extends PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(60)
+  @Max(MAX_DAYS)
   maxDays?: number;
 }
