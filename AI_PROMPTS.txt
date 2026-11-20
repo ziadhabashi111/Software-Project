@@ -795,3 +795,15 @@ Fix every M1 audit finding in blog, uploads, hotels and hotel bookings, importan
 How the output was used:
 Claude wrote each fix test-first on fix/BLG-01-blog-hotels-review-fixes; I reviewed the full diff. Blog writing, reporting and post uploads are registered users only (the sheet's actor); upload kinds are tied to their role. Holds bump each room's version inside their transaction and moderator changes save with optimistic concurrency, so a block and a hold can no longer both commit. Review reports check the review exists, is visible and is not the reporter's own. City must be in country. An upload belongs to one item; unattached stand-alone uploads are removed after 24 hours. Author itineraries and room lists are paginated by 10. The hotel sweep now cancels the PaymentIntent first and leaves an already-paid hold to the webhook, like flights. Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-13, GEN-02, ACC-19, GEN-05, ITN-14, ITN-16, GEN-07, ACC-06, ACC-12, ACC-17, GEN-09, FLT-22
+Prompt:
+Fix every M1 audit finding in accounts, admin, itineraries and shared code, important first then minor: null passes validation on update bodies (saved or a 500), auth cookies are not Secure by default, any list accepts limit=100, the budget lists are not paginated, an admin action can succeed without its audit record, two tabs refreshing at once log the user out, deactivation can race a booking confirmation, the admin booking status filter is not validated, CORS and MAX_DAYS are hardcoded, reported itineraries are never checked, and .env.example lists an unused FLIGHT_HOLD_MINUTES.
+
+How the output was used:
+Claude wrote each fix test-first on fix/GEN-13-accounts-itineraries-review-fixes; I reviewed the full diff. A shared IsOptionalNonNull decorator (and PartialType with skipNullProperties: false) rejects null on every update body in all modules. Cookies are Secure unless COOKIE_SECURE=false. Page size is capped at 10 and the budget lists are paginated. Admin account actions and their audit records share a transaction. A just-rotated refresh token has a 30-second grace window. Deactivation marks the account, ends its unpaid holds, then checks Confirmed bookings, so a late payment is refunded. The booking status filter is validated, CORS comes from validated config and MAX_DAYS is shared. Reports on itineraries must target a public, visible itinerary that is not the reporter's own. Lint, unit, build and e2e pass.
+================================================

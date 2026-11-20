@@ -3,9 +3,10 @@ import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export const DEFAULT_PAGE_SIZE = 10;
-export const MAX_PAGE_SIZE = 100;
+/** GEN-05 fixes the page size at 10, so a client may ask for fewer, never more. */
+export const MAX_PAGE_SIZE = DEFAULT_PAGE_SIZE;
 
-/** Query parameters for every paginated list (GEN-05: page size 10 by default). */
+/** Query parameters for every paginated list (GEN-05: page size 10). */
 export class PaginationQueryDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()

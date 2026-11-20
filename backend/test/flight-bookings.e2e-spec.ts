@@ -7,6 +7,7 @@ import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { FlightBookingExpiryService } from '../src/flight-bookings/flight-booking-expiry.service';
+import { BookingStatus } from '../src/common/booking-status/booking-status';
 import { FlightBookingPayments } from '../src/flight-bookings/flight-booking-payments';
 import { FlightBookingsModule } from '../src/flight-bookings/flight-bookings.module';
 import {
@@ -1355,35 +1356,42 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .expect(409);
     });
 
-    it('allows deactivation with only an unpaid hold', async () => {
+    it('allows deactivation with only an unpaid hold, and ends that hold', async () => {
       const flight = await makeFlight();
-      const { user } = await heldBooking(flight);
+      const { user, booking } = await heldBooking(flight);
       const res = await user.client
         .delete('/api/users/me')
         .query({ confirm: 'true' });
       expect(res.status).toBeLessThan(300);
+      // A payment landing after this is refunded, not confirmed (ACC-12).
+      const ended = await bookings.findById(booking.id).lean();
+      expect(ended?.status).toBe(BookingStatus.EXPIRED);
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
     it('shows flight bookings in the admin bookings list', async () => {
       const flight = await makeFlight();
       const { booking } = await confirmed(flight);
       const admin = await loggedInAs(Role.ADMIN);
-      const res = await admin.client
-        .get('/api/admin/bookings')
-        .query({ type: 'flight', status: 'Confirmed', limit: 100 })
-        .expect(200);
-      const items = (
-        res.body as {
-          items: {
-            id: string;
-            type: string;
-            reference: string;
-            provider: { name: string };
-            amount: number;
-            status: string;
-          }[];
-        }
-      ).items;
+      type Row = {
+        id: string;
+        type: string;
+        reference: string;
+        provider: { name: string };
+        amount: number;
+        status: string;
+      };
+      // Page size is fixed at 10 (GEN-05): walk every page.
+      const items: Row[] = [];
+      for (let page = 1; ; page += 1) {
+        const res = await admin.client
+          .get('/api/admin/bookings')
+          .query({ type: 'flight', status: 'Confirmed', page })
+          .expect(200);
+        const body = res.body as { items: Row[]; total: number };
+        items.push(...body.items);
+        if (items.length >= body.total || body.items.length === 0) break;
+      }
       const row = items.find((i) => i.id === booking.id);
       expect(row).toMatchObject({
         type: 'flight',

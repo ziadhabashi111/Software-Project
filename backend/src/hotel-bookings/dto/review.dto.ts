@@ -9,6 +9,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -35,7 +36,7 @@ export class CreateReviewDto {
 /** Body for `PATCH /api/reviews/:id`. Send `text: null` to remove the text. */
 export class UpdateReviewDto {
   @ApiPropertyOptional({ minimum: 1, maximum: 5, example: 4 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsInt()
   @Min(1)
   @Max(5)

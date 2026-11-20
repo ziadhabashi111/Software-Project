@@ -1637,6 +1637,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         ).expect(201);
         await guest.client.delete('/api/users/me?confirm=true').expect(204);
       });
+
+      it('ends an unpaid hold when the account is deactivated, freeing its rooms', async () => {
+        const guest = await loggedInAs();
+        const res = await hold(
+          guest.client,
+          body([addRoom()], '2028-03-12', '2028-03-13'),
+        ).expect(201);
+        const held = res.body as HotelReservationView;
+        await guest.client.delete('/api/users/me?confirm=true').expect(204);
+
+        const ended = await reservations.findById(held.id).lean();
+        expect(ended?.status).toBe(ReservationStatus.EXPIRED);
+        expect(await nights.countDocuments({ reservation: ended?._id })).toBe(
+          0,
+        );
+      });
     });
 
     describe('ACC-17: hotel reservations in the admin booking list', () => {
@@ -1665,12 +1681,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           ).expect(201)
         ).body as HotelReservationView;
         const admin = await loggedInAs(Role.ADMIN);
-        const list = async (query: string) =>
-          (
-            await admin.client
-              .get(`/api/admin/bookings?type=hotel&limit=100${query}`)
-              .expect(200)
-          ).body as { items: Row[]; total: number };
+        // Page size is fixed at 10 (GEN-05): walk every page.
+        const list = async (query: string) => {
+          const items: Row[] = [];
+          let total = 0;
+          for (let page = 1; ; page += 1) {
+            const body = (
+              await admin.client
+                .get(`/api/admin/bookings?type=hotel&page=${page}${query}`)
+                .expect(200)
+            ).body as { items: Row[]; total: number };
+            total = body.total;
+            items.push(...body.items);
+            if (items.length >= total || body.items.length === 0) break;
+          }
+          return { items, total };
+        };
 
         const all = await list('&from=2029-05-01&to=2029-05-31');
         const row = all.items.find((r) => r.id === confirmed.id);
@@ -1695,7 +1721,9 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           await list('&status=Pending%20Payment&from=2029-05-01&to=2029-05-31')
         ).items.map((r) => r.id);
         expect(pendingIds).toEqual([pending.id]);
-        expect((await list('&status=Booked')).total).toBe(0);
+        await admin.client
+          .get('/api/admin/bookings?type=hotel&status=Booked')
+          .expect(400);
         expect(
           (await list('&from=2029-05-02&to=2029-05-31')).items.map((r) => r.id),
         ).toEqual([pending.id]);

@@ -89,24 +89,46 @@ describe('SessionService (ACC-06, real MongoDB in memory)', () => {
     expect(await sessions.validateAndTouch(session.id)).toBe(false);
   });
 
-  it('rotates the refresh token once and rejects the old one', async () => {
+  it('rotates the refresh token and hands back the id for the new token', async () => {
     const session = await sessions.create(userId, 'jti-1');
-    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe(true);
-    expect(await sessions.rotate(session.id, 'jti-2', 'jti-3')).toBe(true);
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe('jti-2');
+    expect(await sessions.rotate(session.id, 'jti-2', 'jti-3')).toBe('jti-3');
   });
 
-  it('revokes the whole session when an old refresh token is replayed', async () => {
+  it('lets a second tab refreshing at the same moment keep the session (ACC-06)', async () => {
     const session = await sessions.create(userId, 'jti-1');
-    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe(true);
-    expect(await sessions.rotate(session.id, 'jti-1', 'jti-3')).toBe(false);
+    // Both tabs sent jti-1; the first one rotated it.
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe('jti-2');
+    // The second gets the current id back, so both end with the same token.
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-x')).toBe('jti-2');
+    expect(await sessions.validateAndTouch(session.id)).toBe(true);
+    expect(await sessions.rotate(session.id, 'jti-2', 'jti-3')).toBe('jti-3');
+  });
+
+  it('revokes the whole session when an old refresh token is replayed after the grace window', async () => {
+    const session = await sessions.create(userId, 'jti-1');
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe('jti-2');
+    await model.updateOne(
+      { _id: session.id },
+      { rotatedAt: new Date(Date.now() - MINUTE) },
+    );
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-3')).toBeNull();
     expect(await sessions.validateAndTouch(session.id)).toBe(false);
-    expect(await sessions.rotate(session.id, 'jti-2', 'jti-4')).toBe(false);
+    expect(await sessions.rotate(session.id, 'jti-2', 'jti-4')).toBeNull();
+  });
+
+  it('revokes at once when a token two rotations old is replayed', async () => {
+    const session = await sessions.create(userId, 'jti-1');
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe('jti-2');
+    expect(await sessions.rotate(session.id, 'jti-2', 'jti-3')).toBe('jti-3');
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-4')).toBeNull();
+    expect(await sessions.validateAndTouch(session.id)).toBe(false);
   });
 
   it('does not rotate an idle session', async () => {
     const session = await sessions.create(userId, 'jti-1');
     await ageActivity(session.id, 31);
-    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBe(false);
+    expect(await sessions.rotate(session.id, 'jti-1', 'jti-2')).toBeNull();
   });
 
   it('revokes every session of a user, and only that user', async () => {

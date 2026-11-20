@@ -91,8 +91,9 @@ export class ReportsService implements ReportSource, OnModuleInit {
         throw new BadRequestException('You cannot report your own content');
       }
     }
-    // Without a registered checker (reviews, itineraries until their modules
-    // register one) the id is accepted; resolving copes with missing content.
+    // Reviews and itineraries register their checkers from their own modules;
+    // if a module is not loaded the id is accepted and resolving copes with
+    // missing content.
 
     const filter = {
       reporter: new Types.ObjectId(reporter.id),

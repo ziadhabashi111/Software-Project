@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
+import { MAX_DAYS } from '../itinerary-limits';
 
 /** Query for `GET /api/itineraries/:id/hotels` (ITN-25). */
 export class ItineraryHotelsQueryDto extends PaginationQueryDto {
@@ -15,7 +16,7 @@ export class ItineraryHotelsQueryDto extends PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(60)
+  @Max(MAX_DAYS)
   group = 1;
 
   @ApiPropertyOptional({ default: 1, minimum: 1, maximum: 30 })

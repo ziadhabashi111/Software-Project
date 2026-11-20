@@ -6,6 +6,7 @@ import {
   Optional,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Role } from '../auth/auth.types';
 import { SessionService } from '../auth/sessions/session.service';
 import { fieldError } from '../common/validation/validation-errors';
 import { CURRENCY_CATALOG } from './currency-catalog';
@@ -59,12 +60,35 @@ export class ProfileService {
   }
 
   /**
-   * ACC-12: blocked while the user has upcoming Confirmed bookings. A
+   * ACC-12: blocked while the user has upcoming Confirmed bookings; unpaid
+   * holds are ended (a refused deactivation does not bring them back). A
    * deactivated user is signed out everywhere and cannot log in again; their
    * posts and public itineraries are hidden by those modules.
    */
   async deactivate(userId: string): Promise<void> {
-    if (await this.blockers.hasUpcomingBookings(userId)) {
+    // Mark the account first, then look for bookings: a booking confirmed
+    // while this runs is then seen by the check (instead of landing on an
+    // account that was checked a moment earlier).
+    const marked = await this.users.transitionStatus(
+      userId,
+      UserStatus.ACTIVE,
+      UserStatus.DEACTIVATED,
+      [Role.USER],
+    );
+    if (!marked) throw new UnauthorizedException('Not logged in');
+
+    let blocked: boolean;
+    try {
+      // Unpaid holds end first: a payment arriving after this is refunded,
+      // and one that confirmed just before is seen by the check below.
+      await this.blockers.endPendingHolds(userId);
+      blocked = await this.blockers.hasUpcomingBookings(userId);
+    } catch (error) {
+      await this.restore(userId);
+      throw error;
+    }
+    if (blocked) {
+      await this.restore(userId);
       throw new ConflictException({
         statusCode: 409,
         error: 'Conflict',
@@ -73,7 +97,16 @@ export class ProfileService {
         code: 'UPCOMING_BOOKINGS',
       });
     }
-    await this.users.setStatus(userId, UserStatus.DEACTIVATED);
     await this.sessions.revokeAllForUser(userId);
+  }
+
+  /** Undoes the deactivation mark when deactivation is refused. */
+  private async restore(userId: string): Promise<void> {
+    await this.users.transitionStatus(
+      userId,
+      UserStatus.DEACTIVATED,
+      UserStatus.ACTIVE,
+      [Role.USER],
+    );
   }
 }

@@ -123,11 +123,9 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Session expired');
     }
 
-    const newJti = randomUUID();
-    if (!(await this.sessions.rotate(sessionId, jti, newJti))) {
-      throw new UnauthorizedException('Session expired');
-    }
-    return this.issueTokens(user, sessionId, newJti);
+    const nextJti = await this.sessions.rotate(sessionId, jti, randomUUID());
+    if (!nextJti) throw new UnauthorizedException('Session expired');
+    return this.issueTokens(user, sessionId, nextJti);
   }
 
   /** ACC-06: revokes the session on the server. Never fails: logging out twice is fine. */

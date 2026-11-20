@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import type { Connection } from 'mongoose';
 import type { AuditLogService } from '../audit/audit-log.service';
 import { Role } from '../auth/auth.types';
 import type { PasswordService } from '../auth/password.service';
@@ -10,6 +11,8 @@ import type { ProviderDirectory } from './provider-directory';
 
 const ADMIN = 'admin-1';
 const TARGET = 'user-1';
+/** Stands in for the transaction's MongoDB session. */
+const SESSION = { id: 'session' };
 
 function userDoc(status: UserStatus) {
   return {
@@ -35,12 +38,18 @@ function setup(status: UserStatus, withNotifier = true) {
   const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(undefined) };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
   const notifier = { notify: jest.fn().mockResolvedValue(undefined) };
+  const connection = {
+    transaction: jest.fn((work: (session: unknown) => Promise<unknown>) =>
+      work(SESSION),
+    ),
+  };
   const service = new AdminAccountsService(
     users as unknown as UsersService,
     {} as PasswordService,
     sessions as unknown as SessionService,
     audit as unknown as AuditLogService,
     {} as ProviderDirectory,
+    connection as unknown as Connection,
     withNotifier ? notifier : undefined,
   );
   return { service, users, sessions, audit, notifier };
@@ -77,7 +86,7 @@ describe('AdminAccountsService notifications (GEN-01)', () => {
     notifier.notify.mockRejectedValue(new Error('notifications down'));
     const result = await service.suspend(ADMIN, TARGET);
     expect(result.status).toBe(UserStatus.SUSPENDED);
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(TARGET);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(TARGET, SESSION);
     expect(audit.log).toHaveBeenCalledTimes(1);
   });
 

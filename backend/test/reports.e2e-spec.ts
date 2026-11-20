@@ -234,7 +234,7 @@ describe('Report submission (GEN-09) and blog moderation hooks (GEN-10)', () => 
     }
   });
 
-  it('accepts reviews and itineraries by id until their modules add a check', async () => {
+  it('accepts reviews and itineraries by id when their modules are not loaded', async () => {
     const reporter = await loggedInAs();
     for (const type of ['review', 'itinerary']) {
       await reporter.client

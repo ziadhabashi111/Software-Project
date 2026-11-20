@@ -16,6 +16,7 @@ import {
   HotelReservationDocument,
 } from './schemas/hotel-reservation.schema';
 import { startOfUtcDay } from './stay-rules';
+import { HotelReservationsService } from './hotel-reservations.service';
 
 /**
  * The admin filter may say "Confirmed", "Pending Payment", "CONFIRMED" or
@@ -47,11 +48,17 @@ export class HotelBookingHooks
     private readonly reservations: Model<HotelReservationDocument>,
     private readonly blockers: DeactivationBlockers,
     private readonly sources: BookingSources,
+    private readonly holds: HotelReservationsService,
   ) {}
 
   onModuleInit(): void {
     this.blockers.register(this);
     this.sources.register(this);
+  }
+
+  /** ACC-12: unpaid holds end when the account is deactivated. */
+  endPendingHolds(userId: string): Promise<void> {
+    return this.holds.endHoldsOfUser(userId);
   }
 
   /**

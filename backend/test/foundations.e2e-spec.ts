@@ -78,7 +78,10 @@ describe('Shared foundations (e2e, no database)', () => {
           isGlobal: true,
           ignoreEnvFile: true,
           load: [
-            () => ({ JWT_SECRET: 'an-e2e-secret-with-more-than-16-chars' }),
+            () => ({
+              JWT_SECRET: 'an-e2e-secret-with-more-than-16-chars',
+              COOKIE_SECURE: 'false',
+            }),
           ],
         }),
         AuthModule,
@@ -136,7 +139,7 @@ describe('Shared foundations (e2e, no database)', () => {
     const res = await request(server()).get('/api/probe/list').expect(200);
     expect(res.body).toEqual({ items: ['a'], total: 31, page: 1, limit: 10 });
     await request(server()).get('/api/probe/list?page=0').expect(400);
-    await request(server()).get('/api/probe/list?limit=500').expect(400);
+    await request(server()).get('/api/probe/list?limit=11').expect(400);
   });
 
   it('returns field-level validation errors', async () => {

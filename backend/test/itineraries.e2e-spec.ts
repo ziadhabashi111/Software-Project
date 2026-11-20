@@ -390,6 +390,27 @@ describe('Itineraries: structure, days and activities (ITN-01..10, 20; real Mong
       ]);
     });
 
+    it.each([['title'], ['countries'], ['startDate'], ['visibility']])(
+      'rejects a null %s with a field error and keeps the itinerary (GEN-13)',
+      async (field) => {
+        const { client } = await loggedInAs();
+        const created = await createItinerary(client);
+        const res = await client
+          .patch(`/api/itineraries/${created.id}`)
+          .send({ [field]: null })
+          .expect(400);
+        const errors = (res.body as { errors: { field: string }[] }).errors;
+        expect(errors.map((e) => e.field)).toEqual([field]);
+        const after = await client
+          .get(`/api/itineraries/${created.id}`)
+          .expect(200);
+        expect(after.body).toMatchObject({
+          title: created.title,
+          countries: created.countries,
+        });
+      },
+    );
+
     it('changes visibility and Private takes effect immediately', async () => {
       const { client } = await loggedInAs();
       const created = await createItinerary(client);
