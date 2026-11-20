@@ -8,7 +8,6 @@ import { isValidObjectId, Model, Types } from 'mongoose';
 import type { QueryFilter } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
 import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
-import { fieldError } from '../common/validation/validation-errors';
 import type { ImageFile } from '../uploads/uploads.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { BlogModerationService } from './blog-moderation.service';
@@ -42,17 +41,25 @@ export class PostsService {
   /** BLG-01: title and body required; tags and images optional; draft by default. */
   async create(author: AuthUser, dto: CreatePostDto): Promise<PostView> {
     const imageUrls = dto.imageUrls ?? [];
-    await this.assertOwnImageUrls(author, imageUrls);
+    // GEN-08: each URL is a file the author uploaded and no other post uses,
+    // so deleting one post never deletes another post's image.
+    await this.uploads.attach(imageUrls, author.id, 'imageUrls');
     const status = dto.status ?? PostStatus.DRAFT;
-    const post = await this.posts.create({
-      author: new Types.ObjectId(author.id),
-      title: dto.title,
-      body: dto.body,
-      tags: dto.tags ?? [],
-      images: imageUrls.map((url) => ({ url })),
-      status,
-      ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
-    });
+    let post: PostDocument;
+    try {
+      post = await this.posts.create({
+        author: new Types.ObjectId(author.id),
+        title: dto.title,
+        body: dto.body,
+        tags: dto.tags ?? [],
+        images: imageUrls.map((url) => ({ url })),
+        status,
+        ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
+      });
+    } catch (error) {
+      await this.uploads.detach(imageUrls);
+      throw error;
+    }
     return toPostView(post);
   }
 
@@ -191,24 +198,5 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
     return post;
-  }
-
-  /**
-   * GEN-08: every URL must be a file the author uploaded, so nobody can attach
-   * (and later delete with the post) another user's image.
-   */
-  private async assertOwnImageUrls(
-    author: AuthUser,
-    urls: string[],
-  ): Promise<void> {
-    const owned = await Promise.all(
-      urls.map((url) => this.uploads.isUploadedUrl(url, author.id)),
-    );
-    if (owned.includes(false)) {
-      throw fieldError(
-        'imageUrls',
-        'Each image must be one you uploaded through POST /api/uploads/images',
-      );
-    }
   }
 }

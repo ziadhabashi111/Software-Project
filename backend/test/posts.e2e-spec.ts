@@ -171,6 +171,32 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
       expect(post.images.map((i) => i.url)).toEqual([image.url]);
     });
 
+    it('refuses the same image twice in a post, and an image already used by another post (BLG-10, GEN-08)', async () => {
+      const { client } = await author();
+      const uploaded = await client
+        .post('/api/uploads/images')
+        .attach('images', PNG, 'a.png')
+        .expect(201);
+      const [image] = (uploaded.body as { images: { url: string }[] }).images;
+
+      const twice = await client
+        .post('/api/posts')
+        .send({ title: 'T', body: 'b', imageUrls: [image.url, image.url] })
+        .expect(400);
+      expect(fieldsOf(twice)).toEqual(['imageUrls']);
+
+      const first = await createPost(client, { imageUrls: [image.url] });
+      const reused = await client
+        .post('/api/posts')
+        .send({ title: 'T2', body: 'b', imageUrls: [image.url] })
+        .expect(400);
+      expect(fieldsOf(reused)).toEqual(['imageUrls']);
+
+      // Deleting the first post still removes its file: nobody else uses it.
+      await client.delete(`/api/posts/${first.id}`).expect(204);
+      expect(await readdir(dir)).not.toContain(image.url.split('/').pop());
+    });
+
     it("rejects another user's uploaded image URL (GEN-08 ownership)", async () => {
       const a = await author();
       const b = await author();

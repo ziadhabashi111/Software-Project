@@ -87,6 +87,7 @@ export class UploadsService {
     kind: ImageOwnerKind,
     ownerId: string,
     existing = 0,
+    options: { standalone?: boolean } = {},
   ): Promise<StoredImage[]> {
     if (!files || files.length === 0) {
       throw fieldError('images', 'Choose at least one JPG or PNG image');
@@ -108,6 +109,8 @@ export class UploadsService {
     await mkdir(this.directory, { recursive: true });
     const owner = new Types.ObjectId(ownerId);
     const names = checked.map((file) => file.name);
+    const standalone = options.standalone === true;
+    const now = new Date();
     // Record the owner first, then write the files; on any failure undo both
     // so there is never an unowned file or a record without its file.
     await this.records.insertMany(
@@ -116,6 +119,10 @@ export class UploadsService {
         url: this.urlFor(file.name),
         ownerId: owner,
         kind,
+        standalone,
+        // Saved straight onto an item: attached already. Stand-alone files
+        // wait for `attach`.
+        ...(standalone ? {} : { attachedAt: now }),
       })),
     );
     const written: string[] = [];
@@ -150,6 +157,56 @@ export class UploadsService {
       ownerId: new Types.ObjectId(ownerId),
     });
     return found !== null;
+  }
+
+  /**
+   * Claims stand-alone uploads for one item (a post's `imageUrls`, an airline
+   * `logoUrl`): each URL must be a file `ownerId` uploaded that no item uses
+   * yet. All or nothing: on any bad URL nothing stays claimed and a 400 field
+   * error is thrown on `field`. A claimed file is never removed by the cleanup.
+   */
+  async attach(
+    urls: string[],
+    ownerId: string,
+    field = 'images',
+  ): Promise<void> {
+    const refuse = () =>
+      fieldError(
+        field,
+        'Each image must be one you uploaded through POST /api/uploads/images and not used anywhere else',
+      );
+    if (urls.length === 0) return;
+    const names = urls.map((url) => this.nameFromUrl(url));
+    if (names.some((name) => name === null) || !isValidObjectId(ownerId)) {
+      throw refuse();
+    }
+    const owner = new Types.ObjectId(ownerId);
+    const claimed: string[] = [];
+    for (const name of names as string[]) {
+      const result = await this.records.updateOne(
+        { filename: name, ownerId: owner, attachedAt: { $exists: false } },
+        { $set: { attachedAt: new Date() } },
+      );
+      if (result.modifiedCount !== 1) {
+        await this.detach(claimed);
+        throw refuse();
+      }
+      claimed.push(name);
+    }
+  }
+
+  /** Undoes `attach` (for example when saving the item then fails). */
+  async detach(urlsOrNames: string[]): Promise<void> {
+    const names = urlsOrNames
+      .map((value) =>
+        STORED_NAME.test(value) ? value : this.nameFromUrl(value),
+      )
+      .filter((name): name is string => name !== null);
+    if (names.length === 0) return;
+    await this.records.updateMany(
+      { filename: { $in: names } },
+      { $unset: { attachedAt: 1 } },
+    );
   }
 
   /**

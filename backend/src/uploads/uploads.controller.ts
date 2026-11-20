@@ -89,7 +89,9 @@ export class UploadsController {
       );
     }
     return {
-      images: await this.uploads.saveImages(files, query.kind, user.id),
+      images: await this.uploads.saveImages(files, query.kind, user.id, 0, {
+        standalone: true,
+      }),
     };
   }
 }

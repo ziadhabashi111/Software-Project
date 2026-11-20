@@ -30,6 +30,22 @@ export class Upload {
   @Prop({ type: String, required: true, enum: Object.keys(IMAGE_LIMITS) })
   kind!: ImageOwnerKind;
 
+  /**
+   * True for files from the stand-alone `POST /api/uploads/images`: they are
+   * attached to an item later (`UploadsService.attach`), and removed by the
+   * cleanup job when that never happens.
+   */
+  @Prop({ type: Boolean, default: false })
+  standalone!: boolean;
+
+  /**
+   * When the file was attached to its post, activity, hotel or airline. Files
+   * saved straight onto an item are attached at once. A file is attached to
+   * one item only, so deleting that item can safely delete the file.
+   */
+  @Prop({ type: Date })
+  attachedAt?: Date;
+
   createdAt?: Date;
 }
 
