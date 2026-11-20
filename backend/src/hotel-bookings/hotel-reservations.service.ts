@@ -10,6 +10,7 @@ import { Interval } from '@nestjs/schedule';
 import type { ClientSession, Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../common/booking-status/hold';
 import { PLATFORM_CURRENCY } from '../payments/platform-currency';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelInventoryRegistry } from './hotel-inventory';
@@ -65,7 +66,7 @@ export class HotelReservationsService {
     private readonly shared: SharedServices,
   ) {}
 
-  /** `POST /api/hotel-bookings`: hold the rooms for 10 minutes. */
+  /** `POST /api/hotel-bookings`: hold the rooms for HOLD_MINUTES. */
   async hold(
     user: AuthUser,
     dto: CreateHotelBookingDto,
@@ -175,7 +176,7 @@ export class HotelReservationsService {
   }
 
   /**
-   * Turns unpaid holds whose 10 minutes are over into Expired and releases
+   * Turns unpaid holds whose HOLD_MINUTES are over into Expired and releases
    * their rooms (HTL-18). Runs every 30 seconds; safe to run concurrently.
    */
   @Interval('hotel-hold-expiry', 30_000)
@@ -186,14 +187,15 @@ export class HotelReservationsService {
           status: ReservationStatus.PENDING_PAYMENT,
           holdExpiresAt: { $lte: now },
         },
-        { _id: 1 },
+        { _id: 1, holdExpiresAt: 1 },
       )
       .limit(EXPIRY_BATCH)
       .lean();
 
     let expired = 0;
-    for (const { _id } of due) {
+    for (const { _id, holdExpiresAt } of due) {
       try {
+        if (!(await this.paymentStopped(_id, holdExpiresAt, now))) continue;
         const changed = await this.connection.transaction(async (session) => {
           const result = await this.reservations.updateOne(
             {
@@ -210,10 +212,7 @@ export class HotelReservationsService {
           await this.roomNights.deleteMany({ reservation: _id }, { session });
           return true;
         });
-        if (changed) {
-          expired += 1;
-          await this.shared.cancelPendingPayment(_id.toString());
-        }
+        if (changed) expired += 1;
       } catch (error) {
         this.logger.error(
           `Could not expire hotel reservation ${_id.toString()}`,
@@ -222,6 +221,28 @@ export class HotelReservationsService {
       }
     }
     return expired;
+  }
+
+  /**
+   * PAY-01, HTL-18: before a run-out hold expires, its PaymentIntent is
+   * cancelled. If Stripe says the user already paid (in the last seconds of
+   * the hold), the hold is left to the webhook, which confirms it or refunds
+   * the payment. Once Stripe has stopped retrying webhooks the hold expires
+   * anyway, so rooms are never held forever.
+   */
+  private async paymentStopped(
+    reservationId: Types.ObjectId,
+    holdExpiresAt: Date | undefined,
+    now: Date,
+  ): Promise<boolean> {
+    const payment = await this.shared.cancelPendingPayment(
+      reservationId.toString(),
+    );
+    if (payment !== 'not_cancellable') return true;
+    return (
+      !!holdExpiresAt &&
+      now.getTime() - holdExpiresAt.getTime() >= STRIPE_WEBHOOK_RETRY_MS
+    );
   }
 
   /**

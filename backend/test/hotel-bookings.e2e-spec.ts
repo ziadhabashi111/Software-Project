@@ -23,6 +23,7 @@ import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation
 import { ReviewModerator } from '../src/hotel-bookings/review-moderator';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../src/common/booking-status/hold';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
 import type { HotelReviewView } from '../src/hotel-bookings/review-view';
 import { UserStatus } from '../src/users/user-status';
@@ -765,6 +766,26 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         'hotel',
         held.id,
       );
+    });
+
+    it('leaves a hold the user already paid to the webhook, until Stripe stops retrying (HTL-18, PAY-01)', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-20', '2027-10-21');
+      paymentService.cancelPendingPayment.mockResolvedValue('not_cancellable');
+      try {
+        await service.expireDueHolds(new Date(Date.now() + 11 * 60_000));
+        const kept = await reservations.findById(held.id).lean();
+        expect(kept?.status).toBe(ReservationStatus.PENDING_PAYMENT);
+        expect(await nights.countDocuments({ reservation: kept?._id })).toBe(1);
+
+        await service.expireDueHolds(
+          new Date(Date.now() + 11 * 60_000 + STRIPE_WEBHOOK_RETRY_MS),
+        );
+        const expired = await reservations.findById(held.id).lean();
+        expect(expired?.status).toBe(ReservationStatus.EXPIRED);
+      } finally {
+        paymentService.cancelPendingPayment.mockResolvedValue(undefined);
+      }
     });
   });
 
