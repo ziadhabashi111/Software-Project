@@ -783,3 +783,15 @@ Audit everything we built for M1 against the project description and fix every b
 How the output was used:
 Claude wrote each fix test-first on fix/PAY-01-payment-and-booking-review-fixes; I reviewed the full diff. Webhook events are recorded only after handling (handlers are idempotent). "Paid on time" uses Stripe's event time, and the flight expiry sweep leaves a hold alone when Stripe says it was already paid. Rejected-payment refunds are Refund records (kind rejected_payment) with a notification; the old unique refund index is replaced by a partial one. Refund results never go from final back to pending and keep the failure reason. Flights answer 409 HOLD_EXPIRED; one shared HOLD_MINUTES constant; completeDue pages through every Confirmed booking; a return may use other airports of the same two cities. Cancellation refunds keep the tiers accepted at booking (team decision). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-05, BLG-06, BLG-07, BLG-10, BLG-12, GEN-05, GEN-08, GEN-09, HTL-01, HTL-03, HTL-05, HTL-06, HTL-08, HTL-18, PAY-01
+Prompt:
+Fix every M1 audit finding in blog, uploads, hotels and hotel bookings, important first then minor: moderators and admins can post, comment, like and report; a moderator's room block can interleave with a guest hold; reports on reviews are never checked; a hotel's city is not checked against its country; one uploaded image can be attached to two posts; a hotel photo removed by another moderator leaves its file behind; stand-alone uploads are never cleaned up; the author page and the rooms lists are not paginated by 10; and the hotel expiry sweep expires a hold whose payment Stripe already took.
+
+How the output was used:
+Claude wrote each fix test-first on fix/BLG-01-blog-hotels-review-fixes; I reviewed the full diff. Blog writing, reporting and post uploads are registered users only (the sheet's actor); upload kinds are tied to their role. Holds bump each room's version inside their transaction and moderator changes save with optimistic concurrency, so a block and a hold can no longer both commit. Review reports check the review exists, is visible and is not the reporter's own. City must be in country. An upload belongs to one item; unattached stand-alone uploads are removed after 24 hours. Author itineraries and room lists are paginated by 10. The hotel sweep now cancels the PaymentIntent first and leaves an already-paid hold to the webhook, like flights. Lint, unit, build and e2e pass.
+================================================
