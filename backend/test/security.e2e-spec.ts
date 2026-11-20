@@ -52,6 +52,25 @@ describe('HTTP hardening (ACC-05, ACC-19, real HTTP)', () => {
     expect(limited.headers['retry-after']).toBeDefined();
   });
 
+  // The reset endpoints send email and take guessable-looking tokens, so one
+  // address cannot hammer them.
+  it.each(['forgot-password', 'reset-password'])(
+    'allows 10 %s requests per minute from one address, then answers 429',
+    async (route) => {
+      const call = () =>
+        request(ctx.server)
+          .post(`/api/auth/${route}`)
+          .send({ email: 'nobody@example.com', token: 'x', newPassword: 'x' });
+      // Any answer except 429 counts: the body may be invalid, the limit still applies.
+      for (let i = 0; i < 10; i += 1) {
+        const res = await call();
+        expect(res.status).not.toBe(429);
+      }
+      const limited = await call().expect(429);
+      expect((limited.body as { code?: string }).code).toBe('RATE_LIMITED');
+    },
+  );
+
   // One person testing several roles in Swagger, or a whole class behind one
   // address, must not be locked out after a handful of sign-ups.
   it('allows 20 registrations per minute from one address, then answers 429', async () => {
