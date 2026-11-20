@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
+import { Interval } from '@nestjs/schedule';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
@@ -29,6 +30,19 @@ export interface ImageFile {
 /** URL path the files are served under (see UploadsModule). */
 export const UPLOADS_ROUTE = '/uploads';
 
+/** Stand-alone uploads nobody attached within this time are deleted. */
+export const UNATTACHED_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Kinds the cleanup may delete. Airline logos stay until the airlines module
+ * claims its `logoUrl` with `attach` (FLT-01), so a logo is never deleted
+ * from under an airline.
+ */
+const CLEANED_KINDS: ImageOwnerKind[] = ['post', 'activity', 'hotel'];
+
+/** How many abandoned uploads one cleanup run deletes. */
+const CLEANUP_BATCH = 100;
+
 const STORED_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/;
 
@@ -45,6 +59,7 @@ const STORED_NAME =
  */
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
   readonly directory: string;
   private readonly publicBase: string;
 
@@ -87,6 +102,7 @@ export class UploadsService {
     kind: ImageOwnerKind,
     ownerId: string,
     existing = 0,
+    options: { standalone?: boolean } = {},
   ): Promise<StoredImage[]> {
     if (!files || files.length === 0) {
       throw fieldError('images', 'Choose at least one JPG or PNG image');
@@ -108,6 +124,8 @@ export class UploadsService {
     await mkdir(this.directory, { recursive: true });
     const owner = new Types.ObjectId(ownerId);
     const names = checked.map((file) => file.name);
+    const standalone = options.standalone === true;
+    const now = new Date();
     // Record the owner first, then write the files; on any failure undo both
     // so there is never an unowned file or a record without its file.
     await this.records.insertMany(
@@ -116,6 +134,10 @@ export class UploadsService {
         url: this.urlFor(file.name),
         ownerId: owner,
         kind,
+        standalone,
+        // Saved straight onto an item: attached already. Stand-alone files
+        // wait for `attach`.
+        ...(standalone ? {} : { attachedAt: now }),
       })),
     );
     const written: string[] = [];
@@ -153,6 +175,56 @@ export class UploadsService {
   }
 
   /**
+   * Claims stand-alone uploads for one item (a post's `imageUrls`, an airline
+   * `logoUrl`): each URL must be a file `ownerId` uploaded that no item uses
+   * yet. All or nothing: on any bad URL nothing stays claimed and a 400 field
+   * error is thrown on `field`. A claimed file is never removed by the cleanup.
+   */
+  async attach(
+    urls: string[],
+    ownerId: string,
+    field = 'images',
+  ): Promise<void> {
+    const refuse = () =>
+      fieldError(
+        field,
+        'Each image must be one you uploaded through POST /api/uploads/images and not used anywhere else',
+      );
+    if (urls.length === 0) return;
+    const names = urls.map((url) => this.nameFromUrl(url));
+    if (names.some((name) => name === null) || !isValidObjectId(ownerId)) {
+      throw refuse();
+    }
+    const owner = new Types.ObjectId(ownerId);
+    const claimed: string[] = [];
+    for (const name of names as string[]) {
+      const result = await this.records.updateOne(
+        { filename: name, ownerId: owner, attachedAt: { $exists: false } },
+        { $set: { attachedAt: new Date() } },
+      );
+      if (result.modifiedCount !== 1) {
+        await this.detach(claimed);
+        throw refuse();
+      }
+      claimed.push(name);
+    }
+  }
+
+  /** Undoes `attach` (for example when saving the item then fails). */
+  async detach(urlsOrNames: string[]): Promise<void> {
+    const names = urlsOrNames
+      .map((value) =>
+        STORED_NAME.test(value) ? value : this.nameFromUrl(value),
+      )
+      .filter((name): name is string => name !== null);
+    if (names.length === 0) return;
+    await this.records.updateMany(
+      { filename: { $in: names } },
+      { $unset: { attachedAt: 1 } },
+    );
+  }
+
+  /**
    * Use before saving a client-sent URL (e.g. an airline `logoUrl`): throws a
    * 400 field error on `field` unless `ownerId` uploaded that file.
    */
@@ -187,6 +259,64 @@ export class UploadsService {
     if (!record) return false;
     await this.unlinkQuietly(name);
     return true;
+  }
+
+  /**
+   * Deletes the file of an image its item no longer shows, whoever uploaded
+   * it. For modules that have just removed the URL from their own record
+   * after checking the caller may change that item (for example any
+   * moderator of the hotel, GEN-08, HTL-01): a file belongs to one item only
+   * (`attach`), so nothing else uses it. Unknown or foreign URLs are a no-op.
+   */
+  async removeForItem(urlOrId: string): Promise<boolean> {
+    const name = STORED_NAME.test(urlOrId)
+      ? urlOrId
+      : this.nameFromUrl(urlOrId);
+    if (!name) return false;
+    const record = await this.records.findOneAndDelete({ filename: name });
+    if (!record) return false;
+    await this.unlinkQuietly(name);
+    return true;
+  }
+
+  /**
+   * GEN-08: deletes stand-alone uploads that no item claimed within a day,
+   * so the stand-alone endpoint cannot fill the disk with unused files. Each
+   * delete re-checks that the file is still unattached, so an `attach`
+   * running at the same moment either wins or gets a 400. Runs every hour.
+   */
+  @Interval('unattached-upload-cleanup', 60 * 60 * 1000)
+  async removeUnattached(now: Date = new Date()): Promise<number> {
+    const stale = await this.records
+      .find(
+        {
+          standalone: true,
+          attachedAt: { $exists: false },
+          kind: { $in: CLEANED_KINDS },
+          createdAt: { $lt: new Date(now.getTime() - UNATTACHED_TTL_MS) },
+        },
+        { _id: 1, filename: 1 },
+      )
+      .limit(CLEANUP_BATCH)
+      .lean();
+    let removed = 0;
+    for (const record of stale) {
+      const gone = await this.records.findOneAndDelete({
+        _id: record._id,
+        attachedAt: { $exists: false },
+      });
+      if (!gone) continue;
+      try {
+        await this.unlinkQuietly(record.filename);
+        removed += 1;
+      } catch (error) {
+        this.logger.error(
+          `Could not delete abandoned upload ${record.filename}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+    return removed;
   }
 
   private urlFor(name: string): string {

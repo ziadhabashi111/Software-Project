@@ -27,7 +27,9 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
+import type { Paginated } from '../common/pagination/pagination';
 import { AvailabilityQueryDto } from './dto/availability-query.dto';
+import { ListRoomsQueryDto } from './dto/list-rooms-query.dto';
 import { CreateRoomDto, UpdateRoomDto } from './dto/create-room.dto';
 import { DateRangeDto } from './dto/date-range.dto';
 import type { RoomView } from './room-view';
@@ -84,15 +86,20 @@ export class RoomsController {
   @ApiReq(
     ['HTL-03', 'HTL-04', 'HTL-06'],
     'List my hotel’s rooms',
-    'Every room with its availability ranges and blocked ranges, by room number or name.',
+    'Every room with its availability ranges and blocked ranges, by room number or name, 10 per page (GEN-05).',
   )
   @ApiParam({ name: 'id', description: 'Hotel id' })
-  @ApiOkResponse({ schema: { example: [ROOM_EXAMPLE] } })
+  @ApiOkResponse({
+    schema: {
+      example: { items: [ROOM_EXAMPLE], total: 1, page: 1, limit: 10 },
+    },
+  })
   list(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseObjectIdPipe) id: string,
-  ): Promise<RoomView[]> {
-    return this.rooms.list(user, id);
+    @Query() query: ListRoomsQueryDto,
+  ): Promise<Paginated<RoomView>> {
+    return this.rooms.list(user, id, query);
   }
 
   @Patch('rooms/:roomId')
@@ -293,7 +300,7 @@ export class RoomsController {
   @ApiReq(
     'HTL-08',
     'Room status for a period',
-    'Each room, night by night, between `from` and `to` (both included, at most 62 days): Available, Booked (with the reservation reference, null while it is an unpaid hold) or Blocked (with a reason: BLOCKED by the moderator, DEACTIVATED room, or NOT_OFFERED outside the availability ranges).',
+    'One page of rooms (10 per page, GEN-05; total says how many), each night by night, between `from` and `to` (both included, at most 62 days): Available, Booked (with the reservation reference, null while it is an unpaid hold) or Blocked (with a reason: BLOCKED by the moderator, DEACTIVATED room, or NOT_OFFERED outside the availability ranges).',
   )
   @ApiParam({ name: 'id', description: 'Hotel id' })
   @ApiOkResponse({
@@ -317,6 +324,9 @@ export class RoomsController {
             ],
           },
         ],
+        total: 1,
+        page: 1,
+        limit: 10,
       },
     },
   })

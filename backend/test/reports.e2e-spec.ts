@@ -332,4 +332,16 @@ describe('Report submission (GEN-09) and blog moderation hooks (GEN-10)', () => 
       await blog.deleteComment(new Types.ObjectId().toHexString()),
     ).toBeNull();
   });
+  it.each([Role.HOTEL_MODERATOR, Role.AIRLINE_MODERATOR, Role.ADMIN])(
+    'only registered users report content: a %s gets 403 (GEN-09)',
+    async (role) => {
+      const author = await loggedInAs();
+      const staff = await loggedInAs(role);
+      const postId = await makePost(author.id);
+      await staff.client
+        .post('/api/reports')
+        .send(reportBody('post', postId))
+        .expect(403);
+    },
+  );
 });

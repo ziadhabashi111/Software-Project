@@ -163,6 +163,12 @@ export class HotelReviewsService {
     };
   }
 
+  /** GEN-09: the review being reported, or null for an unknown id. */
+  findById(id: string): Promise<HotelReviewDocument | null> {
+    if (!Types.ObjectId.isValid(id)) return Promise.resolve(null);
+    return this.reviews.findById(id);
+  }
+
   /** GEN-10: an admin hides a review (stays visible to its author). */
   hideById(id: string): Promise<HotelReviewDocument | null> {
     return this.reviews.findByIdAndUpdate(

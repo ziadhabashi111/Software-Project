@@ -22,7 +22,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { AuthUser } from '../auth/auth.types';
+import { Role, type AuthUser } from '../auth/auth.types';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { Paginated } from '../common/pagination/pagination';
 import { ApiReq } from '../common/swagger/api-req.decorator';
@@ -61,6 +62,10 @@ const POST_EXAMPLE = {
 @ApiTags('blog')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ description: 'Not signed in' })
+@ApiForbiddenResponse({
+  description: 'Not a registered user, or not your post',
+})
+@Roles(Role.USER)
 @Controller('posts')
 export class PostsController {
   constructor(private readonly posts: PostsService) {}

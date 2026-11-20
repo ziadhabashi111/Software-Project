@@ -6,6 +6,7 @@ import { Role } from '../auth/auth.types';
 import type { HotelRatings } from '../hotel-bookings/hotel-ratings';
 import { PlaceCatalog } from '../itineraries/places';
 import { HotelsService } from './hotels.service';
+import type { City } from '../reference-data/schemas/city.schema';
 import type { Hotel } from './schemas/hotel.schema';
 
 const HOTEL_ID = new Types.ObjectId().toString();
@@ -45,6 +46,8 @@ function build(
     found?: ReturnType<typeof hotelDoc> | null;
     knownCities?: string[];
     knownCountries?: string[];
+    /** city id -> its country code, as in the reference data */
+    cityCountry?: Record<string, string>;
   } = {},
 ) {
   const found = options.found === undefined ? hotelDoc() : options.found;
@@ -75,10 +78,19 @@ function build(
         Promise.resolve((options.knownCountries ?? []).includes(code)),
     });
   }
+  const cityCountry = options.cityCountry ?? { cairo: 'EG' };
+  const cities = {
+    exists: jest.fn((filter: { cityId: string; countryCode: string }) =>
+      Promise.resolve(
+        cityCountry[filter.cityId] === filter.countryCode ? { _id: 1 } : null,
+      ),
+    ),
+  };
   const service = new HotelsService(
     hotels as unknown as Model<Hotel>,
     places,
     ratings as unknown as HotelRatings,
+    cities as unknown as Model<City>,
   );
   return { service, hotels };
 }
@@ -120,6 +132,39 @@ describe('HotelsService.create (HTL-01)', () => {
       service.create({ ...createDto, country: 'ZZ' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(hotels.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('HotelsService city and country (HTL-01, GEN-12: the city must be in the country)', () => {
+  const lists = {
+    knownCities: ['cairo', 'dubai'],
+    knownCountries: ['EG', 'AE'],
+    cityCountry: { cairo: 'EG', dubai: 'AE' },
+  };
+
+  it('refuses to create a hotel whose city is in another country', async () => {
+    const { service, hotels } = build(lists);
+    await expect(
+      service.create({ ...createDto, city: 'cairo', country: 'AE' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(hotels.create).not.toHaveBeenCalled();
+    await expect(
+      service.create({ ...createDto, city: 'dubai', country: 'AE' }),
+    ).resolves.toMatchObject({ city: 'dubai' });
+  });
+
+  it('checks the pair when only the city or only the country changes', async () => {
+    const { service, hotels } = build(lists); // stored: cairo, EG
+    await expect(
+      service.update(moderator, HOTEL_ID, { country: 'AE' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.update(moderator, HOTEL_ID, { city: 'dubai' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(hotels.findByIdAndUpdate).not.toHaveBeenCalled();
+    await expect(
+      service.update(moderator, HOTEL_ID, { city: 'dubai', country: 'AE' }),
+    ).resolves.toMatchObject({ city: 'dubai', country: 'AE' });
   });
 });
 

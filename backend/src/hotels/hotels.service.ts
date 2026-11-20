@@ -7,6 +7,7 @@ import { fieldError } from '../common/validation/validation-errors';
 import { normalizeTiers } from '../flights/airline-policies';
 import { HotelRatings } from '../hotel-bookings/hotel-ratings';
 import { PlaceCatalog } from '../itineraries/places';
+import { City } from '../reference-data/schemas/city.schema';
 import { assertOwnHotel, isOwnHotelModerator } from './hotel-access';
 import { toHotelView } from './hotel-view';
 import type { HotelView } from './hotel-view';
@@ -37,11 +38,13 @@ export class HotelsService {
     @InjectModel(Hotel.name) private readonly hotels: Model<Hotel>,
     private readonly places: PlaceCatalog,
     private readonly ratings: HotelRatings,
+    @InjectModel(City.name) private readonly cities: Model<City>,
   ) {}
 
   /** HTL-01: the admin creates the profile; its moderator is created afterwards (ACC-13). */
   async create(dto: CreateHotelDto): Promise<HotelView> {
     await this.assertPlace(dto.city, dto.country);
+    await this.assertCityInCountry(dto.city, dto.country);
     const hotel = await this.hotels.create({
       name: dto.name,
       address: dto.address,
@@ -83,6 +86,17 @@ export class HotelsService {
     }
     if (changes.city !== undefined || changes.country !== undefined) {
       await this.assertPlace(changes.city, changes.country);
+      // The city must stay in the country, also when only one changes.
+      const current =
+        changes.city === undefined || changes.country === undefined
+          ? Types.ObjectId.isValid(id)
+            ? await this.hotels.findById(id)
+            : null
+          : null;
+      await this.assertCityInCountry(
+        changes.city ?? current?.city,
+        changes.country ?? current?.country,
+      );
     }
     return this.apply(id, changes);
   }
@@ -129,6 +143,23 @@ export class HotelsService {
 
   private async view(hotel: HotelDocument): Promise<HotelView> {
     return toHotelView(hotel, await this.ratings.forHotel(hotel.id));
+  }
+
+  /**
+   * HTL-01, GEN-12: the city must be in the hotel's country (the reference
+   * data's `cities.countryCode`), so a country search finds the right hotels.
+   * Checked once the predefined lists are loaded, like `assertPlace`.
+   */
+  private async assertCityInCountry(
+    city: string | undefined,
+    country: string | undefined,
+  ): Promise<void> {
+    if (!this.places.get() || city === undefined || country === undefined) {
+      return;
+    }
+    if (!(await this.cities.exists({ cityId: city, countryCode: country }))) {
+      throw fieldError('city', `${city} is not a city in ${country}`);
+    }
   }
 
   /** City and country must come from the predefined lists once they are loaded (GEN-12). */

@@ -339,4 +339,31 @@ describe('Comments and likes (BLG-05, BLG-06, BLG-07)', () => {
       });
     });
   });
+  describe('only registered users like and comment (BLG-05, BLG-06, BLG-07)', () => {
+    it.each([Role.HOTEL_MODERATOR, Role.AIRLINE_MODERATOR, Role.ADMIN])(
+      'refuses a %s with 403',
+      async (role) => {
+        const author = await member();
+        const staff = await member(role);
+        const id = await post(author.id);
+        await staff.client
+          .post(`/api/posts/${id}/comments`)
+          .send({ body: 'Visit us' })
+          .expect(403);
+        await staff.client.post(`/api/posts/${id}/like`).expect(403);
+        await staff.client.delete(`/api/posts/${id}/like`).expect(403);
+        const writer = await member();
+        const created = await writer.client
+          .post(`/api/posts/${id}/comments`)
+          .send({ body: 'Nice' })
+          .expect(201);
+        const commentId = (created.body as CommentView).id;
+        await staff.client
+          .patch(`/api/comments/${commentId}`)
+          .send({ body: 'x' })
+          .expect(403);
+        await staff.client.delete(`/api/comments/${commentId}`).expect(403);
+      },
+    );
+  });
 });

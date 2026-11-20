@@ -22,9 +22,10 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { AuthUser } from '../auth/auth.types';
+import { Role, type AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 import type { Paginated } from '../common/pagination/pagination';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { CommentsService } from './comments.service';
@@ -81,11 +82,12 @@ export class PostCommunityController {
   }
 
   @Post('comments')
+  @Roles(Role.USER)
   @ApiCookieAuth()
   @ApiReq(
     'BLG-05',
     'Comment on a post',
-    'Signed-in users comment on a published post. The comment must not be empty and can be at most 500 characters.',
+    'Registered users comment on a published post. The comment must not be empty and can be at most 500 characters.',
   )
   @ApiCreatedResponse({ schema: { example: COMMENT_EXAMPLE } })
   @ApiBadRequestResponse({ description: 'Empty or longer than 500 characters' })
@@ -100,12 +102,13 @@ export class PostCommunityController {
   }
 
   @Post('like')
+  @Roles(Role.USER)
   @HttpCode(200)
   @ApiCookieAuth()
   @ApiReq(
     'BLG-06',
     'Like a post',
-    'Signed-in users like a published post once. Returns the new like count.',
+    'Registered users like a published post once. Returns the new like count.',
   )
   @ApiOkResponse({ schema: { example: LIKE_EXAMPLE } })
   @ApiUnauthorizedResponse({ description: 'Not signed in' })
@@ -121,6 +124,7 @@ export class PostCommunityController {
   }
 
   @Delete('like')
+  @Roles(Role.USER)
   @ApiCookieAuth()
   @ApiReq(
     'BLG-06',
@@ -146,6 +150,10 @@ export class PostCommunityController {
 @ApiTags('blog')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ description: 'Not signed in' })
+@ApiForbiddenResponse({
+  description: 'Someone else’s comment, or not a registered user',
+})
+@Roles(Role.USER)
 @Controller('comments')
 export class CommentsController {
   constructor(private readonly comments: CommentsService) {}

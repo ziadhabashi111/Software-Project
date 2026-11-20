@@ -4,7 +4,12 @@ import { Connection, isValidObjectId, Model, Types } from 'mongoose';
 import type { PipelineStage, QueryFilter } from 'mongoose';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
-import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
+import {
+  DEFAULT_PAGE_SIZE,
+  Paginated,
+  skipFor,
+  toPage,
+} from '../common/pagination/pagination';
 import { canViewContent } from '../common/security/content-visibility';
 import { User } from '../users/schemas/user.schema';
 import { UserStatus } from '../users/user-status';
@@ -45,7 +50,7 @@ export interface AuthorPageView {
   name: string;
   joinedAt: Date;
   posts: Paginated<PublicPostRow>;
-  itineraries: { items: PublicItinerarySummary[]; total: number };
+  itineraries: Paginated<PublicItinerarySummary>;
 }
 
 /** A post as the aggregation returns it, with the author's name joined in. */
@@ -69,7 +74,7 @@ const NEWEST_FIRST = { publishedAt: -1, _id: -1 } as const;
 /** BLG-09: interaction score (likes + comments) desc, newest first on ties. */
 const MOST_INTERACTION = { score: -1, publishedAt: -1, _id: -1 } as const;
 
-const AUTHOR_ITINERARIES_SHOWN = 10;
+const AUTHOR_ITINERARIES_PAGE_SIZE = DEFAULT_PAGE_SIZE;
 
 /**
  * BLG-02 (browse, post page), BLG-08 (tag page), BLG-09 (search) and BLG-12
@@ -167,7 +172,7 @@ export class PublicPostsService {
    */
   async authorPage(
     authorId: string,
-    query: { page: number; limit: number },
+    query: { page: number; limit: number; itinerariesPage?: number },
   ): Promise<AuthorPageView> {
     const author = isValidObjectId(authorId)
       ? await this.users.findById(authorId)
@@ -175,15 +180,19 @@ export class PublicPostsService {
     if (!author || author.status === UserStatus.DEACTIVATED) {
       throw new NotFoundException('Author not found');
     }
-    const [posts, itineraries] = await Promise.all([
+    const itineraryPage = {
+      page: query.itinerariesPage ?? 1,
+      limit: AUTHOR_ITINERARIES_PAGE_SIZE,
+    };
+    const [posts, found] = await Promise.all([
       this.publicPage(
         { author: new Types.ObjectId(authorId) },
         NEWEST_FIRST,
         query,
       ),
       this.authorItineraries.publicForAuthor(authorId, {
-        skip: 0,
-        limit: AUTHOR_ITINERARIES_SHOWN,
+        skip: skipFor(itineraryPage),
+        limit: itineraryPage.limit,
       }),
     ]);
     return {
@@ -191,7 +200,7 @@ export class PublicPostsService {
       name: author.name,
       joinedAt: author.createdAt,
       posts,
-      itineraries,
+      itineraries: toPage(found.items, found.total, itineraryPage),
     };
   }
 
