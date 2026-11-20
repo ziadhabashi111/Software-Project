@@ -1642,7 +1642,9 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           await list('&status=Pending%20Payment&from=2029-05-01&to=2029-05-31')
         ).items.map((r) => r.id);
         expect(pendingIds).toEqual([pending.id]);
-        expect((await list('&status=Booked')).total).toBe(0);
+        await admin.client
+          .get('/api/admin/bookings?type=hotel&status=Booked')
+          .expect(400);
         expect(
           (await list('&from=2029-05-02&to=2029-05-31')).items.map((r) => r.id),
         ).toEqual([pending.id]);

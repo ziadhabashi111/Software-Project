@@ -823,7 +823,12 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
           find: (query) => {
             queries[type].push(query);
             const items = rows
-              .filter((r) => !query.status || r.status === query.status)
+              // Like the real modules: "Cancelled" is stored CANCELLED.
+              .filter(
+                (r) =>
+                  !query.status ||
+                  r.status.toUpperCase().replace(/ /g, '_') === query.status,
+              )
               .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
             return Promise.resolve({
               items: items.slice(query.skip, query.skip + query.limit),
@@ -899,13 +904,15 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
         .expect(200);
       expect((res.body as Page<unknown>).total).toBe(2);
       const asked = queries.hotel[0];
-      expect(asked.status).toBe('Cancelled');
+      // Normalised to the stored GEN-11 value.
+      expect(asked.status).toBe('CANCELLED');
       expect(asked.from?.toISOString()).toBe('2027-01-01T00:00:00.000Z');
       expect(asked.to?.toISOString()).toBe('2027-01-31T23:59:59.999Z');
     });
 
     it.each([
       ['an unknown type', 'type=train', 'type'],
+      ['an unknown status', 'status=Booked', 'status'],
       ['a malformed date', 'from=yesterday', 'from'],
       ['an end before the start', 'from=2027-02-01&to=2027-01-01', 'to'],
     ])('rejects %s', async (_label, query, field) => {
