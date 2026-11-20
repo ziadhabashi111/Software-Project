@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -53,4 +54,18 @@ export class UpdateReviewDto {
   @IsString()
   @MaxLength(1000)
   text?: string | null;
+}
+
+/** Body for `POST /api/reviews/:id/reply` (HTL-26). */
+export class ReviewReplyDto {
+  @ApiProperty({
+    minLength: 1,
+    maxLength: 1000,
+    example: 'Thank you for staying with us; we have fixed the breakfast.',
+  })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'Write a reply' })
+  @MaxLength(1000)
+  text!: string;
 }

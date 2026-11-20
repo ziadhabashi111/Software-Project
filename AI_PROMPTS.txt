@@ -879,3 +879,15 @@ Implement the FLT-27 bonus: change a Confirmed flight booking's date or flight (
 How the output was used:
 Claude wrote it test-first on feature/FLT-27-change-flight (design in docs/design/2026-11-20-flight-change-design.md); I reviewed the full diff, merged FLT-28 in and wired the two together. PATCH /api/flight-bookings/:id/change-flight previews the difference, and with confirm=true applies a same-fare or cheaper change at once in one transaction (new seats booked, old ones returned, lower fare refunded) or holds the new seats for HOLD_MINUTES while the difference is paid as a 'flight-change' payment through the normal payments flow; the webhook applies it. Same airline, route and cabin only; round trips stay in order; passenger types are re-checked; one pending change per booking. The booking keeps a ledger of every payment, so a later cancellation refunds across payments newest first, never more than each received. Seats picked on the old flight are freed when the change applies (my integration, with a test). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: HTL-26 (bonus)
+Prompt:
+Implement the HTL-26 bonus: a hotel moderator can reply to reviews of their own hotel.
+
+How the output was used:
+Claude wrote it test-first on feature/HTL-26-review-replies; I reviewed the full diff. POST /api/reviews/:id/reply creates or edits the hotel's single reply and DELETE removes it; only a moderator of the review's hotel may do it, hidden or unknown reviews are 404, and the reply is written atomically so parallel replies leave one. Review views show the reply as the hotel's response without the moderator's identity, and the author gets an in-app notification for a new reply. Lint, unit, build and e2e pass.
+================================================

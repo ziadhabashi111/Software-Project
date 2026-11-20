@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,7 +18,11 @@ import {
 } from '../common/pagination/pagination';
 import { UserStatus } from '../users/user-status';
 import { UsersService } from '../users/users.service';
-import { CreateReviewDto, UpdateReviewDto } from './dto/review.dto';
+import {
+  CreateReviewDto,
+  ReviewReplyDto,
+  UpdateReviewDto,
+} from './dto/review.dto';
 import { HotelInventoryRegistry } from './hotel-inventory';
 import { HotelRatings } from './hotel-ratings';
 import { ReservationStatus } from './reservation-status';
@@ -37,6 +42,7 @@ import {
   HotelReview,
   HotelReviewDocument,
 } from './schemas/hotel-review.schema';
+import { SharedServices } from './shared-services';
 
 export type HotelReviewsPage = Paginated<HotelReviewView> & RatingSummary;
 
@@ -59,6 +65,7 @@ export class HotelReviewsService {
     private readonly users: UsersService,
     private readonly ratings: HotelRatings,
     private readonly inventory: HotelInventoryRegistry,
+    private readonly shared: SharedServices,
   ) {}
 
   /** One review per Completed reservation, whatever the number of rooms. */
@@ -118,6 +125,68 @@ export class HotelReviewsService {
   async remove(user: AuthUser, id: string): Promise<void> {
     const review = await this.findOwn(user, id);
     await review.deleteOne();
+  }
+
+  /**
+   * HTL-26: the hotel's own moderator answers a visible review. The first
+   * call creates the reply (and tells the author, GEN-01); later calls change
+   * its text. Atomic, so two parallel first replies leave one reply. The
+   * review's own `updatedAt` (the author's edits) is not touched.
+   */
+  async reply(
+    user: AuthUser,
+    id: string,
+    dto: ReviewReplyDto,
+    now: Date = new Date(),
+  ): Promise<HotelReviewView> {
+    const review = await this.findVisibleForModerator(user, id);
+    const created = await this.reviews.findOneAndUpdate(
+      { _id: review._id, isHidden: false, reply: { $exists: false } },
+      {
+        $set: {
+          reply: {
+            text: dto.text,
+            moderator: new Types.ObjectId(user.id),
+            repliedAt: now,
+          },
+        },
+      },
+      { returnDocument: 'after', timestamps: false },
+    );
+    if (created) {
+      await this.shared.notify(
+        created.user.toString(),
+        'REVIEW_REPLIED',
+        `${created.hotelName} replied to your review.`,
+      );
+      return toReviewView(created, await this.authorOf(created));
+    }
+    const edited = await this.reviews.findOneAndUpdate(
+      { _id: review._id, isHidden: false, reply: { $exists: true } },
+      {
+        $set: {
+          'reply.text': dto.text,
+          'reply.moderator': new Types.ObjectId(user.id),
+          'reply.editedAt': now,
+        },
+      },
+      { returnDocument: 'after', timestamps: false },
+    );
+    if (!edited) throw new NotFoundException('Review not found');
+    return toReviewView(edited, await this.authorOf(edited));
+  }
+
+  /** HTL-26: the hotel's own moderator removes the hotel's reply. */
+  async removeReply(user: AuthUser, id: string): Promise<void> {
+    const review = await this.findVisibleForModerator(user, id);
+    const result = await this.reviews.updateOne(
+      { _id: review._id, reply: { $exists: true } },
+      { $unset: { reply: 1 } },
+      { timestamps: false },
+    );
+    if (result.modifiedCount === 0) {
+      throw new NotFoundException('This review has no reply');
+    }
   }
 
   /**
@@ -190,6 +259,31 @@ export class HotelReviewsService {
   /** GEN-10: an admin deletes a review. */
   deleteById(id: string): Promise<HotelReviewDocument | null> {
     return this.reviews.findByIdAndDelete(id);
+  }
+
+  /**
+   * A visible review of the moderator's own hotel. Hidden or unknown reviews
+   * are 404 (GEN-10); another hotel's review is 403. The hotel link is the
+   * moderator's `providerId` (ACC-13), checked here so this module does not
+   * depend on the hotels module.
+   */
+  private async findVisibleForModerator(
+    user: AuthUser,
+    id: string,
+  ): Promise<HotelReviewDocument> {
+    const review = await this.reviews.findById(id);
+    if (!review || review.isHidden) {
+      throw new NotFoundException('Review not found');
+    }
+    if (
+      user.role !== Role.HOTEL_MODERATOR ||
+      user.providerId !== review.hotel.toString()
+    ) {
+      throw new ForbiddenException(
+        'You can only reply to reviews of your own hotel',
+      );
+    }
+    return review;
   }
 
   private async findOwn(
