@@ -759,3 +759,15 @@ The hotel policies response now includes the hotel's checkInTime and checkOutTim
 and to the hotel catalog mapping (hotels). After Habashi's feedback, a hotel that cannot be found now returns a 404 instead of answering without times. 
 Added 4 unit tests in booking-payment-gateway.spec.ts (times shown, hotel not found, hotels module not registered, another user's reservation) and updated the Swagger description. I ran lint and the tests myself.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22 (issues 34, 35)
+Prompt:
+Finish the hotel search and filters (HTL-11, 12) and the free rooms of a hotel (HTL-15), and check the moderator reservation list (HTL-22).
+
+How the output was used:
+Built test-first. Pure, unit-tested rules (a room is free only if active, inside its availability, not blocked and not taken; enough free rooms whose largest occupancies cover the guests; cheapest free room as the hotel price; inclusive price range and minimum rating with unrated hotels left out only when a rating filter is set; stable sort with unrated last) and HotelSearchService around them. Reservations are read through HotelReservationQueries and ratings through HotelRatings, never their collections. Stay validation is reused from the booking module, so search and booking agree. The service registers with HotelSearchHook, so GET /api/itineraries/:id/hotels now works instead of answering 503. HotelSearchController is listed before HotelsController so GET /api/hotels/search is not read as a hotel id. HTL-22 already existed with its own e2e spec, so only a stale comment was corrected. Added an e2e spec and README rows. Reviewed the diff.
+================================================
