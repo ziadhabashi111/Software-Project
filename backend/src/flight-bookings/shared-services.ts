@@ -58,7 +58,9 @@ export class SharedServices {
     try {
       const payments = this.find<PaymentService>(PAYMENT_SERVICE);
       if (!payments) return 'none';
-      return (await payments.cancelPendingPayment('flight', bookingId)) ?? 'none';
+      return (
+        (await payments.cancelPendingPayment('flight', bookingId)) ?? 'none'
+      );
     } catch (error) {
       this.logger.error(
         `Could not cancel the payment of flight booking ${bookingId}`,

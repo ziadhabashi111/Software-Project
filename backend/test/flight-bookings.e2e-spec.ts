@@ -66,14 +66,13 @@ const paymentService = {
 };
 const refundService = {
   preview: jest.fn(),
-  issue: jest.fn(
-    (_type: string, id: string): Promise<RefundResult> =>
-      Promise.resolve({
-        refundId: `re_${id}`,
-        amount: 0,
-        status: 'REFUNDED',
-        currency: 'USD',
-      }),
+  issue: jest.fn((_type: string, id: string): Promise<RefundResult> =>
+    Promise.resolve({
+      refundId: `re_${id}`,
+      amount: 0,
+      status: 'REFUNDED',
+      currency: 'USD',
+    }),
   ),
 };
 
@@ -1061,9 +1060,9 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         } satisfies RefundResult;
       });
       await cancel(user.client, booking.id, { confirm: true }).expect(200);
-      expect((await bookings.findById(booking.id).lean())!.refund).toMatchObject(
-        { status: 'REFUNDED', refundId: `re_${booking.id}` },
-      );
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund,
+      ).toMatchObject({ status: 'REFUNDED', refundId: `re_${booking.id}` });
     });
 
     it('a Failed result keeps its failure reason', async () => {
@@ -1077,9 +1076,12 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         failureReason: 'expired_or_canceled_card',
       });
       await cancel(user.client, booking.id, { confirm: true }).expect(200);
-      expect((await bookings.findById(booking.id).lean())!.refund).toMatchObject(
-        { status: 'FAILED', failureReason: 'expired_or_canceled_card' },
-      );
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund,
+      ).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'expired_or_canceled_card',
+      });
     });
 
     it('keeps the refund Pending when no refund service is wired', async () => {

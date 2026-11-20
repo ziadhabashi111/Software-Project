@@ -10,6 +10,7 @@ import {
   FINAL_REFUND_STATUSES,
   type RefundResult,
 } from '../payments/refund.service.interface';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { newBookingReference } from './booking-reference';
 import { RefundQuote, quoteRefund } from './cancellation-rules';
 import { ReservationStatus, assertCanTransition } from './reservation-status';
@@ -159,7 +160,7 @@ export class HotelReservationPayments {
     }
     if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
       throw new ConflictException({
-        message: 'The 10-minute hold has expired; please book again',
+        message: holdExpiredMessage(),
         code: 'HOLD_EXPIRED',
       });
     }

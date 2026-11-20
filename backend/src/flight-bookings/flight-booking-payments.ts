@@ -10,6 +10,7 @@ import {
   assertCanTransition,
   BookingStatus,
 } from '../common/booking-status/booking-status';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { effectiveStatus, FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import {
@@ -538,7 +539,7 @@ function holdExpired(): ConflictException {
   return new ConflictException({
     statusCode: 409,
     error: 'Conflict',
-    message: 'The 10-minute hold has expired. Start a new booking.',
+    message: holdExpiredMessage(),
     code: 'HOLD_EXPIRED',
   });
 }

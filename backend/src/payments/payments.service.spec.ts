@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { Types } from 'mongoose';
 import type Stripe from 'stripe';
 import { BookingPaymentGateway } from './booking-payment-gateway';
+import { fromMinorUnits } from './money';
 import { PaymentsService, toMinorUnits } from './payments.service';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 
@@ -151,6 +152,13 @@ function fakeUpdateOne(doc: { status: string }, intentId = 'pi_1') {
     return Promise.resolve({ matchedCount: matches ? 1 : 0 });
   };
 }
+
+describe('fromMinorUnits', () => {
+  it('converts Stripe cents back to major units', () => {
+    expect(fromMinorUnits(25050)).toBe(250.5);
+    expect(fromMinorUnits(toMinorUnits(19.99))).toBe(19.99);
+  });
+});
 
 describe('toMinorUnits', () => {
   it('converts major units to cents without float drift', () => {
@@ -359,7 +367,7 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
       type: 'refund.updated',
       created: 1,
       data: { object: { id: 're_1', status: 'succeeded' } },
-    } as unknown as Stripe.Event);
+    });
     await service.handleWebhook(Buffer.from('{}'), 'sig');
     expect(payments.updateOne).toHaveBeenCalledWith(
       { stripeRefundId: 're_1', status: { $ne: 'refunded' } },
@@ -553,9 +561,9 @@ describe('PaymentsService.cancelPendingPayment', () => {
       stripePaymentIntentId: 'pi_1',
       status: 'requires_payment_method',
     });
-    await expect(
-      service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBe('cancelled');
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'cancelled',
+    );
     expect(stripe.paymentIntents.cancel).toHaveBeenCalledWith('pi_1');
   });
 
@@ -573,9 +581,9 @@ describe('PaymentsService.cancelPendingPayment', () => {
       stripePaymentIntentId: 'pi_1',
       status: 'succeeded',
     });
-    await expect(
-      service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBe('not_cancellable');
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'not_cancellable',
+    );
     expect(stripe.paymentIntents.cancel).not.toHaveBeenCalled();
   });
 
@@ -587,9 +595,9 @@ describe('PaymentsService.cancelPendingPayment', () => {
       status: 'requires_payment_method',
     });
     stripe.paymentIntents.cancel.mockRejectedValue(new Error('stripe down'));
-    await expect(
-      service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBe('error');
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'error',
+    );
   });
 
   it('warns (not errors) when the intent already succeeded and cannot be cancelled', async () => {
@@ -616,9 +624,9 @@ describe('PaymentsService.cancelPendingPayment', () => {
     stripe.paymentIntents.retrieve.mockResolvedValue(
       intent({ status: 'succeeded' }),
     );
-    await expect(
-      service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBe('not_cancellable');
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'not_cancellable',
+    );
     expect(warn).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
     expect(payments.updateOne).not.toHaveBeenCalled();
@@ -639,8 +647,8 @@ describe('PaymentsService.cancelPendingPayment', () => {
     stripe.paymentIntents.retrieve.mockResolvedValue(
       intent({ status: 'canceled' }),
     );
-    await expect(
-      service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBe('cancelled');
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'cancelled',
+    );
   });
 });

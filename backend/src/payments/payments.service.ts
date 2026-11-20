@@ -16,7 +16,7 @@ import type {
   PaymentService,
   PendingPaymentCancellation,
 } from './payment.service.interface';
-import { toMinorUnits } from './money';
+import { fromMinorUnits, toMinorUnits } from './money';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import type { BookingType } from './refund.service.interface';
 import { RefundsService, toRefundStatus } from './refunds.service';
@@ -223,9 +223,7 @@ export class PaymentsService implements PaymentService {
   }
 
   /** After Stripe refused to cancel: already cancelled, or paid / processing. */
-  private async stateOf(
-    intentId: string,
-  ): Promise<PendingPaymentCancellation> {
+  private async stateOf(intentId: string): Promise<PendingPaymentCancellation> {
     try {
       const intent = await this.stripe.paymentIntents.retrieve(intentId);
       return intent.status === 'canceled' ? 'cancelled' : 'not_cancellable';
@@ -319,7 +317,7 @@ export class PaymentsService implements PaymentService {
     if (!ref) return;
     const outcome = await this.gateway.confirm(ref.type, ref.bookingId, {
       paymentIntentId: intent.id,
-      amount: intent.amount_received / 100,
+      amount: fromMinorUnits(intent.amount_received),
       currency: intent.currency.toUpperCase(),
       ...(createdSeconds ? { paidAt: new Date(createdSeconds * 1000) } : {}),
     });
@@ -347,7 +345,7 @@ export class PaymentsService implements PaymentService {
         bookingId: ref.bookingId,
         userId,
         paymentIntentId: intent.id,
-        amount: intent.amount_received / 100,
+        amount: fromMinorUnits(intent.amount_received),
         currency: intent.currency.toUpperCase(),
       });
       await this.payments.updateOne(

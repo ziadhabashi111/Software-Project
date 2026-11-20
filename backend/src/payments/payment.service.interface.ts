@@ -13,10 +13,7 @@ export const PAYMENT_SERVICE = Symbol('PAYMENT_SERVICE');
  * - `error`: Stripe could not be reached; the caller decides.
  */
 export type PendingPaymentCancellation =
-  | 'cancelled'
-  | 'none'
-  | 'not_cancellable'
-  | 'error';
+  'cancelled' | 'none' | 'not_cancellable' | 'error';
 
 export interface PaymentService {
   /**
