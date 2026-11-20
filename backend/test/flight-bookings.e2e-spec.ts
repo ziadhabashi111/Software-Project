@@ -519,6 +519,37 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
+    it('does not expire a hold whose payment already went through at the last moment (the webhook decides)', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await pastDue(booking.id);
+      paymentService.cancelPendingPayment.mockResolvedValueOnce(
+        'not_cancellable',
+      );
+      expect(await expiry().expireDue()).toBe(0);
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'PENDING_PAYMENT',
+      );
+      expect((await cabinOf(flight)).heldSeats).toBe(1);
+    });
+
+    it('expires such a hold anyway once Stripe has stopped retrying its webhook', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 4 * 86_400_000) } },
+      );
+      paymentService.cancelPendingPayment.mockResolvedValueOnce(
+        'not_cancellable',
+      );
+      await expiry().expireDue();
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'EXPIRED',
+      );
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
     it('leaves a live hold alone', async () => {
       const flight = await makeFlight();
       const { booking } = await heldBooking(flight);
@@ -604,6 +635,39 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         'EXPIRED',
       );
       expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('confirms a payment that succeeded inside the hold even if its webhook arrives after the hold ended', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const expiredAt = new Date(Date.now() - 5_000);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: expiredAt } },
+      );
+      const result = await payments().confirmPaid(
+        booking.id,
+        paid(booking, { paidAt: new Date(expiredAt.getTime() - 2_000) }),
+      );
+      expect(result.outcome).toBe('confirmed');
+      const cabin = await cabinOf(flight);
+      expect(cabin.heldSeats).toBe(0);
+      expect(cabin.bookedSeats).toBe(1);
+    });
+
+    it('still rejects a payment that succeeded after the hold ended', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const expiredAt = new Date(Date.now() - 5_000);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: expiredAt } },
+      );
+      const result = await payments().confirmPaid(
+        booking.id,
+        paid(booking, { paidAt: new Date(expiredAt.getTime() + 1_000) }),
+      );
+      expect(result).toEqual({ outcome: 'rejected', reason: 'HOLD_EXPIRED' });
     });
 
     it('rejects a payment with the wrong amount', async () => {

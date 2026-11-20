@@ -28,6 +28,8 @@ export interface VerifiedPaid {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /** When Stripe recorded the payment as succeeded (the webhook event time). */
+  paidAt?: Date;
 }
 
 /** PAY-02: what the user reads before accepting. */

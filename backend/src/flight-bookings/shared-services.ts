@@ -7,6 +7,7 @@ import {
 import {
   PAYMENT_SERVICE,
   PaymentService,
+  PendingPaymentCancellation,
 } from '../payments/payment.service.interface';
 import {
   REFUND_SERVICE,
@@ -47,18 +48,23 @@ export class SharedServices {
     }
   }
 
-  /** PAY-01: an expired hold's PaymentIntent is cancelled; failures are logged. */
-  async cancelPendingPayment(bookingId: string): Promise<void> {
+  /**
+   * PAY-01: an expired hold's PaymentIntent is cancelled; failures are logged.
+   * `not_cancellable` means the user already paid: the webhook decides.
+   */
+  async cancelPendingPayment(
+    bookingId: string,
+  ): Promise<PendingPaymentCancellation> {
     try {
-      await this.find<PaymentService>(PAYMENT_SERVICE)?.cancelPendingPayment(
-        'flight',
-        bookingId,
-      );
+      const payments = this.find<PaymentService>(PAYMENT_SERVICE);
+      if (!payments) return 'none';
+      return (await payments.cancelPendingPayment('flight', bookingId)) ?? 'none';
     } catch (error) {
       this.logger.error(
         `Could not cancel the payment of flight booking ${bookingId}`,
         error instanceof Error ? error.stack : String(error),
       );
+      return 'error';
     }
   }
 

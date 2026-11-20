@@ -113,12 +113,18 @@ function setup() {
   };
 }
 
+/** `created` is when Stripe generated the event, i.e. when the payment succeeded. */
 function event(
   type: string,
   object: Stripe.PaymentIntent,
   id = 'evt_1',
 ): Stripe.Event {
-  return { id, type, data: { object } } as unknown as Stripe.Event;
+  return {
+    id,
+    type,
+    created: 1_795_000_000,
+    data: { object },
+  } as unknown as Stripe.Event;
 }
 
 /** Minimal evaluator for the `updateOne` filters used by setStatus. */
@@ -296,6 +302,7 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
       paymentIntentId: 'pi_1',
       amount: 250.5,
       currency: 'USD',
+      paidAt: new Date(1_795_000_000 * 1000),
     });
     expect(stripe.refunds.create).not.toHaveBeenCalled();
   });
@@ -384,9 +391,9 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
       order.push('handled');
       return Promise.resolve('confirmed');
     });
-    processedEvents.create.mockImplementation(() => {
+    processedEvents.create.mockImplementation((doc: { eventId: string }) => {
       order.push('recorded');
-      return Promise.resolve({});
+      return Promise.resolve(doc);
     });
     stripe.webhooks.constructEvent.mockReturnValue(
       event('payment_intent.succeeded', intent({ status: 'succeeded' })),
@@ -500,8 +507,17 @@ describe('PaymentsService.cancelPendingPayment', () => {
       stripePaymentIntentId: 'pi_1',
       status: 'requires_payment_method',
     });
-    await service.cancelPendingPayment('flight', BOOKING);
+    await expect(
+      service.cancelPendingPayment('flight', BOOKING),
+    ).resolves.toBe('cancelled');
     expect(stripe.paymentIntents.cancel).toHaveBeenCalledWith('pi_1');
+  });
+
+  it('answers none when the booking has no PaymentIntent', async () => {
+    const { service } = setup();
+    await expect(service.cancelPendingPayment('flight', BOOKING)).resolves.toBe(
+      'none',
+    );
   });
 
   it('never cancels a payment that already succeeded', async () => {
@@ -511,7 +527,9 @@ describe('PaymentsService.cancelPendingPayment', () => {
       stripePaymentIntentId: 'pi_1',
       status: 'succeeded',
     });
-    await service.cancelPendingPayment('flight', BOOKING);
+    await expect(
+      service.cancelPendingPayment('flight', BOOKING),
+    ).resolves.toBe('not_cancellable');
     expect(stripe.paymentIntents.cancel).not.toHaveBeenCalled();
   });
 
@@ -525,7 +543,7 @@ describe('PaymentsService.cancelPendingPayment', () => {
     stripe.paymentIntents.cancel.mockRejectedValue(new Error('stripe down'));
     await expect(
       service.cancelPendingPayment('flight', BOOKING),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('error');
   });
 
   it('warns (not errors) when the intent already succeeded and cannot be cancelled', async () => {
@@ -549,9 +567,34 @@ describe('PaymentsService.cancelPendingPayment', () => {
     const error = jest
       .spyOn(logger, 'error')
       .mockImplementation(() => undefined);
-    await service.cancelPendingPayment('flight', BOOKING);
+    stripe.paymentIntents.retrieve.mockResolvedValue(
+      intent({ status: 'succeeded' }),
+    );
+    await expect(
+      service.cancelPendingPayment('flight', BOOKING),
+    ).resolves.toBe('not_cancellable');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
     expect(payments.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('answers cancelled when Stripe says the intent was already cancelled', async () => {
+    const { service, stripe, payments } = setup();
+    payments.findOne.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      stripePaymentIntentId: 'pi_1',
+      status: 'requires_payment_method',
+    });
+    stripe.paymentIntents.cancel.mockRejectedValue(
+      Object.assign(new Error('unexpected state'), {
+        code: 'payment_intent_unexpected_state',
+      }),
+    );
+    stripe.paymentIntents.retrieve.mockResolvedValue(
+      intent({ status: 'canceled' }),
+    );
+    await expect(
+      service.cancelPendingPayment('flight', BOOKING),
+    ).resolves.toBe('cancelled');
   });
 });

@@ -49,6 +49,12 @@ export interface VerifiedFlightPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (FLT-22). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
 export type FlightConfirmRejection =
@@ -402,7 +408,11 @@ export class FlightBookingPayments {
           ? { outcome: 'already_confirmed', booking: doc }
           : { outcome: 'already_processed', booking: doc };
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = paid.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' };
       }
       if (

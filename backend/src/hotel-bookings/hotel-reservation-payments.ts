@@ -66,6 +66,12 @@ export interface VerifiedPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (HTL-18). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
 /**
@@ -274,7 +280,11 @@ export class HotelReservationPayments {
           reservation: toReservationView(doc, now),
         } as const;
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = payment.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' } as const;
       }
       if (
