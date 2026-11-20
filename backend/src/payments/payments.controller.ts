@@ -1,3 +1,4 @@
+import { HOLD_MINUTES } from '../common/booking-status/hold';
 import {
   Body,
   Controller,
@@ -47,7 +48,7 @@ export class PaymentsController {
   @ApiReq(
     'PAY-01',
     'Start paying for a booking',
-    'Creates (or reuses) a Stripe PaymentIntent in test mode for your own live 10-minute hold and returns its `clientSecret` for the browser to confirm. No card data reaches this API. Rejects expired holds (409 HOLD_EXPIRED) and unaccepted policies (409 POLICIES_NOT_ACCEPTED). The booking is confirmed only by the verified Stripe webhook.',
+    `Creates (or reuses) a Stripe PaymentIntent in test mode for your own live ${HOLD_MINUTES}-minute hold and returns its \`clientSecret\` for the browser to confirm. No card data reaches this API. Rejects expired holds (409 HOLD_EXPIRED) and unaccepted policies (409 POLICIES_NOT_ACCEPTED). The booking is confirmed only by the verified Stripe webhook.`,
   )
   @ApiOkResponse({
     description: 'PaymentIntent client secret and payment record',

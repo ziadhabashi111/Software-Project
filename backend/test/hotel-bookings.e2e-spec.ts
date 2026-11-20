@@ -669,6 +669,21 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(notifications.notify).not.toHaveBeenCalled();
     });
 
+    it('confirms a payment made inside the hold even when its webhook arrives after the hold ended', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-12', '2027-10-13');
+      const later = new Date(Date.now() + 11 * 60_000);
+      const result = await payments.confirmPaid(
+        held.id,
+        { ...paid(held), paidAt: new Date() },
+        later,
+      );
+      expect(result.outcome).toBe('confirmed');
+      expect((await reservations.findById(held.id).lean())?.status).toBe(
+        ReservationStatus.CONFIRMED,
+      );
+    });
+
     it('refuses a payment that arrives after the hold expired', async () => {
       const { client } = await loggedInAs();
       const held = await holdOne(client, '2027-10-09', '2027-10-10');

@@ -8,9 +8,28 @@ export const REFUND_STATUSES: RefundStatus[] = [
   'REFUNDED',
 ];
 
-/** PAY-03: one refund per cancelled booking; only ids, amount and status. */
+/**
+ * Why money went back:
+ * - `cancellation`: the booking was cancelled (tier or airline refund).
+ * - `rejected_payment`: a payment the booking could not accept (the hold had
+ *   ended, wrong amount, booking no longer payable) was refunded in full.
+ */
+export const REFUND_KINDS = ['cancellation', 'rejected_payment'] as const;
+export type RefundKind = (typeof REFUND_KINDS)[number];
+
+/** Name of the index before rejected-payment refunds were recorded. */
+export const LEGACY_BOOKING_INDEX = 'bookingType_1_bookingId_1';
+
+/**
+ * PAY-03: one refund per cancelled booking, plus one per rejected payment;
+ * only ids, amount and status.
+ */
 @Schema({ timestamps: true })
 export class Refund {
+  /** Records written before `kind` existed are cancellations. */
+  @Prop({ type: String, enum: REFUND_KINDS, default: 'cancellation' })
+  kind!: RefundKind;
+
   @Prop({ type: String, enum: ['flight', 'hotel'], required: true })
   bookingType!: BookingType;
 
@@ -49,4 +68,13 @@ export class Refund {
 
 export type RefundDocument = HydratedDocument<Refund>;
 export const RefundSchema = SchemaFactory.createForClass(Refund);
-RefundSchema.index({ bookingType: 1, bookingId: 1 }, { unique: true });
+// One cancellation refund per booking; a booking may also have refunds of
+// payments it rejected (keyed by their unique stripeRefundId).
+RefundSchema.index(
+  { bookingType: 1, bookingId: 1, kind: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { kind: 'cancellation' },
+    name: 'one_cancellation_refund_per_booking',
+  },
+);

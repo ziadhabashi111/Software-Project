@@ -6,7 +6,11 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+} from '../payments/refund.service.interface';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { newBookingReference } from './booking-reference';
 import { RefundQuote, quoteRefund } from './cancellation-rules';
 import { ReservationStatus, assertCanTransition } from './reservation-status';
@@ -66,6 +70,12 @@ export interface VerifiedPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (HTL-18). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
 /**
@@ -150,7 +160,7 @@ export class HotelReservationPayments {
     }
     if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
       throw new ConflictException({
-        message: 'The 10-minute hold has expired; please book again',
+        message: holdExpiredMessage(),
         code: 'HOLD_EXPIRED',
       });
     }
@@ -274,7 +284,11 @@ export class HotelReservationPayments {
           reservation: toReservationView(doc, now),
         } as const;
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = payment.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' } as const;
       }
       if (
@@ -368,22 +382,32 @@ export class HotelReservationPayments {
     reservationId: string,
     result: RefundResult,
   ): Promise<boolean> {
+    // A Pending result never overwrites a final one (a webhook may land
+    // before `issue()` returns); Failed keeps its reason, Refunded clears it.
+    const filter = {
+      _id: new Types.ObjectId(reservationId),
+      status: ReservationStatus.CANCELLED,
+    };
+    const pending = result.status === 'PENDING';
+    const set: Record<string, unknown> = {
+      'refund.stripeRefundId': result.refundId,
+      'refund.amount': result.amount,
+      'refund.currency': result.currency,
+      'refund.status': result.status,
+    };
+    if (result.status === 'FAILED' && result.failureReason) {
+      set['refund.failureReason'] = result.failureReason;
+    }
     const updated = await this.reservations.updateOne(
-      {
-        _id: new Types.ObjectId(reservationId),
-        status: ReservationStatus.CANCELLED,
-      },
-      {
-        $set: {
-          'refund.stripeRefundId': result.refundId,
-          'refund.amount': result.amount,
-          'refund.currency': result.currency,
-          'refund.status': result.status,
-        },
-        $unset: { 'refund.failureReason': 1 },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      result.status === 'REFUNDED'
+        ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+        : { $set: set },
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    return pending && (await this.reservations.exists(filter)) !== null;
   }
 
   private async findOwned(
