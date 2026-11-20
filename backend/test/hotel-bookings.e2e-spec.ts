@@ -529,6 +529,35 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(await nights.countDocuments({ reservation: firstId })).toBe(0);
     });
 
+    it('a run-out hold the user already paid keeps its room; the late webhook confirms it (HTL-18, PAY-01)', async () => {
+      const a = await loggedInAs();
+      const b = await loggedInAs();
+      const r = addRoom();
+      const first = await hold(
+        a.client,
+        body([r], '2027-08-10', '2027-08-12'),
+      ).expect(201);
+      const view = first.body as HotelReservationView;
+      const paidAt = new Date();
+      await expire(view.id);
+
+      paymentService.cancelPendingPayment.mockResolvedValue('not_cancellable');
+      try {
+        await hold(b.client, body([r], '2027-08-11', '2027-08-13')).expect(409);
+      } finally {
+        paymentService.cancelPendingPayment.mockResolvedValue(undefined);
+      }
+      expect((await reservations.findById(view.id).lean())?.status).toBe(
+        ReservationStatus.PENDING_PAYMENT,
+      );
+
+      const outcome = await payments.confirmPaid(view.id, {
+        ...paid(view),
+        paidAt: new Date(paidAt.getTime() - 60_000),
+      });
+      expect(outcome.outcome).toBe('confirmed');
+    });
+
     it('the expiry job expires unpaid holds and releases their rooms', async () => {
       const a = await loggedInAs();
       const r1 = addRoom();
