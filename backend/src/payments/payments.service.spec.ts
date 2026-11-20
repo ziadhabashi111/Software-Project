@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Types } from 'mongoose';
@@ -113,6 +114,7 @@ function setup() {
   return {
     service,
     stripe,
+    config,
     payments,
     gateway,
     policies,
@@ -306,6 +308,19 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
     await expect(
       service.handleWebhook(Buffer.from('{}'), undefined),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  // A blank STRIPE_WEBHOOK_SECRET means payments are not configured: a 503
+  // (not a 500) says so, and Stripe should not treat it as a transient server
+  // crash to hammer with retries.
+  it('fails with 503 when the webhook secret is not configured', async () => {
+    const { service, config, gateway, stripe } = setup();
+    (config.get as jest.Mock).mockReturnValue(undefined);
+    await expect(
+      service.handleWebhook(Buffer.from('{}'), 'sig'),
+    ).rejects.toThrow(ServiceUnavailableException);
+    expect(stripe.webhooks.constructEvent).not.toHaveBeenCalled();
+    expect(gateway.confirm).not.toHaveBeenCalled();
   });
 
   it('confirms the booking from a verified succeeded event, without refund', async () => {

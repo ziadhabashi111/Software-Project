@@ -927,3 +927,15 @@ Fix the two problems found when checking the backend through Swagger UI: two DTO
 How the output was used:
 Built test-first. The admin reset-password body is now AdminResetPasswordDto, so Swagger documents each reset endpoint with its own request body; a unit test checks that every DTO class name in the app is unique and an e2e test checks the generated OpenAPI document. The Stripe provider now treats a blank or whitespace key like an unset one (the app boots and payment calls fail later, as designed), with unit tests. I reviewed the full diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: PAY-01
+Prompt:
+Make the Stripe webhook return a 503 instead of a 500 when STRIPE_WEBHOOK_SECRET is not configured.
+
+How the output was used:
+Built test-first. POST /api/payments/webhook now answers 503 (ServiceUnavailableException, "Payments are not configured") when the webhook secret is blank or unset, instead of a 500: a missing config is not an unexpected server crash, and Stripe should not retry it as a transient 5xx. A unit test asserts the 503 and that no event is parsed; the normal signed-webhook path is unchanged. I reviewed the diff.
+================================================

@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -243,11 +244,12 @@ export class PaymentsService implements PaymentService {
     rawBody: Buffer | undefined,
     signature: string | undefined,
   ): Promise<{ received: true }> {
-    const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
+    // A blank STRIPE_WEBHOOK_SECRET is a missing-configuration state, not an
+    // unexpected crash: answer 503 (payments unavailable) so the response is
+    // honest and Stripe does not retry it as a transient 5xx fault.
+    const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET')?.trim();
     if (!secret) {
-      throw new InternalServerErrorException(
-        'Webhook secret is not configured',
-      );
+      throw new ServiceUnavailableException('Payments are not configured');
     }
     if (!rawBody || !signature) {
       throw new BadRequestException('Missing Stripe signature or body');
