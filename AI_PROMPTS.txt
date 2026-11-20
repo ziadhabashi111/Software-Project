@@ -843,3 +843,15 @@ Make sure all of Milestone 1 is done: compare every mandatory requirement and ev
 How the output was used:
 All mandatory backend requirements are implemented; the only ones without backend code are frontend requirements for Milestone 2 (ACC-10, GEN-04, GEN-14..17). The one documented endpoint that did not exist, PATCH /api/hotels/:id/rooms/:roomId/availability, was added test-first: it replaces a room's bookable ranges, rejects overlaps and refuses to drop nights a reservation holds (409). The full-app wiring test now builds the Swagger document for the whole AppModule and fails if any operation lacks a requirement ID. docs/erd.md was rewritten from the real Mongoose schemas (collections, references, embedded documents, booking lifecycle). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: FLT-28 (bonus), FLT-04, FLT-05, FLT-23
+Prompt:
+Implement the FLT-28 bonus: seat selection for flight bookings.
+
+How the output was used:
+Claude wrote it test-first on feature/FLT-28-seat-selection; I reviewed the full diff and added one fix. Each cabin has a seat layout (seatsPerRow, default 6 in Economy/Premium Economy and 4 in Business/First; labels 1A, 1B, ...). GET /api/flights/:id/seats shows free and taken seats with no personal data. PATCH /api/flight-bookings/:id/seat lets the owner of a Confirmed booking pick a seat per passenger per flight (not infants); a unique index makes parallel picks safe (409 SEAT_TAKEN), and the pick re-checks the booking inside its transaction so a booking cancelled at the same moment never gets a seat (my fix, with a test). Seats are freed on cancellation (user or airline) and expiry, shown on bookings and the e-ticket, and an airline cannot shrink or reshape a cabin in a way that drops a picked seat (409 SEATS_ASSIGNED). Lint, unit, build and e2e pass.
+================================================

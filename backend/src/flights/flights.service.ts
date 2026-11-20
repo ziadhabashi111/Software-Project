@@ -32,6 +32,7 @@ import type { FlightView } from './flight-view';
 import type { AirportDocument } from './schemas/airport.schema';
 import { Flight } from './schemas/flight.schema';
 import type { FlightDocument } from './schemas/flight.schema';
+import { isSeatInLayout, seatsPerRowOf } from './seat-layout';
 import { localToUtc, utcToLocal } from './time-zones';
 
 function isDuplicateKey(error: unknown): boolean {
@@ -284,6 +285,10 @@ export class FlightsService {
             price: dto.price,
             freeBags: dto.freeBags,
             maxBagWeightKg: dto.maxBagWeightKg,
+            ...(dto.seatsPerRow !== undefined
+              ? { seatsPerRow: dto.seatsPerRow }
+              : {}),
+            seatMapVersion: 0,
           },
         },
       },
@@ -323,46 +328,52 @@ export class FlightsService {
     if (dto.maxBagWeightKg !== undefined) {
       set['cabins.$[c].maxBagWeightKg'] = dto.maxBagWeightKg;
     }
+    if (dto.seatsPerRow !== undefined) {
+      set['cabins.$[c].seatsPerRow'] = dto.seatsPerRow;
+    }
     if (Object.keys(set).length === 0) {
       throw fieldError('body', 'Send at least one field to change');
     }
 
+    // FLT-28: a layout change must not remove a seat a passenger picked.
+    const seatMapVersion = await this.assertSeatsKept(flight, cabin, dto);
+
     const cabinObjectId = new Types.ObjectId(cabinId);
+    const conditions: Record<string, unknown>[] = [
+      { $eq: ['$$c._id', cabinObjectId] },
+    ];
+    if (dto.seats !== undefined) {
+      // Atomic with booking holds: the new total must cover booked + held.
+      conditions.push({
+        $lte: [{ $add: ['$$c.bookedSeats', '$$c.heldSeats'] }, dto.seats],
+      });
+    }
+    if (seatMapVersion !== undefined) {
+      // Atomic with seat picks: no seat was assigned since the check above.
+      conditions.push({
+        $eq: [{ $ifNull: ['$$c.seatMapVersion', 0] }, seatMapVersion],
+      });
+    }
     const filter: QueryFilter<Flight> = {
       _id: flight._id,
       status: FlightStatus.SCHEDULED,
       // Not after departure, even if the minute job has not marked it Departed yet (FLT-30).
       departureUtc: { $gt: new Date() },
-    };
-    if (dto.seats !== undefined) {
-      // Atomic with booking holds: the new total must cover booked + held.
-      filter.$expr = {
+      $expr: {
         $gt: [
           {
             $size: {
               $filter: {
                 input: '$cabins',
                 as: 'c',
-                cond: {
-                  $and: [
-                    { $eq: ['$$c._id', cabinObjectId] },
-                    {
-                      $lte: [
-                        { $add: ['$$c.bookedSeats', '$$c.heldSeats'] },
-                        dto.seats,
-                      ],
-                    },
-                  ],
-                },
+                cond: { $and: conditions },
               },
             },
           },
           0,
         ],
-      };
-    } else {
-      filter['cabins._id'] = cabinObjectId;
-    }
+      },
+    };
 
     const updated = await this.flights.findOneAndUpdate(
       filter,
@@ -387,6 +398,46 @@ export class FlightsService {
       );
     }
     return this.view(updated);
+  }
+
+  /**
+   * FLT-28: fewer seats or another seats-per-row would change which seats
+   * exist; refused (409 SEATS_ASSIGNED) while that drops a seat a passenger
+   * picked. Returns the cabin's seat-map version for a layout change, so the
+   * update only applies if no seat was assigned in between.
+   */
+  private async assertSeatsKept(
+    flight: FlightDocument,
+    cabin: FlightDocument['cabins'][number],
+    dto: UpdateCabinDto,
+  ): Promise<number | undefined> {
+    const perRow = seatsPerRowOf(cabin);
+    const reshaped =
+      dto.seatsPerRow !== undefined && dto.seatsPerRow !== perRow;
+    const shrunk = dto.seats !== undefined && dto.seats < cabin.totalSeats;
+    if (!reshaped && !shrunk) return undefined;
+
+    const assigned =
+      (await this.bookings
+        .get()
+        ?.assignedSeats?.(flight.id, cabin.cabinClass)) ?? [];
+    if (assigned.length > 0) {
+      if (reshaped) {
+        throw conflict(
+          'SEATS_ASSIGNED',
+          'Passengers have picked seats in this cabin, so its seats per row cannot change',
+        );
+      }
+      const total = dto.seats ?? cabin.totalSeats;
+      const lost = assigned.filter((s) => !isSeatInLayout(s, total, perRow));
+      if (lost.length > 0) {
+        throw conflict(
+          'SEATS_ASSIGNED',
+          `Passengers have picked seats that would no longer exist: ${lost.sort().join(', ')}`,
+        );
+      }
+    }
+    return cabin.seatMapVersion ?? 0;
   }
 
   /** FLT-30: persist Departed once the departure time has passed (also computed on read). */

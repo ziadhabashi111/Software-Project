@@ -8,7 +8,9 @@ import {
   FlightBookingRow,
 } from '../flights/flight-booking-hooks';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
+import type { CabinClass } from '../flights/flight-status';
 import { FlightBookingCancellationsService } from './flight-booking-cancellations.service';
+import { SeatAssignments } from './seat-assignments';
 import {
   FlightBooking,
   FlightBookingDocument,
@@ -30,6 +32,7 @@ export class FlightBookingLinkAdapter
     @InjectModel(Flight.name) private readonly flights: Model<FlightDocument>,
     private readonly hooks: FlightBookingHooks,
     private readonly cancellations: FlightBookingCancellationsService,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   onModuleInit(): void {
@@ -53,6 +56,11 @@ export class FlightBookingLinkAdapter
     flightId: string,
   ): Promise<{ cancelled: number; notifiedUserIds: string[] }> {
     return this.cancellations.cancelForFlight(flightId);
+  }
+
+  /** FLT-28: seats picked in a cabin, checked before its layout changes. */
+  assignedSeats(flightId: string, cabinClass: CabinClass): Promise<string[]> {
+    return this.seatAssignments.takenSeats(flightId, cabinClass);
   }
 
   /**

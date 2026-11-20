@@ -1,6 +1,8 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsNumber, IsPositive, Max, Min } from 'class-validator';
 import { CabinClass } from '../flight-status';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
+import { MAX_SEATS_PER_ROW, MIN_SEATS_PER_ROW } from '../seat-layout';
 
 /** Body for `POST /api/flights/:id/cabins` (FLT-04). */
 export class CreateCabinDto {
@@ -42,4 +44,15 @@ export class CreateCabinDto {
   @IsPositive()
   @Max(100)
   maxBagWeightKg!: number;
+
+  @ApiPropertyOptional({
+    example: 6,
+    description:
+      'Seats per row for the seat map (FLT-28), 2 to 10. Default: 6 in Economy and Premium Economy, 4 in Business and First.',
+  })
+  @IsOptionalNonNull()
+  @IsInt()
+  @Min(MIN_SEATS_PER_ROW)
+  @Max(MAX_SEATS_PER_ROW)
+  seatsPerRow?: number;
 }

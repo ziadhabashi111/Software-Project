@@ -34,6 +34,7 @@ import {
   FlightBookingDocument,
 } from './schemas/flight-booking.schema';
 import { refundFailureReason } from './refund-failure-reason';
+import { SeatAssignments } from './seat-assignments';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -67,6 +68,7 @@ export class FlightBookingCancellationsService {
     private readonly views: FlightBookingViews,
     private readonly shared: SharedServices,
     private readonly changes: FlightBookingChangesService,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   /** FLT-26: the user's own Confirmed booking, before the outbound departs. */
@@ -270,6 +272,8 @@ export class FlightBookingCancellationsService {
           session,
         );
       }
+      // FLT-28: the picked seats become free for others.
+      await this.seatAssignments.releaseBooking(doc._id, session);
       return doc;
     });
   }
