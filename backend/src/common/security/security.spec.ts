@@ -3,24 +3,31 @@ import { originCheck } from './origin-check';
 import { RateLimiter, rateLimit, routeRateLimits } from './rate-limit';
 import { securityHeaders } from './security-headers';
 
-function fakeRes() {
+interface FakeRes {
+  statusCode: number;
+  body: unknown;
+  setHeader(name: string, value: string): FakeRes;
+  status(code: number): FakeRes;
+  json(body: unknown): FakeRes;
+}
+
+function fakeRes(): { res: FakeRes; headers: Map<string, string> } {
   const headers = new Map<string, string>();
-  const res = {
+  const res: FakeRes = {
     statusCode: 200,
-    body: undefined as unknown,
-    setHeader: jest.fn((name: string, value: string) => {
+    body: undefined,
+    setHeader(name, value) {
       headers.set(name.toLowerCase(), String(value));
       return res;
-    }),
-    removeHeader: jest.fn((name: string) => headers.delete(name.toLowerCase())),
-    status: jest.fn((code: number) => {
+    },
+    status(code) {
       res.statusCode = code;
       return res;
-    }),
-    json: jest.fn((body: unknown) => {
+    },
+    json(body) {
       res.body = body;
       return res;
-    }),
+    },
   };
   return { res, headers };
 }
