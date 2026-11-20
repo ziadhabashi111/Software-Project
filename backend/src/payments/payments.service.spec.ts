@@ -87,6 +87,9 @@ function setup() {
       seenEvents.delete(filter.eventId);
       return Promise.resolve({});
     }),
+    exists: jest.fn((filter: { eventId: string }) =>
+      Promise.resolve(seenEvents.has(filter.eventId) ? { _id: 'x' } : null),
+    ),
   };
   const refunds = { onStripeRefund: jest.fn().mockResolvedValue(undefined) };
   const service = new PaymentsService(
@@ -357,6 +360,39 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
     ).rejects.toThrow('db down');
     await service.handleWebhook(Buffer.from('{}'), 'sig');
     expect(gateway.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('processes a Stripe retry when the server died while handling the first delivery', async () => {
+    const { service, stripe, gateway, processedEvents } = setup();
+    // The process dies mid-handling: no cleanup code runs at all.
+    processedEvents.deleteOne.mockImplementation(() => Promise.resolve({}));
+    gateway.confirm.mockRejectedValueOnce(new Error('process killed'));
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await expect(
+      service.handleWebhook(Buffer.from('{}'), 'sig'),
+    ).rejects.toThrow('process killed');
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(gateway.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('records the event as processed only after it was handled', async () => {
+    const { service, stripe, gateway, processedEvents } = setup();
+    const order: string[] = [];
+    gateway.confirm.mockImplementation(() => {
+      order.push('handled');
+      return Promise.resolve('confirmed');
+    });
+    processedEvents.create.mockImplementation(() => {
+      order.push('recorded');
+      return Promise.resolve({});
+    });
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(order).toEqual(['handled', 'recorded']);
   });
 
   it('never refunds a payment that is already refunded (beyond the 24h idempotency window)', async () => {

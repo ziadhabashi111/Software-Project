@@ -215,7 +215,7 @@ export class PaymentsService implements PaymentService {
   /**
    * POST /payments/webhook: the only place a booking becomes Confirmed.
    * The signature is checked against the RAW body. Stripe retries are safe:
-   * each event id is processed once (ProcessedStripeEvent), `confirmPaid` is
+   * a fully handled event id is skipped (ProcessedStripeEvent), `confirmPaid` is
    * idempotent, and a payment already marked refunded is never refunded again.
    */
   async handleWebhook(
@@ -241,48 +241,45 @@ export class PaymentsService implements PaymentService {
     if (!HANDLED_EVENTS.has(event.type)) {
       return { received: true }; // other events are not needed for PAY-01/PAY-03
     }
-    // Atomic claim (unique eventId): a redelivered or concurrent duplicate of
-    // this event is acknowledged with 2xx and not processed again.
-    if (!(await this.claimEvent(event))) {
+    // An event already handled to the end is acknowledged and skipped. It is
+    // recorded only AFTER its handler succeeded, so a crash or error half-way
+    // leaves nothing behind and Stripe's retry processes it. Two concurrent
+    // deliveries may both run; every handler is idempotent (`confirmPaid`
+    // answers `already_confirmed`, refunds reuse one idempotency key, status
+    // updates are conditional).
+    if (await this.processedEvents.exists({ eventId: event.id })) {
       return { received: true };
     }
-    try {
-      switch (event.type) {
-        case 'payment_intent.succeeded':
-          await this.onSucceeded(event.data.object);
-          break;
-        case 'payment_intent.payment_failed':
-          await this.onFailed(event.data.object);
-          break;
-        case 'payment_intent.canceled':
-          await this.setStatus(event.data.object, 'canceled');
-          break;
-        case 'refund.updated':
-        case 'refund.failed':
-          await this.refunds.onStripeRefund(event.data.object);
-          break;
-        default:
-          break;
-      }
-    } catch (error) {
-      // Release the claim so Stripe's retry can process the event.
-      await this.processedEvents.deleteOne({ eventId: event.id });
-      throw error;
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        await this.onSucceeded(event.data.object);
+        break;
+      case 'payment_intent.payment_failed':
+        await this.onFailed(event.data.object);
+        break;
+      case 'payment_intent.canceled':
+        await this.setStatus(event.data.object, 'canceled');
+        break;
+      case 'refund.updated':
+      case 'refund.failed':
+        await this.refunds.onStripeRefund(event.data.object);
+        break;
+      default:
+        break;
     }
+    await this.markProcessed(event);
     return { received: true };
   }
 
-  /** True when this call is the first to handle `event.id`. */
-  private async claimEvent(event: Stripe.Event): Promise<boolean> {
+  /** Remembers a fully handled event; a concurrent duplicate may beat us. */
+  private async markProcessed(event: Stripe.Event): Promise<void> {
     try {
       await this.processedEvents.create({
         eventId: event.id,
         type: event.type,
       });
-      return true;
     } catch (error) {
-      if (isDuplicateKey(error)) return false;
-      throw error;
+      if (!isDuplicateKey(error)) throw error;
     }
   }
 
