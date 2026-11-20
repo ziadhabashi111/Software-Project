@@ -377,8 +377,43 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
 
       const list = (
         await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
-      ).body as RoomBody[];
-      expect(list.map((r) => r.name)).toEqual(['101', '102']);
+      ).body as { items: RoomBody[] };
+      expect(list.items.map((r) => r.name)).toEqual(['101', '102']);
+    });
+
+    it('lists rooms and the per-room status view 10 rooms per page (GEN-05, HTL-03, HTL-08)', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      for (let i = 1; i <= 12; i += 1) {
+        await newRoom(moderator, hotel.id, {
+          name: `R${String(i).padStart(2, '0')}`,
+        }).expect(201);
+      }
+      const first = (
+        await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
+      ).body as {
+        items: RoomBody[];
+        total: number;
+        page: number;
+        limit: number;
+      };
+      expect(first).toMatchObject({ total: 12, page: 1, limit: 10 });
+      expect(first.items).toHaveLength(10);
+      const second = (
+        await moderator.client
+          .get(`/api/hotels/${hotel.id}/rooms?page=2`)
+          .expect(200)
+      ).body as { items: RoomBody[] };
+      expect(second.items.map((r) => r.name)).toEqual(['R11', 'R12']);
+
+      const view = (
+        await moderator.client
+          .get(
+            `/api/hotels/${hotel.id}/availability?from=${day(10)}&to=${day(11)}&page=2`,
+          )
+          .expect(200)
+      ).body as AvailabilityBody & { total: number; page: number };
+      expect(view).toMatchObject({ total: 12, page: 2, limit: 10 });
+      expect(view.rooms).toHaveLength(2);
     });
 
     it('validates a room and keeps other moderators out', async () => {
@@ -480,8 +515,12 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
         .filter((r) => r.status !== 201)
         .forEach((r) => expect(r.status).toBe(400));
       const [finalRoom] = (
-        await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
-      ).body as RoomBody[];
+        (
+          await moderator.client
+            .get(`/api/hotels/${hotel.id}/rooms`)
+            .expect(200)
+        ).body as { items: RoomBody[] }
+      ).items;
       expect(finalRoom.availability).toHaveLength(1);
     });
 

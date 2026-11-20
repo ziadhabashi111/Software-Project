@@ -13,6 +13,8 @@ import { RoomsService } from './rooms.service';
 import type { Hotel } from './schemas/hotel.schema';
 import type { Room } from './schemas/room.schema';
 
+const PAGE = { page: 1, limit: 10 };
+
 const HOTEL_ID = new Types.ObjectId().toString();
 const moderator = {
   id: 'm1',
@@ -71,8 +73,17 @@ function build(
   const room = options.room === undefined ? roomDoc() : options.room;
   const rooms = {
     findOne: jest.fn().mockResolvedValue(room),
+    countDocuments: jest
+      .fn()
+      .mockResolvedValue((options.rooms ?? (room ? [room] : [])).length),
     find: jest.fn(() => ({
-      sort: jest.fn().mockResolvedValue(options.rooms ?? (room ? [room] : [])),
+      sort: jest.fn(() => ({
+        skip: jest.fn(() => ({
+          limit: jest
+            .fn()
+            .mockResolvedValue(options.rooms ?? (room ? [room] : [])),
+        })),
+      })),
     })),
     // A newly created room starts with nothing open and nothing blocked.
     create: jest
@@ -157,7 +168,7 @@ describe('RoomsService.create / list / update (HTL-03, HTL-05)', () => {
     await expect(
       service.create(other, HOTEL_ID, createDto),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    await expect(service.list(other, HOTEL_ID)).rejects.toBeInstanceOf(
+    await expect(service.list(other, HOTEL_ID, PAGE)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
     expect(rooms.create).not.toHaveBeenCalled();
@@ -171,9 +182,14 @@ describe('RoomsService.create / list / update (HTL-03, HTL-05)', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('lists the hotel’s rooms', async () => {
+  it('lists the hotel’s rooms, one page at a time (GEN-05)', async () => {
     const { service } = build();
-    expect(await service.list(moderator, HOTEL_ID)).toHaveLength(1);
+    expect(await service.list(moderator, HOTEL_ID, PAGE)).toMatchObject({
+      total: 1,
+      page: 1,
+      limit: 10,
+      items: [expect.objectContaining({ name: '101' })],
+    });
   });
 
   it('edits beds, occupancy and price, and needs at least one of them', async () => {
