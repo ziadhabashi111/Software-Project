@@ -8,6 +8,7 @@ import { PlaceCatalog } from '../places';
 import { BudgetService } from './budget.service';
 import { BudgetCategory, TransportMode } from './budget-categories';
 import type { BudgetEntry } from './schemas/budget-entry.schema';
+import type { ItineraryBooking } from '../schemas/itinerary-booking.schema';
 import type { TransportCost } from './schemas/transport-cost.schema';
 
 /** Arguments of one recorded call to a jest mock. */
@@ -65,6 +66,8 @@ function build(options: { supported?: boolean; knownCity?: boolean } = {}) {
     find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue([]) }),
     deleteMany: jest.fn().mockResolvedValue({}),
   };
+  // Bookings linked to days (ITN-27) go when their day or itinerary goes.
+  const linkModel = { deleteMany: jest.fn().mockResolvedValue({}) };
   const repository = {
     loadOwned: jest
       .fn()
@@ -88,11 +91,12 @@ function build(options: { supported?: boolean; knownCity?: boolean } = {}) {
   const service = new BudgetService(
     entryModel as unknown as Model<BudgetEntry>,
     costModel as unknown as Model<TransportCost>,
+    linkModel as unknown as Model<ItineraryBooking>,
     repository as unknown as ItineraryRepository,
     places,
     catalog,
   );
-  return { service, entryModel, costModel, repository };
+  return { service, entryModel, costModel, linkModel, repository };
 }
 
 const dto = {
@@ -271,10 +275,10 @@ describe('transport costs (ITN-16)', () => {
 });
 
 describe('cleanup (ITN-07)', () => {
-  it('removes a deleted day’s entries and transport costs', async () => {
-    const { service, entryModel, costModel } = build();
+  it('removes a deleted day’s entries, transport costs and linked bookings', async () => {
+    const { service, entryModel, costModel, linkModel } = build();
     await service.removeDay(ITINERARY_ID.toString(), DAY_ID.toString());
-    for (const model of [entryModel, costModel]) {
+    for (const model of [entryModel, costModel, linkModel]) {
       const filter = argsOf(model.deleteMany)[0] as {
         itineraryId: Types.ObjectId;
         dayId: Types.ObjectId;
@@ -285,9 +289,10 @@ describe('cleanup (ITN-07)', () => {
   });
 
   it('removes everything of a deleted itinerary', async () => {
-    const { service, entryModel, costModel } = build();
+    const { service, entryModel, costModel, linkModel } = build();
     await service.removeItinerary(ITINERARY_ID.toString());
     expect(entryModel.deleteMany).toHaveBeenCalledTimes(1);
     expect(costModel.deleteMany).toHaveBeenCalledTimes(1);
+    expect(linkModel.deleteMany).toHaveBeenCalledTimes(1);
   });
 });

@@ -75,6 +75,8 @@ import { SharedServices } from './shared-services';
     HotelReservationPayments,
     HotelRatings,
     HotelReservationQueries,
+    // The itinerary links a traveller's own reservations (ITN-27).
+    MyHotelReservationsService,
     MongooseModule,
   ],
 })

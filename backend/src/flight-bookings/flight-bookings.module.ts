@@ -75,6 +75,8 @@ import { SharedServices } from './shared-services';
     FlightBookingPayments,
     FlightBookingChangesService,
     SeatAssignments,
+    // The itinerary links a traveller's own bookings (ITN-27).
+    MyFlightBookingsService,
   ],
 })
 export class FlightBookingsModule {}
