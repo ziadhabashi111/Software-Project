@@ -384,11 +384,40 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       const oldRefresh = cookiePair(login, 'refresh_token') as string;
 
       await client.post('/api/auth/refresh').expect(204);
+      // The thief replays it later than the two-tab grace window.
+      await sessionModel.updateMany(
+        {},
+        { rotatedAt: new Date(Date.now() - 60_000) },
+      );
       await api()
         .post('/api/auth/refresh')
         .set('Cookie', oldRefresh)
         .expect(401);
       await client.get('/api/auth/me').expect(401);
+    });
+
+    it('keeps the session when two tabs refresh with the same token at once', async () => {
+      const email = await registerUser();
+      const login = await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD });
+      const shared = cookiePair(login, 'refresh_token') as string;
+
+      const [first, second] = await Promise.all([
+        api().post('/api/auth/refresh').set('Cookie', shared),
+        api().post('/api/auth/refresh').set('Cookie', shared),
+      ]);
+      expect([first.status, second.status]).toEqual([204, 204]);
+
+      // Whichever answer the browser keeps, it can refresh again.
+      for (const res of [first, second]) {
+        const access = cookiePair(res, 'access_token') as string;
+        await api().get('/api/auth/me').set('Cookie', access).expect(200);
+      }
+      await api()
+        .post('/api/auth/refresh')
+        .set('Cookie', cookiePair(second, 'refresh_token') as string)
+        .expect(204);
     });
 
     it('refuses to refresh a suspended account', async () => {

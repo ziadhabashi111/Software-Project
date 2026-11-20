@@ -18,6 +18,13 @@ export class Session {
   @Prop({ type: String, required: true })
   refreshJti!: string;
 
+  /** The refresh token id replaced by the last rotation (ACC-06 grace window). */
+  @Prop({ type: String })
+  previousRefreshJti?: string;
+
+  @Prop({ type: Date })
+  rotatedAt?: Date;
+
   @Prop({ type: Date, required: true })
   lastActivityAt!: Date;
 

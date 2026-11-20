@@ -10,3 +10,11 @@ export const LOCK_DURATION_MINUTES = LOCK_DURATION_MS / MINUTE;
 export const SESSION_IDLE_LIMIT_MS = 30 * MINUTE;
 /** Activity is written at most this often (not on every request). */
 export const SESSION_TOUCH_INTERVAL_MS = 1 * MINUTE;
+
+/**
+ * ACC-06: two tabs share the refresh cookie, so they can refresh with the same
+ * token at the same moment. For this long after a rotation the just-replaced
+ * token is still accepted (and answered with the current one) instead of
+ * being treated as a stolen, replayed token.
+ */
+export const REFRESH_REUSE_GRACE_MS = 30 * 1000;
