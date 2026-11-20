@@ -3,6 +3,7 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
 import { BookingStatus } from '../common/booking-status/booking-status';
+import { holdExpiresAt } from '../common/booking-status/hold';
 import { PLATFORM_CURRENCY } from '../payments/platform-currency';
 import { BookingRequestDto } from './dto/booking-request.dto';
 import {
@@ -18,8 +19,8 @@ import {
 } from './schemas/flight-booking.schema';
 import { SeatInventory } from './seat-inventory';
 
-/** FLT-22: how long seats stay held while the user pays. */
-export const HOLD_MINUTES = 10;
+/** FLT-22: how long seats stay held while the user pays (shared with hotels). */
+export { HOLD_MINUTES } from '../common/booking-status/hold';
 
 /**
  * Proceed to payment (FLT-22): validates like the summary, then holds the
@@ -113,7 +114,7 @@ function toBookingDocument(
       ? { baggagePolicy: prepared.baggagePolicy }
       : {}),
     status: BookingStatus.PENDING_PAYMENT,
-    holdExpiresAt: new Date(now.getTime() + HOLD_MINUTES * 60_000),
+    holdExpiresAt: holdExpiresAt(now),
   };
 }
 

@@ -2,9 +2,10 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 
 /**
- * PAY-01: one row per Stripe webhook event we have handled. The unique index
- * on `eventId` makes the claim atomic, so a redelivered or concurrently
- * delivered event is acknowledged without being processed twice.
+ * PAY-01: one row per Stripe webhook event we have fully handled, written
+ * after its handler succeeded. A redelivery of a recorded event is
+ * acknowledged without being processed again; an event whose handling died
+ * half-way has no row, so Stripe's retry processes it.
  */
 @Schema()
 export class ProcessedStripeEvent {

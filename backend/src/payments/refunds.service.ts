@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -21,11 +22,28 @@ import type {
   RefundService,
   RefundStatus,
 } from './refund.service.interface';
-import { Refund, RefundDocument } from './schemas/refund.schema';
+import {
+  LEGACY_BOOKING_INDEX,
+  Refund,
+  RefundDocument,
+  RefundKind,
+} from './schemas/refund.schema';
 import { STRIPE_CLIENT } from './stripe.provider';
+
+/** A payment the booking could not accept, to be refunded in full. */
+export interface RejectedPayment {
+  bookingType: BookingType;
+  bookingId: string;
+  userId: string;
+  paymentIntentId: string;
+  /** Major units, what Stripe received. */
+  amount: number;
+  currency: string;
+}
 
 export interface RefundView {
   refundId: string;
+  kind: RefundKind;
   bookingType: BookingType;
   bookingId: string;
   amount: number;
@@ -49,7 +67,7 @@ export function toRefundStatus(stripeStatus: string | null): RefundStatus {
  * that result and pays out the amount fixed at cancellation.
  */
 @Injectable()
-export class RefundsService implements RefundService {
+export class RefundsService implements RefundService, OnModuleInit {
   private readonly logger = new Logger(RefundsService.name);
 
   constructor(
@@ -60,6 +78,19 @@ export class RefundsService implements RefundService {
     @Inject(NOTIFICATION_SERVICE)
     private readonly notifications: NotificationService,
   ) {}
+
+  /**
+   * The shared database still has the old unique {bookingType, bookingId}
+   * index, which would refuse a rejected-payment refund for a booking that
+   * also has a cancellation refund. Drop it once; a no-op afterwards.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.refunds.collection.dropIndex(LEGACY_BOOKING_INDEX);
+    } catch {
+      // Already gone, or the collection does not exist yet.
+    }
+  }
 
   /** What cancelling now would refund (for the cancel dialogs). */
   async preview(
@@ -110,6 +141,64 @@ export class RefundsService implements RefundService {
     return toResult(doc);
   }
 
+  /**
+   * PAY-01 / PAY-03: a payment that succeeded but could not confirm its
+   * booking (hold ended, wrong amount, booking no longer payable) goes back
+   * in full. Recorded like any refund, so the `refund.updated` /
+   * `refund.failed` webhooks find it, and the user is told the outcome
+   * (GEN-01). Safe to call twice for the same payment.
+   */
+  async refundRejectedPayment(payment: RejectedPayment): Promise<RefundResult> {
+    const existing = await this.refunds.findOne({
+      kind: 'rejected_payment',
+      stripePaymentIntentId: payment.paymentIntentId,
+    });
+    if (existing) return toResult(existing);
+    const stripeRefund = await this.stripe.refunds.create(
+      {
+        payment_intent: payment.paymentIntentId,
+        metadata: {
+          bookingType: payment.bookingType,
+          bookingId: payment.bookingId,
+          userId: payment.userId,
+          reason: 'payment_rejected',
+        },
+      },
+      { idempotencyKey: `refund-rejected-${payment.paymentIntentId}` },
+    );
+    const status = toRefundStatus(stripeRefund.status);
+    const filter = { stripeRefundId: stripeRefund.id };
+    let doc: RefundDocument | null;
+    try {
+      doc = await this.refunds.findOneAndUpdate(
+        filter,
+        {
+          $setOnInsert: {
+            kind: 'rejected_payment',
+            bookingType: payment.bookingType,
+            bookingId: new Types.ObjectId(payment.bookingId),
+            userId: new Types.ObjectId(payment.userId),
+            stripePaymentIntentId: payment.paymentIntentId,
+            amount: payment.amount,
+            percentage: 100,
+            currency: payment.currency.toUpperCase(),
+            status,
+            ...(status === 'FAILED'
+              ? { failureReason: stripeRefund.failure_reason ?? 'unknown' }
+              : {}),
+          },
+        },
+        { upsert: true, returnDocument: 'after' },
+      );
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+      doc = await this.refunds.findOne(filter);
+    }
+    if (!doc) throw new InternalServerErrorException();
+    await this.notifyOnce(doc);
+    return toResult(doc);
+  }
+
   /** GET /refunds/:id: owner only; accepts the Stripe refund id or our id. */
   async get(userId: string, id: string): Promise<RefundView> {
     const doc = Types.ObjectId.isValid(id)
@@ -147,11 +236,14 @@ export class RefundsService implements RefundService {
       // beat it, fail so the webhook claim is released and Stripe retries.
       throw new Error(`Refund ${refund.id} is not recorded yet`);
     }
-    await this.gateway.recordRefund(
-      doc.bookingType,
-      doc.bookingId.toString(),
-      toResult(doc),
-    );
+    // A rejected payment's refund is not the booking's cancellation refund.
+    if (doc.kind !== 'rejected_payment') {
+      await this.gateway.recordRefund(
+        doc.bookingType,
+        doc.bookingId.toString(),
+        toResult(doc),
+      );
+    }
     await this.notifyOnce(doc);
   }
 
@@ -161,9 +253,11 @@ export class RefundsService implements RefundService {
     basis: RefundBasisView,
     stripeRefund: Stripe.Refund,
   ): Promise<RefundDocument> {
+    // `$ne` also matches records written before `kind` existed.
     const filter = {
       bookingType,
       bookingId: new Types.ObjectId(bookingId),
+      kind: { $ne: 'rejected_payment' as RefundKind },
     };
     const status = toRefundStatus(stripeRefund.status);
     let doc: RefundDocument | null;
@@ -172,6 +266,7 @@ export class RefundsService implements RefundService {
         filter,
         {
           $setOnInsert: {
+            kind: 'cancellation',
             userId: new Types.ObjectId(basis.userId),
             stripePaymentIntentId: basis.paymentIntentId,
             stripeRefundId: stripeRefund.id,
@@ -203,14 +298,20 @@ export class RefundsService implements RefundService {
     );
     if (!claimed) return;
     const refunded = doc.status === 'REFUNDED';
+    const rejected = doc.kind === 'rejected_payment';
+    const amount = `${doc.amount} ${doc.currency}`;
+    let type = refunded ? 'REFUND_ISSUED' : 'REFUND_FAILED';
+    let message = refunded
+      ? `Your refund of ${amount} has been issued.`
+      : `Your refund of ${amount} could not be completed. Please contact support.`;
+    if (rejected && refunded) {
+      type = 'PAYMENT_REFUNDED';
+      message = `Your payment of ${amount} could not be applied to your ${doc.bookingType} booking (the hold had ended or the booking changed), so it was not confirmed. The full ${amount} has been refunded.`;
+    } else if (rejected) {
+      message = `Your payment of ${amount} could not be applied to your ${doc.bookingType} booking, and refunding it failed. Please contact support.`;
+    }
     try {
-      await this.notifications.notify(
-        doc.userId.toString(),
-        refunded ? 'REFUND_ISSUED' : 'REFUND_FAILED',
-        refunded
-          ? `Your refund of ${doc.amount} ${doc.currency} has been issued.`
-          : `Your refund of ${doc.amount} ${doc.currency} could not be completed. Please contact support.`,
-      );
+      await this.notifications.notify(doc.userId.toString(), type, message);
     } catch (error) {
       this.logger.error(
         `Could not notify user ${doc.userId.toString()} about refund ${doc.stripeRefundId}`,
@@ -226,12 +327,16 @@ function toResult(doc: RefundDocument): RefundResult {
     amount: doc.amount,
     status: doc.status,
     currency: doc.currency,
+    ...(doc.status === 'FAILED' && doc.failureReason
+      ? { failureReason: doc.failureReason }
+      : {}),
   };
 }
 
 function toView(doc: RefundDocument): RefundView {
   return {
     refundId: doc.stripeRefundId,
+    kind: doc.kind ?? 'cancellation',
     bookingType: doc.bookingType,
     bookingId: doc.bookingId.toString(),
     amount: doc.amount,

@@ -19,6 +19,8 @@ import { SharedServices } from './shared-services';
 export const EXPIRY_SWEEP_MS = 30_000;
 /** Bookings handled per sweep, so one run stays short. */
 const BATCH = 500;
+/** Stripe retries a webhook for up to 3 days. */
+export const STRIPE_WEBHOOK_RETRY_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * GEN-11 timed transitions:
@@ -82,6 +84,9 @@ export class FlightBookingExpiryService {
     options: { force?: boolean } = {},
   ): Promise<boolean> {
     assertCanTransition(BookingStatus.PENDING_PAYMENT, BookingStatus.EXPIRED);
+    if (!options.force && !(await this.paymentCancelled(bookingId, now))) {
+      return false;
+    }
     const expired = await this.connection.transaction(async (session) => {
       const doc = await this.bookings.findOneAndUpdate(
         {
@@ -103,18 +108,79 @@ export class FlightBookingExpiryService {
       }
       return true;
     });
-    if (expired) await this.shared.cancelPendingPayment(bookingId.toString());
+    // A forced expiry (the flight was cancelled) ends the hold first, then
+    // stops the payment; a late success is refunded by the webhook.
+    if (expired && options.force) {
+      await this.shared.cancelPendingPayment(bookingId.toString());
+    }
     return expired;
   }
 
-  /** Confirmed bookings whose last flight has landed become Completed. */
-  async completeDue(now: Date = new Date()): Promise<number> {
-    const confirmed = await this.bookings
-      .find({ status: BookingStatus.CONFIRMED })
-      .select('_id segments.flight')
-      .limit(BATCH)
+  /**
+   * Before a run-out hold expires, its PaymentIntent is cancelled. If Stripe
+   * says the user already paid (in the last seconds of the hold), the hold is
+   * left alone: the webhook confirms the booking, or refunds the payment
+   * (FLT-22, PAY-01). Once Stripe has stopped retrying webhooks the hold is
+   * expired anyway, so seats are never held forever. False when the booking
+   * is not a run-out hold.
+   */
+  private async paymentCancelled(
+    bookingId: Types.ObjectId,
+    now: Date,
+  ): Promise<boolean> {
+    const due = await this.bookings
+      .findOne({
+        _id: bookingId,
+        status: BookingStatus.PENDING_PAYMENT,
+        holdExpiresAt: { $lte: now },
+      })
+      .select('holdExpiresAt')
       .lean();
-    if (confirmed.length === 0) return 0;
+    if (!due?.holdExpiresAt) return false;
+    const payment = await this.shared.cancelPendingPayment(
+      bookingId.toString(),
+    );
+    if (payment !== 'not_cancellable') return true;
+    return (
+      now.getTime() - due.holdExpiresAt.getTime() >= STRIPE_WEBHOOK_RETRY_MS
+    );
+  }
+
+  /**
+   * Confirmed bookings whose last flight has landed become Completed. Pages
+   * through every Confirmed booking (by `_id`, `batchSize` at a time), so
+   * upcoming bookings never hide landed ones behind a fixed limit.
+   */
+  async completeDue(
+    now: Date = new Date(),
+    batchSize: number = BATCH,
+  ): Promise<number> {
+    let completed = 0;
+    let after: Types.ObjectId | undefined;
+    for (;;) {
+      const page = await this.bookings
+        .find({
+          status: BookingStatus.CONFIRMED,
+          ...(after ? { _id: { $gt: after } } : {}),
+        })
+        .select('_id segments.flight')
+        .sort({ _id: 1 })
+        .limit(batchSize)
+        .lean();
+      if (page.length === 0) return completed;
+      completed += await this.completeLanded(page, now);
+      if (page.length < batchSize) return completed;
+      after = page[page.length - 1]._id;
+    }
+  }
+
+  private async completeLanded(
+    confirmed: {
+      _id: Types.ObjectId;
+      segments: { flight: Types.ObjectId }[];
+    }[],
+    now: Date,
+  ): Promise<number> {
     const flightIds = confirmed.flatMap((b) => b.segments.map((s) => s.flight));
     const landed = new Set(
       (
