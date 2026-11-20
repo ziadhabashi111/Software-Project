@@ -92,12 +92,20 @@ export class UsersService {
 
   updateProfile(
     userId: string,
-    patch: { name?: string; phone?: string; preferredCurrency?: string },
+    patch: {
+      name?: string;
+      phone?: string | null;
+      preferredCurrency?: string;
+    },
   ): Promise<UserDocument | null> {
+    // A null phone clears it (the only clearable profile field, ACC-09).
+    const { phone, ...rest } = patch;
+    const set =
+      phone === null || phone === undefined ? rest : { ...rest, phone };
     return this.model
       .findByIdAndUpdate(
         userId,
-        { $set: patch },
+        phone === null ? { $set: set, $unset: { phone: 1 } } : { $set: set },
         { new: true, runValidators: true },
       )
       .exec();

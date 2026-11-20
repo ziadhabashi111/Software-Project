@@ -150,10 +150,26 @@ describe('Profile and deactivation (ACC-09, ACC-11, ACC-12; real MongoDB in memo
       ['a numeric currency', { preferredCurrency: '123' }],
       ['an empty name', { name: '' }],
       ['a one letter name', { name: 'A' }],
+      ['a null name (GEN-13)', { name: null }],
+      ['a null currency (GEN-13)', { preferredCurrency: null }],
     ])('rejects %s', async (_label, patch) => {
       const { client } = await loggedInClient();
       const res = await client.patch('/api/users/me').send(patch).expect(400);
       expect(fieldsOf(res)).toEqual(Object.keys(patch));
+    });
+
+    it('clears the phone when it is sent as null', async () => {
+      const { client } = await loggedInClient();
+      await client
+        .patch('/api/users/me')
+        .send({ phone: '+201001234567' })
+        .expect(200);
+      const res = await client
+        .patch('/api/users/me')
+        .send({ phone: null })
+        .expect(200);
+      expect((res.body as { phone?: string }).phone ?? null).toBeNull();
+      expect((res.body as { name: string }).name).toBe('Profile User');
     });
 
     it('rejects an empty update', async () => {

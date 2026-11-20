@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 import { CURRENCY_CODE, TIME_OF_DAY, trim, upper } from './transforms';
 
 /**
@@ -21,7 +22,7 @@ import { CURRENCY_CODE, TIME_OF_DAY, trim, upper } from './transforms';
  */
 export class UpdateActivityDto {
   @ApiPropertyOptional({ maxLength: 100 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @IsNotEmpty()
