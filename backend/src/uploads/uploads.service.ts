@@ -246,6 +246,24 @@ export class UploadsService {
     return true;
   }
 
+  /**
+   * Deletes the file of an image its item no longer shows, whoever uploaded
+   * it. For modules that have just removed the URL from their own record
+   * after checking the caller may change that item (for example any
+   * moderator of the hotel, GEN-08, HTL-01): a file belongs to one item only
+   * (`attach`), so nothing else uses it. Unknown or foreign URLs are a no-op.
+   */
+  async removeForItem(urlOrId: string): Promise<boolean> {
+    const name = STORED_NAME.test(urlOrId)
+      ? urlOrId
+      : this.nameFromUrl(urlOrId);
+    if (!name) return false;
+    const record = await this.records.findOneAndDelete({ filename: name });
+    if (!record) return false;
+    await this.unlinkQuietly(name);
+    return true;
+  }
+
   private urlFor(name: string): string {
     return `${this.publicBase}/${name}`;
   }

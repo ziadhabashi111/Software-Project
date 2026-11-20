@@ -836,6 +836,21 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
         .expect(404);
     });
 
+    it('deletes the file when another moderator of the same hotel removes the photo', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      const colleague = await loggedInAs(Role.HOTEL_MODERATOR, hotel.id);
+      const added = (await upload(moderator.client, hotel.id).expect(201))
+        .body as { photos: { id: string; url: string }[] };
+      const name = added.photos[0].url.split('/').pop() as string;
+      expect(await readdir(dir)).toContain(name);
+
+      await colleague.client
+        .delete(`/api/hotels/${hotel.id}/images/${added.photos[0].id}`)
+        .expect(200);
+      expect(await readdir(dir)).not.toContain(name);
+      await guest().get(`/uploads/${name}`).expect(404);
+    });
+
     it('keeps everyone else out, and stores nothing for them', async () => {
       const { hotel, moderator } = await hotelWithModerator();
       const other = await hotelWithModerator();
