@@ -5,6 +5,7 @@ import {
   HttpCode,
   Patch,
   Post,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
@@ -30,10 +31,12 @@ import { AllowPasswordChange } from './decorators/allow-password-change.decorato
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { EmailVerificationService } from './email-verification.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import {
   PasswordResetService,
   RESET_LINK_TTL_MINUTES,
@@ -49,6 +52,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly passwordReset: PasswordResetService,
+    private readonly emailVerification: EmailVerificationService,
     private readonly cookies: AuthCookiesService,
   ) {}
 
@@ -155,6 +159,51 @@ export class AuthController {
   ): Promise<void> {
     const tokens = await this.auth.changePassword(user, dto);
     this.cookies.set(res, tokens);
+  }
+
+  @Public()
+  @Get('verify-email')
+  @ApiReq(
+    'ACC-02',
+    'Verify the email address (optional bonus)',
+    'Opens the link from the verification email: send its `token`. Marks the account as verified. The link works once and expires after 24 hours. Registration sends the first link; ask for another with POST /api/auth/resend-verification. Booking is blocked until verification only when the server runs with EMAIL_VERIFICATION_REQUIRED=true (off by default).',
+  )
+  @ApiOkResponse({
+    schema: { example: { message: 'Your email address is verified.' } },
+  })
+  @ApiBadRequestResponse({
+    description: 'The link is invalid, expired or already used',
+  })
+  async verifyEmail(
+    @Query() query: VerifyEmailQueryDto,
+  ): Promise<{ message: string }> {
+    await this.emailVerification.verify(query.token);
+    return { message: 'Your email address is verified.' };
+  }
+
+  @HttpCode(200)
+  @Post('resend-verification')
+  @ApiCookieAuth()
+  @ApiReq(
+    'ACC-02',
+    'Send a new verification link (optional bonus)',
+    'For the logged-in user: emails a new verification link, replacing the older one. Nothing is sent when the address is already verified. With no SMTP server configured the email is written to the server log (outside production).',
+  )
+  @ApiOkResponse({
+    schema: {
+      example: { message: 'A new verification link has been sent.' },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Not logged in' })
+  async resendVerification(
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ message: string }> {
+    const { alreadyVerified } = await this.emailVerification.resend(user.id);
+    return {
+      message: alreadyVerified
+        ? 'Your email address is already verified.'
+        : 'A new verification link has been sent.',
+    };
   }
 
   @Public()

@@ -20,6 +20,8 @@ export interface NewUser {
   providerId?: string;
   mustChangePassword?: boolean;
   consentAcceptedAt?: Date;
+  /** `false` for a self-registered user until they verify the email (ACC-02). */
+  emailVerified?: boolean;
 }
 
 @Injectable()
@@ -233,6 +235,16 @@ export class UsersService {
   ): Promise<void> {
     await this.model
       .updateOne({ _id: userId }, { passwordHash, mustChangePassword })
+      .exec();
+  }
+
+  /** ACC-02: the emailed link was used. Safe to repeat; only an unverified account changes. */
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.model
+      .updateOne(
+        { _id: userId, emailVerified: false },
+        { emailVerified: true, emailVerifiedAt: new Date() },
+      )
       .exec();
   }
 

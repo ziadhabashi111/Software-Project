@@ -71,6 +71,27 @@ describe('HTTP hardening (ACC-05, ACC-19, real HTTP)', () => {
     },
   );
 
+  // Resending sends an email each time; the verification link takes a secret
+  // token. Neither may be hammered from one address.
+  it.each([
+    ['POST', 'resend-verification', 5],
+    ['GET', 'verify-email', 20],
+  ] as const)(
+    'allows %s /auth/%s %i times per minute from one address, then answers 429',
+    async (method, route, limit) => {
+      const call = () =>
+        method === 'GET'
+          ? request(ctx.server).get(`/api/auth/${route}`).query({ token: 'x' })
+          : request(ctx.server).post(`/api/auth/${route}`);
+      for (let i = 0; i < limit; i += 1) {
+        const res = await call();
+        expect(res.status).not.toBe(429);
+      }
+      const limited = await call().expect(429);
+      expect((limited.body as { code?: string }).code).toBe('RATE_LIMITED');
+    },
+  );
+
   // One person testing several roles in Swagger, or a whole class behind one
   // address, must not be locked out after a handful of sign-ups.
   it('allows 20 registrations per minute from one address, then answers 429', async () => {

@@ -100,6 +100,20 @@ function AUTH_AND_UPLOAD_LIMITS(): RouteRateLimit[] {
       limiter: new RateLimiter(10, MINUTE),
     },
     {
+      // Sends an email each time.
+      method: 'POST',
+      path: /^\/api\/auth\/resend-verification$/,
+      name: 'resend-verification',
+      limiter: new RateLimiter(5, MINUTE),
+    },
+    {
+      // Takes a secret token, so guessing is limited.
+      method: 'GET',
+      path: /^\/api\/auth\/verify-email$/,
+      name: 'verify-email',
+      limiter: new RateLimiter(20, MINUTE),
+    },
+    {
       method: 'POST',
       path: /^\/api\/(uploads\/images|(posts|hotels|activities)\/[^/]+\/images)$/,
       name: 'uploads',

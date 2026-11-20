@@ -9,6 +9,13 @@ export interface ReviewAuthor {
   name: string;
 }
 
+/** The hotel's response to a review (HTL-26); the moderator is not named. */
+export interface ReviewReplyView {
+  text: string;
+  repliedAt: string;
+  editedAt?: string;
+}
+
 export interface HotelReviewView {
   id: string;
   reservationId: string;
@@ -17,6 +24,8 @@ export interface HotelReviewView {
   text: string | null;
   author: ReviewAuthor;
   isHidden: boolean;
+  /** The hotel's response, or null when the hotel has not answered. */
+  reply: ReviewReplyView | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +48,15 @@ export function toReviewView(
     text: doc.text ?? null,
     author,
     isHidden: doc.isHidden,
+    reply: doc.reply
+      ? {
+          text: doc.reply.text,
+          repliedAt: doc.reply.repliedAt.toISOString(),
+          ...(doc.reply.editedAt
+            ? { editedAt: doc.reply.editedAt.toISOString() }
+            : {}),
+        }
+      : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

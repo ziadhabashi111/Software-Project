@@ -59,6 +59,18 @@ export class User {
   @Prop({ type: Date })
   consentAcceptedAt?: Date;
 
+  /**
+   * False from registration until the emailed link is used (ACC-02). Accounts
+   * that have no value (created before this existed, seeded, or made by an
+   * admin) count as verified, so turning verification on locks nobody out
+   * by surprise.
+   */
+  @Prop({ type: Boolean, default: true })
+  emailVerified!: boolean;
+
+  @Prop({ type: Date })
+  emailVerifiedAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
