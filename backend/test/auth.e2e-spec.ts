@@ -267,6 +267,26 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       expect((correct.body as ErrorBody).message).toMatch(/locked/i);
     });
 
+    it('checks the password at most 5 times when 20 wrong logins arrive at once', async () => {
+      const email = await registerUser();
+      const compare = jest.spyOn(passwords, 'compare');
+      try {
+        compare.mockClear();
+        const results = await Promise.all(
+          Array.from({ length: 20 }, () => wrong(email)),
+        );
+        expect(compare.mock.calls.length).toBeLessThanOrEqual(5);
+        expect(results.filter((r) => r.status === 401)).toHaveLength(4);
+        expect(results.filter((r) => r.status === 429)).toHaveLength(16);
+      } finally {
+        compare.mockRestore();
+      }
+      await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD })
+        .expect(429);
+    });
+
     it('lets the user back in once the lock has passed', async () => {
       const email = await registerUser();
       for (let attempt = 1; attempt <= 5; attempt += 1) {
@@ -503,6 +523,26 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       await client.post('/api/auth/login').send({ email, password: PASSWORD });
       return { email, client };
     }
+
+    it('counts wrong current passwords like failed logins and locks the account (ACC-05)', async () => {
+      const { client, email } = await loggedIn();
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        await client
+          .patch('/api/auth/change-password')
+          .send({ currentPassword: 'Wrong1234', newPassword: 'Another123' })
+          .expect(400);
+      }
+      await client
+        .patch('/api/auth/change-password')
+        .send({ currentPassword: 'Wrong1234', newPassword: 'Another123' })
+        .expect(429);
+      // Locked: the session is gone and the right password is refused too.
+      await client.get('/api/auth/me').expect(401);
+      await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD })
+        .expect(429);
+    });
 
     it('needs a login', async () => {
       await api()
