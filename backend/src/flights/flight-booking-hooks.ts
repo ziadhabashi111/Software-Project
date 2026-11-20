@@ -40,6 +40,13 @@ export interface FlightBookingLink {
   getConfirmedUserIdsForAirline?(airlineId: string): Promise<string[]>;
 
   /**
+   * FLT-28 (optional): labels of the seats passengers picked in this cabin.
+   * Asked before a cabin layout change (fewer seats or another seats-per-row)
+   * so an assigned seat never disappears.
+   */
+  assignedSeats?(flightId: string, cabinClass: CabinClass): Promise<string[]>;
+
+  /**
    * FLT-29: Confirmed and Cancelled bookings of the flight, newest first.
    * Without `page` returns all of them (CSV export).
    */
