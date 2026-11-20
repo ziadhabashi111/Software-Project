@@ -91,7 +91,15 @@ function setup() {
       Promise.resolve(seenEvents.has(filter.eventId) ? { _id: 'x' } : null),
     ),
   };
-  const refunds = { onStripeRefund: jest.fn().mockResolvedValue(undefined) };
+  const refunds = {
+    onStripeRefund: jest.fn().mockResolvedValue(undefined),
+    refundRejectedPayment: jest.fn().mockResolvedValue({
+      refundId: 're_1',
+      amount: 250.5,
+      status: 'REFUNDED',
+      currency: 'USD',
+    }),
+  };
   const service = new PaymentsService(
     stripe as unknown as Stripe,
     config,
@@ -307,16 +315,55 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
     expect(stripe.refunds.create).not.toHaveBeenCalled();
   });
 
-  it('refunds a payment the booking could not accept (idempotent key)', async () => {
-    const { service, stripe, gateway } = setup();
+  it('refunds a payment the booking could not accept through the refund records', async () => {
+    const { service, stripe, gateway, refunds } = setup();
     gateway.confirm.mockResolvedValue('rejected');
     stripe.webhooks.constructEvent.mockReturnValue(
       event('payment_intent.succeeded', intent({ status: 'succeeded' })),
     );
     await service.handleWebhook(Buffer.from('{}'), 'sig');
-    expect(stripe.refunds.create).toHaveBeenCalledWith(
-      { payment_intent: 'pi_1' },
-      { idempotencyKey: 'refund-rejected-pi_1' },
+    expect(refunds.refundRejectedPayment).toHaveBeenCalledWith({
+      bookingType: 'flight',
+      bookingId: BOOKING,
+      userId: USER,
+      paymentIntentId: 'pi_1',
+      amount: 250.5,
+      currency: 'USD',
+    });
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps the payment succeeded while its refund is still pending', async () => {
+    const { service, stripe, gateway, refunds, payments } = setup();
+    gateway.confirm.mockResolvedValue('rejected');
+    refunds.refundRejectedPayment.mockResolvedValue({
+      refundId: 're_1',
+      amount: 250.5,
+      status: 'PENDING',
+      currency: 'USD',
+    });
+    stripe.webhooks.constructEvent.mockReturnValue(
+      event('payment_intent.succeeded', intent({ status: 'succeeded' })),
+    );
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(payments.updateOne).toHaveBeenCalledWith(
+      { stripePaymentIntentId: 'pi_1' },
+      { $set: { stripeRefundId: 're_1' } },
+    );
+  });
+
+  it('marks the payment refunded once the refund webhook says it went through', async () => {
+    const { service, stripe, payments } = setup();
+    stripe.webhooks.constructEvent.mockReturnValue({
+      id: 'evt_refund',
+      type: 'refund.updated',
+      created: 1,
+      data: { object: { id: 're_1', status: 'succeeded' } },
+    } as unknown as Stripe.Event);
+    await service.handleWebhook(Buffer.from('{}'), 'sig');
+    expect(payments.updateOne).toHaveBeenCalledWith(
+      { stripeRefundId: 're_1', status: { $ne: 'refunded' } },
+      { $set: { status: 'refunded' } },
     );
   });
 
@@ -353,7 +400,6 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
       service.handleWebhook(Buffer.from('{}'), 'sig'),
     ).resolves.toEqual({ received: true });
     expect(gateway.confirm).toHaveBeenCalledTimes(1);
-    expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
   });
 
   it('releases the event claim when processing fails, so a Stripe retry is processed', async () => {
@@ -403,7 +449,7 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
   });
 
   it('never refunds a payment that is already refunded (beyond the 24h idempotency window)', async () => {
-    const { service, stripe, gateway, payments } = setup();
+    const { service, stripe, gateway, payments, refunds } = setup();
     gateway.confirm.mockResolvedValue('rejected');
     payments.findOne.mockResolvedValue({
       stripePaymentIntentId: 'pi_1',
@@ -419,10 +465,10 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
       ),
     );
     await service.handleWebhook(Buffer.from('{}'), 'sig');
-    expect(stripe.refunds.create).not.toHaveBeenCalled();
+    expect(refunds.refundRejectedPayment).not.toHaveBeenCalled();
   });
 
-  it('stores the refund id when it refunds a rejected payment', async () => {
+  it('stores the refund id and marks the payment refunded when the refund went through', async () => {
     const { service, stripe, gateway, payments } = setup();
     gateway.confirm.mockResolvedValue('rejected');
     stripe.webhooks.constructEvent.mockReturnValue(
@@ -430,8 +476,8 @@ describe('PaymentsService.handleWebhook (PAY-01)', () => {
     );
     await service.handleWebhook(Buffer.from('{}'), 'sig');
     expect(payments.updateOne).toHaveBeenCalledWith(
-      { stripePaymentIntentId: 'pi_1', status: { $ne: 'refunded' } },
-      { $set: { status: 'refunded', stripeRefundId: 're_1' } },
+      { stripePaymentIntentId: 'pi_1' },
+      { $set: { stripeRefundId: 're_1', status: 'refunded' } },
     );
   });
 

@@ -19,7 +19,7 @@ import type {
 import { toMinorUnits } from './money';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import type { BookingType } from './refund.service.interface';
-import { RefundsService } from './refunds.service';
+import { RefundsService, toRefundStatus } from './refunds.service';
 import { Payment, PaymentDocument } from './schemas/payment.schema';
 import {
   ProcessedStripeEvent,
@@ -285,6 +285,7 @@ export class PaymentsService implements PaymentService {
       case 'refund.updated':
       case 'refund.failed':
         await this.refunds.onStripeRefund(event.data.object);
+        await this.onRefundSettled(event.data.object);
         break;
       default:
         break;
@@ -332,17 +333,44 @@ export class PaymentsService implements PaymentService {
       if (existing?.status === 'refunded' || existing?.stripeRefundId) {
         return; // already refunded; the idempotency key only lasts 24h
       }
-      const refund = await this.stripe.refunds.create(
-        { payment_intent: intent.id },
-        { idempotencyKey: `refund-rejected-${intent.id}` },
-      );
+      const userId = intent.metadata?.userId || existing?.userId?.toString();
+      if (!userId) {
+        throw new InternalServerErrorException(
+          `PaymentIntent ${intent.id} has no user to refund`,
+        );
+      }
+      // A Refund record (PAY-03), so the refund webhooks find it and the
+      // user is told (GEN-01). The payment only counts as refunded once
+      // Stripe says the money went back.
+      const refund = await this.refunds.refundRejectedPayment({
+        bookingType: ref.type,
+        bookingId: ref.bookingId,
+        userId,
+        paymentIntentId: intent.id,
+        amount: intent.amount_received / 100,
+        currency: intent.currency.toUpperCase(),
+      });
       await this.payments.updateOne(
-        { stripePaymentIntentId: intent.id, status: { $ne: 'refunded' } },
-        { $set: { status: 'refunded', stripeRefundId: refund.id } },
+        { stripePaymentIntentId: intent.id },
+        {
+          $set: {
+            stripeRefundId: refund.refundId,
+            ...(refund.status === 'REFUNDED' ? { status: 'refunded' } : {}),
+          },
+        },
       );
       return;
     }
     await this.setStatus(intent, 'succeeded');
+  }
+
+  /** A rejected payment's refund went through: the payment is now refunded. */
+  private async onRefundSettled(refund: Stripe.Refund): Promise<void> {
+    if (toRefundStatus(refund.status) !== 'REFUNDED') return;
+    await this.payments.updateOne(
+      { stripeRefundId: refund.id, status: { $ne: 'refunded' } },
+      { $set: { status: 'refunded' } },
+    );
   }
 
   private async onFailed(intent: Stripe.PaymentIntent): Promise<void> {

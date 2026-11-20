@@ -293,6 +293,107 @@ describe('RefundsService.onStripeRefund webhook (PAY-03)', () => {
   });
 });
 
+describe('RefundsService.refundRejectedPayment (PAY-03, GEN-01)', () => {
+  const rejected = {
+    bookingType: 'flight' as const,
+    bookingId: BOOKING,
+    userId: USER,
+    paymentIntentId: 'pi_late',
+    amount: 250.5,
+    currency: 'USD',
+  };
+
+  it('refunds the whole payment once and keeps a Refund record for the refund webhooks', async () => {
+    const { service, stripe, model } = setup();
+    model.findOne.mockResolvedValue(null);
+    const doc = refundDoc({
+      kind: 'rejected_payment',
+      stripePaymentIntentId: 'pi_late',
+      amount: 250.5,
+      percentage: 100,
+    });
+    model.findOneAndUpdate
+      .mockResolvedValueOnce(doc) // save
+      .mockResolvedValueOnce(doc); // notify claim
+    const result = await service.refundRejectedPayment(rejected);
+    expect(stripe.refunds.create).toHaveBeenCalledWith(
+      {
+        payment_intent: 'pi_late',
+        metadata: {
+          bookingType: 'flight',
+          bookingId: BOOKING,
+          userId: USER,
+          reason: 'payment_rejected',
+        },
+      },
+      { idempotencyKey: 'refund-rejected-pi_late' },
+    );
+    const [filter, update] = model.findOneAndUpdate.mock.calls[0] as [
+      Record<string, unknown>,
+      { $setOnInsert: Record<string, unknown> },
+    ];
+    expect(filter).toEqual({ stripeRefundId: 're_1' });
+    expect(update.$setOnInsert).toMatchObject({
+      kind: 'rejected_payment',
+      bookingType: 'flight',
+      stripePaymentIntentId: 'pi_late',
+      amount: 250.5,
+      percentage: 100,
+      currency: 'USD',
+      status: 'REFUNDED',
+    });
+    expect(result.status).toBe('REFUNDED');
+  });
+
+  it('tells the user their payment was not accepted and was refunded', async () => {
+    const { service, model, notifications } = setup();
+    model.findOne.mockResolvedValue(null);
+    const doc = refundDoc({ kind: 'rejected_payment', amount: 250.5 });
+    model.findOneAndUpdate
+      .mockResolvedValueOnce(doc)
+      .mockResolvedValueOnce(doc);
+    await service.refundRejectedPayment(rejected);
+    expect(notifications.notify).toHaveBeenCalledWith(
+      USER,
+      'PAYMENT_REFUNDED',
+      expect.stringContaining('250.5 USD'),
+    );
+  });
+
+  it('never refunds the same payment twice', async () => {
+    const { service, stripe, model } = setup();
+    model.findOne.mockResolvedValue(
+      refundDoc({ kind: 'rejected_payment', stripePaymentIntentId: 'pi_late' }),
+    );
+    await service.refundRejectedPayment(rejected);
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+  });
+
+  it('a refund.failed webhook for it is recorded and the user is told, without touching the booking', async () => {
+    const { service, model, gateway, notifications } = setup();
+    const doc = refundDoc({
+      kind: 'rejected_payment',
+      status: 'FAILED',
+      failureReason: 'expired_or_canceled_card',
+    });
+    model.findOneAndUpdate
+      .mockResolvedValueOnce(doc)
+      .mockResolvedValueOnce(doc);
+    await service.onStripeRefund(
+      stripeRefund({
+        status: 'failed',
+        failure_reason: 'expired_or_canceled_card',
+      }),
+    );
+    expect(gateway.recordRefund).not.toHaveBeenCalled();
+    expect(notifications.notify).toHaveBeenCalledWith(
+      USER,
+      'REFUND_FAILED',
+      expect.any(String),
+    );
+  });
+});
+
 describe('RefundsService.get (PAY-03)', () => {
   it('returns your own refund by its Stripe id', async () => {
     const { service, model } = setup();
