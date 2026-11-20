@@ -132,6 +132,13 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         countryCode: 'AE',
         timeZone: 'Asia/Dubai',
       },
+      {
+        iataCode: 'DWC',
+        name: 'Al Maktoum International Airport',
+        cityId: 'dubai',
+        countryCode: 'AE',
+        timeZone: 'Asia/Dubai',
+      },
     ]);
     airline = await airlines.create({
       name: 'Nile Air',
@@ -448,6 +455,22 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect(booking.price.perSegment).toEqual([200, 150]);
       expect((await cabinOf(outbound)).heldSeats).toBe(1);
       expect((await cabinOf(back)).heldSeats).toBe(1);
+    });
+
+    it('books a round trip whose return leaves from another airport of the same city (ITN-26)', async () => {
+      const outbound = await makeFlight({ departInDays: 40 });
+      const back = await makeFlight({
+        from: 'DWC',
+        to: 'CAI',
+        departInDays: 45,
+      });
+      const { booking } = await heldBooking(outbound, [adult()], {
+        return: { flightId: back.id, cabinClass: 'Economy' },
+      });
+      expect(booking.segments.map((s) => s.flightId)).toEqual([
+        outbound.id,
+        back.id,
+      ]);
     });
 
     it('cannot hold seats on a cancelled flight', async () => {
