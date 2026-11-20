@@ -15,7 +15,7 @@ import {
   ProviderType,
 } from '../src/admin/provider-directory';
 import { ReportDirectory } from '../src/admin/report-source';
-import { configureApp } from '../src/app.setup';
+import { buildSwaggerDocument, configureApp } from '../src/app.setup';
 import { AuthorItineraries } from '../src/blog/author-itineraries';
 import { ReportTargets } from '../src/blog/reports/report-targets';
 import { FlightBookingHooks } from '../src/flights/flight-booking-hooks';
@@ -168,6 +168,31 @@ describe('Real AppModule wiring and end-to-end flows', () => {
   });
 
   // ---------------------------------------------------------------- registries
+
+  describe('Swagger, how Milestone 1 is evaluated', () => {
+    it('builds the document for the whole app and tags every operation with a requirement ID', () => {
+      const doc = buildSwaggerDocument(app) as unknown as {
+        paths: Record<
+          string,
+          Record<string, { description?: string; summary?: string }>
+        >;
+      };
+      const operations = Object.entries(doc.paths).flatMap(([path, ops]) =>
+        Object.entries(ops).map(([method, op]) => ({ path, method, op })),
+      );
+      expect(operations.length).toBeGreaterThanOrEqual(130);
+      const untagged = operations
+        .filter(({ path }) => path !== '/api/health')
+        .filter(
+          ({ op }) =>
+            !/[A-Z]{3}-\d{2}/.test(
+              `${op.summary ?? ''} ${op.description ?? ''}`,
+            ),
+        )
+        .map(({ method, path }) => `${method.toUpperCase()} ${path}`);
+      expect(untagged).toEqual([]);
+    });
+  });
 
   describe('cross-module registries and tokens', () => {
     it('ContentModerators has post, comment, review and itinerary (GEN-10)', () => {
