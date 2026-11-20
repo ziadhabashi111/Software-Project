@@ -113,7 +113,7 @@ export class AuthorsController {
   @ApiReq(
     'BLG-12',
     'Author page',
-    "The author's name, join date, published posts (newest first, paginated with page/limit) and public itineraries. Deactivated authors have no page (ACC-12).",
+    "The author's name, join date, published posts (newest first, paginated with page/limit) and public itineraries (10 per page, itinerariesPage). Deactivated authors have no page (ACC-12).",
   )
   @ApiParam({ name: 'id', description: 'User id of the author' })
   @ApiOkResponse({
@@ -134,6 +134,8 @@ export class AuthorsController {
             },
           ],
           total: 1,
+          page: 1,
+          limit: 10,
         },
       },
     },
