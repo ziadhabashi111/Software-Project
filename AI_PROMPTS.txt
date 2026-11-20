@@ -807,3 +807,15 @@ Fix every M1 audit finding in accounts, admin, itineraries and shared code, impo
 How the output was used:
 Claude wrote each fix test-first on fix/GEN-13-accounts-itineraries-review-fixes; I reviewed the full diff. A shared IsOptionalNonNull decorator (and PartialType with skipNullProperties: false) rejects null on every update body in all modules. Cookies are Secure unless COOKIE_SECURE=false. Page size is capped at 10 and the budget lists are paginated. Admin account actions and their audit records share a transaction. A just-rotated refresh token has a 30-second grace window. Deactivation marks the account, ends its unpaid holds, then checks Confirmed bookings, so a late payment is refunded. The booking status filter is validated, CORS comes from validated config and MAX_DAYS is shared. Reports on itineraries must target a public, visible itinerary that is not the reporter's own. Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-07, GEN-10, HTL-18, PAY-01, ACC-05, ACC-06, ACC-08, ACC-19, GEN-08, GEN-13
+Prompt:
+Fix the two remaining known issues (a new hotel hold could take the rooms of a hold the user paid for in its last seconds; resolving a report wrote its audit record after the content change), then run a quick security audit and check that every hook, API and module is wired correctly end to end.
+
+How the output was used:
+Claude wrote each fix test-first on fix/GEN-07-moderation-audit-and-paid-holds; I reviewed the full diff. Content moderation and report resolution now write the audit record before acting, claim the report first so two admins cannot both act, and undo the records and reopen the report if the action fails. A new hotel hold only takes over run-out holds whose payment Stripe has stopped. Security: each login attempt is claimed atomically before the password check (parallel guesses can no longer bypass the 5-attempt lock), wrong current passwords on change-password count toward the lock, a token's session must belong to its user, security headers and a same-origin check for state-changing requests were added, auth and upload routes are rate limited per IP (built in, no new package), and unused stand-alone uploads are capped at 20 per user with a cleanup that removes every abandoned file. A new e2e test boots the real AppModule and checks every hook, registry and token plus the main flows end to end. Not changed: the minimum JWT secret length (raising it could stop teammates' servers from starting) and Swagger stays public for the M1 evaluation. Lint, unit, build and e2e pass.
+================================================

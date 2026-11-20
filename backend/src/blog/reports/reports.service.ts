@@ -159,4 +159,13 @@ export class ReportsService implements ReportSource, OnModuleInit {
     );
     return result.modifiedCount === 1;
   }
+
+  /** The admin's action failed after `resolve`: open the report again. */
+  async reopen(id: string): Promise<void> {
+    if (!isValidObjectId(id)) return;
+    await this.reports.updateOne(
+      { _id: id, status: ReportStatus.RESOLVED },
+      { $set: { status: ReportStatus.OPEN }, $unset: { resolution: 1 } },
+    );
+  }
 }

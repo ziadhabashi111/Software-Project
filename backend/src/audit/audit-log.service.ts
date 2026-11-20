@@ -24,8 +24,15 @@ export class AuditLogService {
     private readonly model: Model<AuditLogDocument>,
   ) {}
 
-  /** Pass the action's `session` so the change and its record commit together. */
-  async log(entry: AuditLogEntry, session?: ClientSession): Promise<void> {
+  /**
+   * Pass the action's `session` so the change and its record commit together.
+   * Returns the record's id, so an action that cannot share a transaction
+   * can write its record first and `discard` it if the action then fails.
+   */
+  async log(
+    entry: AuditLogEntry,
+    session?: ClientSession,
+  ): Promise<Types.ObjectId> {
     const record = {
       actor: new Types.ObjectId(entry.actorId),
       action: entry.action,
@@ -35,7 +42,25 @@ export class AuditLogService {
         : {}),
       ...(entry.details ? { details: entry.details } : {}),
     };
-    await this.model.create([record], { session });
+    const [created] = await this.model.create([record], { session });
+    return created._id;
+  }
+
+  /** Adds details learned after the action (e.g. the deleted content's title). */
+  async annotate(
+    id: Types.ObjectId,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    const set = Object.fromEntries(
+      Object.entries(details).map(([key, value]) => [`details.${key}`, value]),
+    );
+    if (Object.keys(set).length === 0) return;
+    await this.model.updateOne({ _id: id }, { $set: set }).exec();
+  }
+
+  /** Removes a record written for an action that then failed (never happened). */
+  async discard(id: Types.ObjectId): Promise<void> {
+    await this.model.deleteOne({ _id: id }).exec();
   }
 
   /** The admin audit trail (GEN-07): newest entries first. */

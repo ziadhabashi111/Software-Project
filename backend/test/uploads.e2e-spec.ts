@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { chmod, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getModelToken } from '@nestjs/mongoose';
-import type { Model } from 'mongoose';
+import { Types, type Model } from 'mongoose';
 import request from 'supertest';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
@@ -235,6 +236,64 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
     await expect(
       uploads.attach([abandoned.url], aliceId),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('refuses more than 20 unused stand-alone uploads per user (GEN-08)', async () => {
+    const users = ctx.moduleRef.get(UsersService);
+    const passwords = ctx.moduleRef.get(PasswordService);
+    await users.create({
+      name: 'Hoarder',
+      email: 'hoarder@example.com',
+      passwordHash: await passwords.hash('Passw0rd!'),
+    });
+    const login = await request(ctx.server)
+      .post('/api/auth/login')
+      .send({ email: 'hoarder@example.com', password: 'Passw0rd!' })
+      .expect(200);
+    const hoarder = login.get('Set-Cookie') ?? [];
+    const batch = () => {
+      let req = request(ctx.server)
+        .post('/api/uploads/images?kind=post')
+        .set('Cookie', hoarder);
+      for (let i = 0; i < 5; i += 1)
+        req = req.attach('images', PNG, `${i}.png`);
+      return req;
+    };
+    for (let i = 0; i < 4; i += 1) await batch().expect(201);
+    const refused = await batch().expect(409);
+    expect((refused.body as { code?: string }).code).toBe(
+      'TOO_MANY_UNUSED_UPLOADS',
+    );
+  });
+
+  it('keeps cleaning until every abandoned upload is gone, not just one batch (GEN-08)', async () => {
+    const uploads = ctx.moduleRef.get(UploadsService);
+    const records = ctx.moduleRef.get<Model<Upload>>(
+      getModelToken(Upload.name),
+    );
+    const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await records.collection.insertMany(
+      Array.from({ length: 150 }, () => ({
+        filename: `${randomUUID()}.png`,
+        url: 'http://localhost:3000/uploads/x.png',
+        ownerId: new Types.ObjectId(aliceId),
+        kind: 'post',
+        standalone: true,
+        createdAt: dayAgo,
+        updatedAt: dayAgo,
+      })),
+    );
+    await expect(uploads.removeUnattached()).resolves.toBeGreaterThanOrEqual(
+      150,
+    );
+    expect(
+      await records.countDocuments({
+        standalone: true,
+        attachedAt: { $exists: false },
+        kind: 'post',
+        createdAt: { $lt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      }),
+    ).toBe(0);
   });
 
   describe('ownership (GEN-08: only the uploader may reuse or delete a file)', () => {

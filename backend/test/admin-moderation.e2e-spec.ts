@@ -101,6 +101,13 @@ class FakeReports implements ReportSource {
     this.resolved.push({ id, ...resolution });
     return Promise.resolve(true);
   }
+
+  reopen(id: string): Promise<void> {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.status = 'open';
+    this.resolved = this.resolved.filter((r) => r.id !== id);
+    return Promise.resolve();
+  }
 }
 
 /** An in-memory stand-in for a content module (posts, comments, itineraries). */

@@ -33,10 +33,18 @@ export class SessionService implements SessionValidator {
     });
   }
 
-  async validateAndTouch(sessionId: string): Promise<boolean> {
+  /**
+   * True when the session is live. With `userId`, the session must also
+   * belong to that user, so a token carrying someone else's session id is
+   * refused even if it was signed correctly.
+   */
+  async validateAndTouch(sessionId: string, userId?: string): Promise<boolean> {
     if (!OBJECT_ID.test(sessionId)) return false;
     const session = await this.model.findById(sessionId).exec();
     if (!session || session.revokedAt) return false;
+    if (userId !== undefined && session.user.toString() !== userId) {
+      return false;
+    }
 
     const now = Date.now();
     if (session.expiresAt.getTime() <= now) return false;

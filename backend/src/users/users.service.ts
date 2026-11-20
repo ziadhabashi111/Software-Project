@@ -57,37 +57,68 @@ export class UsersService {
   }
 
   /**
-   * Counts a failed login (ACC-05). On the 5th consecutive failure the
-   * account is locked for 15 minutes and the counter starts again.
+   * ACC-05: claims one login attempt before the password is checked. Atomic,
+   * so parallel requests cannot all slip past the lock: at most
+   * MAX_FAILED_LOGINS attempts are claimed before the account locks. Returns
+   * the attempt number, or null when the account is locked (or its last
+   * allowed attempts are already in flight).
    */
-  async recordFailedLogin(
+  async claimLoginAttempt(
     userId: string,
-  ): Promise<{ locked: boolean; lockUntil?: Date }> {
+    now: Date = new Date(),
+  ): Promise<number | null> {
     const updated = await this.model
-      .findByIdAndUpdate(
-        userId,
+      .findOneAndUpdate(
+        {
+          _id: userId,
+          failedLoginAttempts: { $lt: MAX_FAILED_LOGINS },
+          $or: [{ lockUntil: null }, { lockUntil: { $lte: now } }],
+        },
         { $inc: { failedLoginAttempts: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
-    if (updated && updated.failedLoginAttempts >= MAX_FAILED_LOGINS) {
-      const lockUntil = new Date(Date.now() + LOCK_DURATION_MS);
-      await this.model
-        .updateOne({ _id: userId }, { lockUntil, failedLoginAttempts: 0 })
-        .exec();
-      return { locked: true, lockUntil };
-    }
-    return { locked: false };
+    return updated ? updated.failedLoginAttempts : null;
   }
 
-  /** A successful login resets the counter (ACC-05). */
-  async resetLoginFailures(userId: string): Promise<void> {
+  /**
+   * The claimed attempt had a wrong password. The one that used the last
+   * allowed attempt locks the account for 15 minutes and starts the counter
+   * again (ACC-05). True when the account is now locked.
+   */
+  async failLoginAttempt(userId: string, attempt: number): Promise<boolean> {
+    if (attempt < MAX_FAILED_LOGINS) return false;
     await this.model
       .updateOne(
         { _id: userId },
+        {
+          lockUntil: new Date(Date.now() + LOCK_DURATION_MS),
+          failedLoginAttempts: 0,
+        },
+      )
+      .exec();
+    return true;
+  }
+
+  /**
+   * A correct password resets the counter (ACC-05), unless parallel wrong
+   * attempts locked the account meanwhile: then false, and the login is
+   * refused as locked.
+   */
+  async resetLoginFailures(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const result = await this.model
+      .updateOne(
+        {
+          _id: userId,
+          $or: [{ lockUntil: null }, { lockUntil: { $lte: now } }],
+        },
         { failedLoginAttempts: 0, $unset: { lockUntil: 1 } },
       )
       .exec();
+    return result.matchedCount === 1;
   }
 
   updateProfile(
