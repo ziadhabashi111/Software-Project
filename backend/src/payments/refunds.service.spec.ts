@@ -431,3 +431,42 @@ describe('RefundsService.get (PAY-03)', () => {
     );
   });
 });
+
+describe('RefundsService.refundPart (FLT-27)', () => {
+  const part = {
+    kind: 'fare_difference' as const,
+    bookingType: 'flight-change' as const,
+    bookingId: BOOKING,
+    userId: USER,
+    paymentIntentId: 'pi_1',
+    amount: 80,
+    currency: 'usd',
+    idempotencyKey: `flight-change-refund-${BOOKING}-pi_1`,
+  };
+
+  it('refunds the exact amount from that payment, with the given idempotency key', async () => {
+    const { service, stripe, model } = setup();
+    model.findOne.mockResolvedValue(null);
+    model.findOneAndUpdate.mockImplementation(() =>
+      Promise.resolve(
+        refundDoc({ kind: 'fare_difference', amount: 80, notifiedAt: null }),
+      ),
+    );
+    const result = await service.refundPart(part);
+    expect(stripe.refunds.create).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: 'pi_1', amount: 8000 }),
+      { idempotencyKey: part.idempotencyKey },
+    );
+    expect(result).toMatchObject({ refundId: 're_1', status: 'REFUNDED' });
+  });
+
+  it('returns the existing refund instead of refunding twice', async () => {
+    const { service, stripe, model } = setup();
+    model.findOne.mockResolvedValue(
+      refundDoc({ kind: 'fare_difference', amount: 80 }),
+    );
+    const result = await service.refundPart(part);
+    expect(stripe.refunds.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ refundId: 're_1', amount: 80 });
+  });
+});

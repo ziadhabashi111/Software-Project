@@ -31,6 +31,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentsService } from './payments.service';
 import type { PaymentView } from './payments.service';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
+import { BOOKING_TYPES } from './refund.service.interface';
 import type { BookingType } from './refund.service.interface';
 
 /** HTTP only; the logic lives in the services. */
@@ -46,9 +47,9 @@ export class PaymentsController {
   @Post('payments')
   @Roles(Role.USER)
   @ApiReq(
-    'PAY-01',
+    ['PAY-01', 'FLT-27'],
     'Start paying for a booking',
-    `Creates (or reuses) a Stripe PaymentIntent in test mode for your own live ${HOLD_MINUTES}-minute hold and returns its \`clientSecret\` for the browser to confirm. No card data reaches this API. Rejects expired holds (409 HOLD_EXPIRED) and unaccepted policies (409 POLICIES_NOT_ACCEPTED). The booking is confirmed only by the verified Stripe webhook.`,
+    `Creates (or reuses) a Stripe PaymentIntent in test mode for your own live ${HOLD_MINUTES}-minute hold and returns its \`clientSecret\` for the browser to confirm. No card data reaches this API. Rejects expired holds (409 HOLD_EXPIRED) and unaccepted policies (409 POLICIES_NOT_ACCEPTED). The booking is confirmed only by the verified Stripe webhook. FLT-27: \`bookingType: flight-change\` with the change id pays the fare difference of a dearer flight change; the policies accepted for the original booking cover it, and the webhook applies the change.`,
   )
   @ApiOkResponse({
     description: 'PaymentIntent client secret and payment record',
@@ -109,7 +110,7 @@ export class PaymentsController {
 
   @Get('bookings/:type/:id/policies')
   @Roles(Role.USER)
-  @ApiParam({ name: 'type', enum: ['flight', 'hotel'] })
+  @ApiParam({ name: 'type', enum: BOOKING_TYPES })
   @ApiReq(
     'PAY-02',
     'View the booking policies',
@@ -117,7 +118,7 @@ export class PaymentsController {
   )
   policiesOf(
     @CurrentUser() user: AuthUser,
-    @Param('type', new ParseEnumPipe(['flight', 'hotel'])) type: BookingType,
+    @Param('type', new ParseEnumPipe(BOOKING_TYPES)) type: BookingType,
     @Param('id', ParseObjectIdPipe) id: string,
   ): ReturnType<PolicyAcceptanceService['view']> {
     return this.policies.view(type, id, user.id);
@@ -126,7 +127,7 @@ export class PaymentsController {
   @Post('bookings/:type/:id/accept-policies')
   @Roles(Role.USER)
   @HttpCode(200)
-  @ApiParam({ name: 'type', enum: ['flight', 'hotel'] })
+  @ApiParam({ name: 'type', enum: BOOKING_TYPES })
   @ApiReq(
     'PAY-02',
     'Accept the booking policies',
@@ -134,7 +135,7 @@ export class PaymentsController {
   )
   accept(
     @CurrentUser() user: AuthUser,
-    @Param('type', new ParseEnumPipe(['flight', 'hotel'])) type: BookingType,
+    @Param('type', new ParseEnumPipe(BOOKING_TYPES)) type: BookingType,
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<{
     bookingType: BookingType;

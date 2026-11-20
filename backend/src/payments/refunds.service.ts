@@ -17,6 +17,7 @@ import type { RefundBasisView } from './booking-payment-gateway';
 import { toMinorUnits } from './money';
 import type {
   BookingType,
+  RefundPartRequest,
   RefundPreview,
   RefundResult,
   RefundService,
@@ -199,6 +200,66 @@ export class RefundsService implements RefundService, OnModuleInit {
     return toResult(doc);
   }
 
+  /**
+   * FLT-27: refunds a known amount from one payment (a cheaper change's fare
+   * difference, or one payment's share of a cancellation). Safe to call
+   * twice: an existing record for the same kind, booking and payment is
+   * returned, and Stripe gets the same idempotency key.
+   */
+  async refundPart(request: RefundPartRequest): Promise<RefundResult> {
+    const key = {
+      kind: request.kind,
+      bookingType: request.bookingType,
+      bookingId: new Types.ObjectId(request.bookingId),
+      stripePaymentIntentId: request.paymentIntentId,
+    };
+    const existing = await this.refunds.findOne(key);
+    if (existing) return toResult(existing);
+    const stripeRefund = await this.stripe.refunds.create(
+      {
+        payment_intent: request.paymentIntentId,
+        amount: toMinorUnits(request.amount),
+        metadata: {
+          bookingType: request.bookingType,
+          bookingId: request.bookingId,
+          userId: request.userId,
+          reason: request.kind,
+        },
+      },
+      { idempotencyKey: request.idempotencyKey },
+    );
+    const status = toRefundStatus(stripeRefund.status);
+    const filter = { stripeRefundId: stripeRefund.id };
+    let doc: RefundDocument | null;
+    try {
+      doc = await this.refunds.findOneAndUpdate(
+        filter,
+        {
+          $setOnInsert: {
+            ...key,
+            userId: new Types.ObjectId(request.userId),
+            amount: request.amount,
+            ...(request.percentage !== undefined
+              ? { percentage: request.percentage }
+              : {}),
+            currency: request.currency.toUpperCase(),
+            status,
+            ...(status === 'FAILED'
+              ? { failureReason: stripeRefund.failure_reason ?? 'unknown' }
+              : {}),
+          },
+        },
+        { upsert: true, returnDocument: 'after' },
+      );
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+      doc = await this.refunds.findOne(filter);
+    }
+    if (!doc) throw new InternalServerErrorException();
+    await this.notifyOnce(doc);
+    return toResult(doc);
+  }
+
   /** GET /refunds/:id: owner only; accepts the Stripe refund id or our id. */
   async get(userId: string, id: string): Promise<RefundView> {
     const doc = Types.ObjectId.isValid(id)
@@ -253,11 +314,17 @@ export class RefundsService implements RefundService, OnModuleInit {
     basis: RefundBasisView,
     stripeRefund: Stripe.Refund,
   ): Promise<RefundDocument> {
-    // `$ne` also matches records written before `kind` existed.
+    // `$nin` also matches records written before `kind` existed.
     const filter = {
       bookingType,
       bookingId: new Types.ObjectId(bookingId),
-      kind: { $ne: 'rejected_payment' as RefundKind },
+      kind: {
+        $nin: [
+          'rejected_payment',
+          'fare_difference',
+          'cancellation_part',
+        ] as RefundKind[],
+      },
     };
     const status = toRefundStatus(stripeRefund.status);
     let doc: RefundDocument | null;
@@ -304,7 +371,11 @@ export class RefundsService implements RefundService, OnModuleInit {
     let message = refunded
       ? `Your refund of ${amount} has been issued.`
       : `Your refund of ${amount} could not be completed. Please contact support.`;
-    if (rejected && refunded) {
+    if (doc.kind === 'fare_difference') {
+      message = refunded
+        ? `The lower fare of your flight change saved you ${amount}; it has been refunded.`
+        : `Refunding ${amount} for your flight change could not be completed. Please contact support.`;
+    } else if (rejected && refunded) {
       type = 'PAYMENT_REFUNDED';
       message = `Your payment of ${amount} could not be applied to your ${doc.bookingType} booking (the hold had ended or the booking changed), so it was not confirmed. The full ${amount} has been refunded.`;
     } else if (rejected) {

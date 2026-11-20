@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import type { FlightBookingPayments } from '../flight-bookings/flight-booking-payments';
 import type { HotelInventoryRegistry } from '../hotel-bookings/hotel-inventory';
 import type { HotelReservationPayments } from '../hotel-bookings/hotel-reservation-payments';
+import type { FlightBookingChangesService } from '../flight-bookings/flight-booking-changes.service';
 import { BookingPaymentGateway } from './booking-payment-gateway';
 
 const USER = new Types.ObjectId().toString();
@@ -29,6 +30,7 @@ function setup(hotel: unknown, registered = true) {
   };
   const gateway = new BookingPaymentGateway(
     {} as FlightBookingPayments,
+    {} as FlightBookingChangesService,
     {} as HotelReservationPayments,
     reservations as never,
     inventory as unknown as HotelInventoryRegistry,

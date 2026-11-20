@@ -2,7 +2,7 @@ import { BookingStatus } from '../../common/booking-status/booking-status';
 import { CabinClass } from '../../flights/flight-status';
 import { PassengerType } from '../../flights/passenger-rules';
 import type { FlightBookingView } from '../flight-booking-view';
-import { renderETicket } from './e-ticket.renderer';
+import { renderETicket, seatText } from './e-ticket.renderer';
 
 const end = (code: string, time: string) => ({
   airport: {
@@ -49,6 +49,7 @@ const view: FlightBookingView = {
       extraBagWeightKg: 20,
       fare: 200,
       baggageFee: 30,
+      seats: ['12C'],
     },
   ],
   seats: 1,
@@ -69,5 +70,35 @@ describe('renderETicket (FLT-23, GEN-06)', () => {
     const pdf = await renderETicket(view);
     expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
     expect(pdf.length).toBeGreaterThan(1000);
+  });
+});
+
+describe('seatText (FLT-28)', () => {
+  it('names the seat, or says it is not selected yet', () => {
+    expect(seatText(view, view.passengers[0])).toBe('Seat 12C');
+    expect(seatText(view, { ...view.passengers[0], seats: [null] })).toBe(
+      'Seat not selected',
+    );
+  });
+
+  it('labels outbound and return seats on a round trip', () => {
+    const roundTrip: FlightBookingView = {
+      ...view,
+      tripType: 'round-trip',
+      segments: [view.segments[0], view.segments[0]],
+    };
+    expect(
+      seatText(roundTrip, { ...view.passengers[0], seats: ['12C', null] }),
+    ).toBe('Seats: outbound 12C, return not selected');
+  });
+
+  it('says an infant has no seat of their own', () => {
+    expect(
+      seatText(view, {
+        ...view.passengers[0],
+        type: PassengerType.INFANT,
+        seats: [null],
+      }),
+    ).toBe('No seat (infant on lap)');
   });
 });
