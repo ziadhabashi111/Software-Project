@@ -8,6 +8,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import type { AuthUser } from '../../auth/auth.types';
+import { skipFor, toPage } from '../../common/pagination/pagination';
+import type { PaginationQueryDto } from '../../common/pagination/pagination';
 import { fieldError } from '../../common/validation/validation-errors';
 import { CURRENCY_CATALOG } from '../../users/currency-catalog';
 import type { CurrencyCatalog } from '../../users/currency-catalog';
@@ -50,16 +52,42 @@ export class BudgetService {
   ) {}
 
   /** The itinerary's entries and transport costs, for the budget screen. */
-  async list(user: Caller, itineraryId: string): Promise<BudgetListView> {
+  /**
+   * GEN-05: one page (10 rows) of entries and of transport costs, in the
+   * order they were added. The same page number applies to both lists; each
+   * reports its own total. Converted totals over every entry come from the
+   * budget summary.
+   */
+  async list(
+    user: Caller,
+    itineraryId: string,
+    page: PaginationQueryDto,
+  ): Promise<BudgetListView> {
     await this.itineraries.loadOwned(itineraryId, user);
     const filter = { itineraryId: new Types.ObjectId(itineraryId) };
-    const [entries, transportCosts] = await Promise.all([
-      this.entries.find(filter).sort({ createdAt: 1, _id: 1 }),
-      this.transport.find(filter).sort({ createdAt: 1, _id: 1 }),
-    ]);
+    const order = { createdAt: 1 as const, _id: 1 as const };
+    const [entries, entryCount, transportCosts, transportCount] =
+      await Promise.all([
+        this.entries
+          .find(filter)
+          .sort(order)
+          .skip(skipFor(page))
+          .limit(page.limit),
+        this.entries.countDocuments(filter),
+        this.transport
+          .find(filter)
+          .sort(order)
+          .skip(skipFor(page))
+          .limit(page.limit),
+        this.transport.countDocuments(filter),
+      ]);
     return {
-      entries: entries.map(toBudgetEntryView),
-      transportCosts: transportCosts.map(toTransportCostView),
+      entries: toPage(entries.map(toBudgetEntryView), entryCount, page),
+      transportCosts: toPage(
+        transportCosts.map(toTransportCostView),
+        transportCount,
+        page,
+      ),
     };
   }
 

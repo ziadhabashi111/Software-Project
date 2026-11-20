@@ -339,6 +339,59 @@ describe('Public itineraries, cloning and hotels (ITN-21, ITN-25, BLG-12; real M
     });
   });
 
+  describe('GET /api/itineraries/:id/budgets (ITN-14, ITN-16, GEN-05)', () => {
+    it('pages entries and transport costs 10 at a time', async () => {
+      const owner = await loggedInAs();
+      const it = await itineraryOf(owner.client, {
+        title: 'Lots of budget lines',
+        cities: ['cairo', 'luxor'],
+      });
+      for (let i = 0; i < 12; i += 1) {
+        await owner.client
+          .post(`/api/itineraries/${it.id}/days/${it.days[0].id}/budgets`)
+          .send({ category: 'food', amount: i, currency: 'USD' })
+          .expect(201);
+      }
+      await owner.client
+        .post(`/api/itineraries/${it.id}/transport-costs`)
+        .send({
+          dayId: it.days[0].id,
+          mode: 'train',
+          fromCity: 'cairo',
+          toCity: 'luxor',
+          amount: 35,
+          currency: 'USD',
+        })
+        .expect(201);
+
+      type Lists = {
+        entries: Page<{ amount: number }>;
+        transportCosts: Page<{ amount: number }>;
+      };
+      const first = (
+        await owner.client.get(`/api/itineraries/${it.id}/budgets`).expect(200)
+      ).body as Lists;
+      expect(first.entries).toMatchObject({ total: 12, page: 1, limit: 10 });
+      expect(first.entries.items.map((e) => e.amount)).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+      ]);
+      expect(first.transportCosts).toMatchObject({ total: 1, page: 1 });
+      expect(first.transportCosts.items).toHaveLength(1);
+
+      const second = (
+        await owner.client
+          .get(`/api/itineraries/${it.id}/budgets?page=2`)
+          .expect(200)
+      ).body as Lists;
+      expect(second.entries.items.map((e) => e.amount)).toEqual([10, 11]);
+      expect(second.transportCosts.items).toEqual([]);
+
+      await owner.client
+        .get(`/api/itineraries/${it.id}/budgets?limit=11`)
+        .expect(400);
+    });
+  });
+
   describe('POST /api/itineraries/:id/clone (ITN-21)', () => {
     async function publicWithBudget() {
       const author = await loggedInAs(Role.USER, 'Layla');
@@ -391,9 +444,9 @@ describe('Public itineraries, cloning and hotels (ITN-21, ITN-25, BLG-12; real M
 
       const budgets = (
         await me.client.get(`/api/itineraries/${copy.id}/budgets`).expect(200)
-      ).body as { entries: { dayId: string; amount: number }[] };
-      expect(budgets.entries).toHaveLength(1);
-      expect(budgets.entries[0]).toMatchObject({
+      ).body as { entries: Page<{ dayId: string; amount: number }> };
+      expect(budgets.entries.items).toHaveLength(1);
+      expect(budgets.entries.items[0]).toMatchObject({
         dayId: copy.days[1].id,
         amount: 40,
       });
