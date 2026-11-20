@@ -363,6 +363,28 @@ describe('Blog posts, drafts, tags and images (BLG-01, 03, 04, 08, 10)', () => {
     });
   });
 
+  describe('only registered users write posts (BLG-01, BLG-03, BLG-04, BLG-10)', () => {
+    it.each([Role.HOTEL_MODERATOR, Role.AIRLINE_MODERATOR, Role.ADMIN])(
+      'refuses a %s with 403',
+      async (role) => {
+        const staff = await author(undefined, role);
+        await staff.client
+          .post('/api/posts')
+          .send({ title: 'Ad', body: 'Book our rooms', status: 'published' })
+          .expect(403);
+        await staff.client.get('/api/posts/mine').expect(403);
+        const me = await author();
+        const post = await createPost(me.client, { status: 'published' });
+        await staff.client
+          .patch(`/api/posts/${post.id}`)
+          .send({ title: 'x' })
+          .expect(403);
+        await staff.client.delete(`/api/posts/${post.id}`).expect(403);
+        await upload(staff.client, post.id, 1).expect(403);
+      },
+    );
+  });
+
   describe('GET /api/tags/:tag/posts (BLG-08)', () => {
     it('lists published, visible posts with the tag for everyone', async () => {
       const me = await author('Tag Author');

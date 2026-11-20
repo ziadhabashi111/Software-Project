@@ -1,3 +1,5 @@
+import { Role } from '../auth/auth.types';
+
 /**
  * GEN-08: the shared media-upload rule.
  * JPG or PNG only, up to 5 MB each, up to 5 images per post, activity or
@@ -13,6 +15,18 @@ export const IMAGE_LIMITS = {
 } as const;
 
 export type ImageOwnerKind = keyof typeof IMAGE_LIMITS;
+
+/**
+ * Who may upload images for each kind of item: users own posts and
+ * activities, an airline moderator the airline logo, a hotel moderator the
+ * hotel photos.
+ */
+export const UPLOADER_ROLE: Record<ImageOwnerKind, Role> = {
+  post: Role.USER,
+  activity: Role.USER,
+  hotel: Role.HOTEL_MODERATOR,
+  airlineLogo: Role.AIRLINE_MODERATOR,
+};
 
 /** The most files one upload request may carry (the largest limit). */
 export const MAX_FILES_PER_REQUEST = Math.max(...Object.values(IMAGE_LIMITS));
