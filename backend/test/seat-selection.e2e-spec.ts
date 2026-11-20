@@ -410,6 +410,31 @@ describe('Seat selection (FLT-28; real flights module, MongoDB replica set in me
       expect(taken(await seatMap(flight))).toEqual([]);
     });
 
+    it('never seats a passenger on a booking cancelled while the pick runs', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await confirmed(flight);
+      // The pick read the booking while it was still Confirmed ...
+      const stale = await bookings.findById(booking.id);
+      await user.client
+        .post(`/api/flight-bookings/${booking.id}/cancel`)
+        .send({ confirm: true })
+        .expect(200);
+      // ... and only reaches its transaction after the cancel committed.
+      const findById = jest
+        .spyOn(bookings, 'findById')
+        .mockResolvedValueOnce(stale);
+      try {
+        const res = await user.client
+          .patch(`/api/flight-bookings/${booking.id}/seat`)
+          .send({ passengerIndex: 0, seat: '1A' })
+          .expect(409);
+        expect((res.body as { code?: string }).code).toBe('NOT_CONFIRMED');
+      } finally {
+        findById.mockRestore();
+      }
+      expect(taken(await seatMap(flight))).toEqual([]);
+    });
+
     it('when the airline cancels the flight', async () => {
       const flight = await makeFlight();
       const { user, booking } = await confirmed(flight);

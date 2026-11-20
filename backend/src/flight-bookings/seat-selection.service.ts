@@ -114,6 +114,20 @@ export class SeatSelectionService {
 
     try {
       await this.connection.transaction(async (session) => {
+        // Re-check the booking inside the transaction with a write, so a
+        // cancellation (which frees the seats in its own transaction) and
+        // this pick serialize: a pick never lands on a cancelled booking.
+        const live = await this.bookings.updateOne(
+          { _id: booking._id, status: BookingStatus.CONFIRMED },
+          { $set: { updatedAt: now } },
+          { session, timestamps: false },
+        );
+        if (live.matchedCount === 0) {
+          throw conflict(
+            'NOT_CONFIRMED',
+            'Seats can be picked once the booking is Confirmed',
+          );
+        }
         // Bumping the cabin's seat-map version locks its layout for this
         // pick: a concurrent layout change (FLT-05) fails and is retried.
         const flight = await this.flights.findOneAndUpdate(
