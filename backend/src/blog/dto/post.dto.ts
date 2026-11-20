@@ -19,6 +19,7 @@ import {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { PostStatus } from '../schemas/post.schema';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 export const TITLE_MAX = 150;
 export const BODY_MAX = 20_000;
@@ -68,7 +69,7 @@ export class CreatePostDto {
     example: ['cairo', 'food'],
     description: `Up to ${TAGS_MAX} tags of at most ${TAG_MAX_LENGTH} characters; stored lower-case`,
   })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(normalizeTags)
   @IsArray()
   @ArrayMaxSize(TAGS_MAX, { message: `At most ${TAGS_MAX} tags` })
@@ -99,7 +100,7 @@ export class CreatePostDto {
     default: PostStatus.DRAFT,
     description: 'draft (only you see it) or published',
   })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsEnum(PostStatus, { message: 'status must be draft or published' })
   status?: PostStatus;
 }
@@ -111,6 +112,7 @@ export class CreatePostDto {
  */
 export class UpdatePostDto extends PartialType(
   OmitType(CreatePostDto, ['imageUrls'] as const),
+  { skipNullProperties: false },
 ) {}
 
 /** Query for `GET /api/posts/mine` (BLG-03). */

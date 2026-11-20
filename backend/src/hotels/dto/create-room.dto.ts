@@ -8,7 +8,6 @@ import { Transform } from 'class-transformer';
 import {
   IsInt,
   IsNumber,
-  IsOptional,
   IsPositive,
   IsString,
   Length,
@@ -17,6 +16,7 @@ import {
   Min,
 } from 'class-validator';
 import { trim } from '../../itineraries/dto/transforms';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 /** Body for `POST /api/hotels/:id/rooms` (HTL-03). */
 export class CreateRoomDto {
@@ -30,7 +30,7 @@ export class CreateRoomDto {
   name!: string;
 
   @ApiPropertyOptional({ example: 'Double', maxLength: 40 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @MaxLength(40)
@@ -64,4 +64,5 @@ export class CreateRoomDto {
  */
 export class UpdateRoomDto extends PartialType(
   OmitType(CreateRoomDto, ['name'] as const),
+  { skipNullProperties: false },
 ) {}

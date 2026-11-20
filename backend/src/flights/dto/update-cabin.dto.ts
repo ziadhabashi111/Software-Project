@@ -1,12 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsPositive,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsInt, IsNumber, IsPositive, Max, Min } from 'class-validator';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 /** Body for `PATCH /api/flights/:id/cabins/:cabinId` (FLT-04, FLT-05). */
 export class UpdateCabinDto {
@@ -14,7 +8,7 @@ export class UpdateCabinDto {
     example: 160,
     description: 'Cannot go below the seats already booked or held',
   })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsInt()
   @Min(1)
   @Max(1000)
@@ -24,21 +18,21 @@ export class UpdateCabinDto {
     example: 450,
     description: 'Does not change existing bookings',
   })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
   @Max(1000000)
   price?: number;
 
   @ApiPropertyOptional({ example: 1 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsInt()
   @Min(0)
   @Max(10)
   freeBags?: number;
 
   @ApiPropertyOptional({ example: 23 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsNumber({ maxDecimalPlaces: 1 })
   @IsPositive()
   @Max(100)

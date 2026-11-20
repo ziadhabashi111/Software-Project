@@ -5,7 +5,6 @@ import {
   ArrayUnique,
   IsArray,
   IsInt,
-  IsOptional,
   IsString,
   Length,
   Matches,
@@ -20,6 +19,7 @@ import {
   trim,
   upper,
 } from '../../itineraries/dto/transforms';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 export const MAX_AMENITIES = 30;
 
@@ -57,7 +57,7 @@ export class CreateHotelDto {
   country!: string;
 
   @ApiPropertyOptional({ maxLength: 2000 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @MaxLength(2000)
@@ -73,7 +73,7 @@ export class CreateHotelDto {
     example: ['wifi', 'pool', 'breakfast'],
     description: `Up to ${MAX_AMENITIES}, each up to 40 characters`,
   })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trimEach)
   @IsArray()
   @ArrayMaxSize(MAX_AMENITIES)

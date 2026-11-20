@@ -6,6 +6,13 @@ import { UpdateActivityDto } from '../../itineraries/dto/update-activity.dto';
 import { UpdateDayDto } from '../../itineraries/dto/update-day.dto';
 import { UpdateItineraryDto } from '../../itineraries/dto/update-itinerary.dto';
 import { UpdateProfileDto } from '../../users/dto/update-profile.dto';
+import { UpdatePostDto } from '../../blog/dto/post.dto';
+import { UpdateAirlineDto } from '../../flights/dto/update-airline.dto';
+import { UpdateCabinDto } from '../../flights/dto/update-cabin.dto';
+import { UpdateFlightDto } from '../../flights/dto/update-flight.dto';
+import { UpdateReviewDto } from '../../hotel-bookings/dto/review.dto';
+import { UpdateRoomDto } from '../../hotels/dto/create-room.dto';
+import { UpdateHotelDto } from '../../hotels/dto/update-hotel.dto';
 
 type DtoClass = new () => object;
 
@@ -37,6 +44,37 @@ describe('update DTOs reject null for required fields (GEN-13)', () => {
       'UpdateTransportCostDto',
       UpdateTransportCostDto,
       ['dayId', 'mode', 'fromCity', 'toCity', 'amount', 'currency'],
+    ],
+    ['UpdatePostDto', UpdatePostDto, ['title', 'body', 'tags', 'status']],
+    ['UpdateAirlineDto', UpdateAirlineDto, ['name', 'code']],
+    [
+      'UpdateCabinDto',
+      UpdateCabinDto,
+      ['seats', 'price', 'freeBags', 'maxBagWeightKg'],
+    ],
+    [
+      'UpdateFlightDto',
+      UpdateFlightDto,
+      ['departureAirport', 'arrivalAirport', 'departureTime', 'arrivalTime'],
+    ],
+    ['UpdateReviewDto', UpdateReviewDto, ['rating']],
+    [
+      'UpdateHotelDto',
+      UpdateHotelDto,
+      [
+        'name',
+        'address',
+        'city',
+        'country',
+        'description',
+        'starClass',
+        'amenities',
+      ],
+    ],
+    [
+      'UpdateRoomDto',
+      UpdateRoomDto,
+      ['type', 'beds', 'maxOccupancy', 'pricePerNight'],
     ],
   ];
 

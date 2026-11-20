@@ -10,18 +10,19 @@ import {
 } from 'class-validator';
 import { trim, upper } from '../../itineraries/dto/transforms';
 import { AIRLINE_CODE } from './create-airline.dto';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 
 /** Body for `PATCH /api/airlines/:id` (FLT-01). Send only the fields to change. */
 export class UpdateAirlineDto {
   @ApiPropertyOptional({ example: 'EgyptAir', minLength: 2, maxLength: 100 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @Length(2, 100)
   name?: string;
 
   @ApiPropertyOptional({ example: 'MS' })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(upper)
   @IsString()
   @Matches(AIRLINE_CODE, { message: 'Code must be 2 to 3 letters or digits' })
