@@ -54,6 +54,10 @@ describe('validateEnv', () => {
     ).toThrow(/COOKIE_SECURE/);
   });
 
+  it('accepts SameSite=none when COOKIE_SECURE is left at its Secure default', () => {
+    expect(() => validateEnv({ ...ok, COOKIE_SAMESITE: 'none' })).not.toThrow();
+  });
+
   it('rejects malformed token lifetimes', () => {
     expect(() => validateEnv({ ...ok, JWT_EXPIRES_IN: 'soon' })).toThrow(
       /JWT_EXPIRES_IN/,

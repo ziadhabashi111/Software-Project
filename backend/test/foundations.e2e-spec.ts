@@ -78,7 +78,10 @@ describe('Shared foundations (e2e, no database)', () => {
           isGlobal: true,
           ignoreEnvFile: true,
           load: [
-            () => ({ JWT_SECRET: 'an-e2e-secret-with-more-than-16-chars' }),
+            () => ({
+              JWT_SECRET: 'an-e2e-secret-with-more-than-16-chars',
+              COOKIE_SECURE: 'false',
+            }),
           ],
         }),
         AuthModule,

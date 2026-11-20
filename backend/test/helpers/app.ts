@@ -65,6 +65,8 @@ export async function createTestApp(
             JWT_SECRET: 'an-e2e-secret-with-more-than-16-chars',
             JWT_EXPIRES_IN: '15m',
             JWT_REFRESH_EXPIRES_IN: '7d',
+            // supertest talks plain http, which never sends Secure cookies.
+            COOKIE_SECURE: 'false',
           }),
         ],
       }),
