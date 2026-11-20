@@ -822,6 +822,18 @@ Claude wrote each fix test-first on fix/GEN-07-moderation-audit-and-paid-holds; 
 
 ================================================
 Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-05, ACC-01
+Prompt:
+Raise the per-IP register rate limit: five sign-ups a minute is too few for someone testing every role in Swagger or a class sharing one address.
+
+How the output was used:
+Wrote the e2e test first (20 registrations per minute from one address succeed, the 21st answers 429 RATE_LIMITED); it failed at the sixth sign-up with the old limit of 5. Then raised the register limit from 5 to 20 per minute in app.setup.ts, with a short comment saying why. Login (10), refresh, change-password and upload limits are unchanged. Ran the security e2e suite, lint and checked the diff.
+================================================
+
+================================================
+Date: 2026-11-20
 Student: Yahia Tarek
 Tool: Claude Code
 Related Requirement: HTL-05, HTL-06, GEN-13 (Milestone 1 completeness)
