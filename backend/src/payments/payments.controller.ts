@@ -112,7 +112,7 @@ export class PaymentsController {
   @ApiReq(
     'PAY-02',
     'View the booking policies',
-    'Flight: airline cancellation tiers and baggage rules. Hotel: cancellation tiers and stay dates. Your own booking only; another user gets 404. Shows whether you already accepted.',
+    'Flight: airline cancellation tiers and baggage rules. Hotel: cancellation tiers, your stay dates and the check-in/check-out times of the hotel. Your own booking only; another user gets 404. Shows whether you already accepted.',
   )
   policiesOf(
     @CurrentUser() user: AuthUser,

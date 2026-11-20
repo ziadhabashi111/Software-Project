@@ -12,6 +12,10 @@ export interface InventoryHotel {
    * it is made, so the refund follows the policy the guest accepted.
    */
   cancellationTiers: { daysBefore: number; refundPercent: number }[];
+  /** The hotel's standard check-in time, `HH:mm` (HTL-09); shown with its policies (PAY-02). */
+  checkInTime?: string;
+  /** The hotel's standard check-out time, `HH:mm` (HTL-09). */
+  checkOutTime?: string;
 }
 
 /** One room as it is right now, for the requested stay. */
