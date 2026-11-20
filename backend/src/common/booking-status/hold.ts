@@ -16,3 +16,10 @@ export function holdExpiresAt(now: Date): Date {
 export function holdExpiredMessage(): string {
   return `The ${HOLD_MINUTES}-minute hold has expired. Start a new booking.`;
 }
+
+/**
+ * Stripe retries a webhook for up to 3 days. A run-out hold whose payment
+ * Stripe already took is left to the webhook for this long, then expired
+ * anyway, so seats and rooms are never held forever (FLT-22, HTL-18).
+ */
+export const STRIPE_WEBHOOK_RETRY_MS = 3 * 24 * 60 * 60 * 1000;

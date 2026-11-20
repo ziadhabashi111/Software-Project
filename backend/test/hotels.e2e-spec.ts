@@ -6,7 +6,9 @@ import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
+import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation-queries';
 import { formatDate } from '../src/hotel-bookings/stay-rules';
+import { HotelCatalog } from '../src/hotels/hotel-catalog';
 import { HotelsModule } from '../src/hotels/hotels.module';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
@@ -375,8 +377,43 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
 
       const list = (
         await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
-      ).body as RoomBody[];
-      expect(list.map((r) => r.name)).toEqual(['101', '102']);
+      ).body as { items: RoomBody[] };
+      expect(list.items.map((r) => r.name)).toEqual(['101', '102']);
+    });
+
+    it('lists rooms and the per-room status view 10 rooms per page (GEN-05, HTL-03, HTL-08)', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      for (let i = 1; i <= 12; i += 1) {
+        await newRoom(moderator, hotel.id, {
+          name: `R${String(i).padStart(2, '0')}`,
+        }).expect(201);
+      }
+      const first = (
+        await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
+      ).body as {
+        items: RoomBody[];
+        total: number;
+        page: number;
+        limit: number;
+      };
+      expect(first).toMatchObject({ total: 12, page: 1, limit: 10 });
+      expect(first.items).toHaveLength(10);
+      const second = (
+        await moderator.client
+          .get(`/api/hotels/${hotel.id}/rooms?page=2`)
+          .expect(200)
+      ).body as { items: RoomBody[] };
+      expect(second.items.map((r) => r.name)).toEqual(['R11', 'R12']);
+
+      const view = (
+        await moderator.client
+          .get(
+            `/api/hotels/${hotel.id}/availability?from=${day(10)}&to=${day(11)}&page=2`,
+          )
+          .expect(200)
+      ).body as AvailabilityBody & { total: number; page: number };
+      expect(view).toMatchObject({ total: 12, page: 2, limit: 10 });
+      expect(view.rooms).toHaveLength(2);
     });
 
     it('validates a room and keeps other moderators out', async () => {
@@ -478,8 +515,12 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
         .filter((r) => r.status !== 201)
         .forEach((r) => expect(r.status).toBe(400));
       const [finalRoom] = (
-        await moderator.client.get(`/api/hotels/${hotel.id}/rooms`).expect(200)
-      ).body as RoomBody[];
+        (
+          await moderator.client
+            .get(`/api/hotels/${hotel.id}/rooms`)
+            .expect(200)
+        ).body as { items: RoomBody[] }
+      ).items;
       expect(finalRoom.availability).toHaveLength(1);
     });
 
@@ -705,6 +746,102 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
       await moderator.client.get(`${url}?from=oops&to=${day(1)}`).expect(400);
     });
   });
+  describe('moderator changes and guest holds never interleave (HTL-05, HTL-06, HTL-18)', () => {
+    async function ready() {
+      const { hotel, moderator } = await hotelWithModerator();
+      const room = (
+        await moderator.client
+          .post(`/api/hotels/${hotel.id}/rooms`)
+          .send({ name: '201', beds: 2, maxOccupancy: 3, pricePerNight: 100 })
+          .expect(201)
+      ).body as RoomBody;
+      const base = `/api/hotels/${hotel.id}/rooms/${room.id}`;
+      await moderator.client
+        .post(`${base}/availability`)
+        .send({ from: day(10), to: day(60) })
+        .expect(201);
+      const traveller = await loggedInAs();
+      const hold = () =>
+        traveller.client.post('/api/hotel-bookings').send({
+          hotelId: hotel.id,
+          checkIn: day(20),
+          checkOut: day(23),
+          rooms: [{ roomId: room.id, adults: 2, childrenAges: [] }],
+        });
+      return { moderator, base, hold };
+    }
+
+    it('a hold made after the block checked for reservations, but before it saved, wins and the block is refused', async () => {
+      const { moderator, base, hold } = await ready();
+      const queries = ctx.moduleRef.get(HotelReservationQueries);
+      const original = queries.takenRoomIds.bind(queries);
+      let held: request.Response | undefined;
+      const spy = jest
+        .spyOn(queries, 'takenRoomIds')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          held = await hold();
+          return result;
+        });
+      try {
+        const block = await moderator.client
+          .post(`${base}/blocks`)
+          .send({ from: day(21), to: day(21) });
+        expect(held?.status).toBe(201);
+        expect(block.status).toBe(409);
+        expect(codeOf(block)).toBe('ROOM_RESERVED');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a block saved after the hold read the room, but before the hold was stored, makes the hold fail', async () => {
+      const { moderator, base, hold } = await ready();
+      const catalog = ctx.moduleRef.get(HotelCatalog);
+      const original = catalog.findRooms.bind(catalog);
+      let blocked: request.Response | undefined;
+      const spy = jest
+        .spyOn(catalog, 'findRooms')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          blocked = await moderator.client
+            .post(`${base}/blocks`)
+            .send({ from: day(21), to: day(21) });
+          return result;
+        });
+      try {
+        const res = await hold();
+        expect(blocked?.status).toBe(201);
+        expect(res.status).toBe(400);
+        expect(codeOf(res)).toBe('ROOM_NOT_AVAILABLE');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a room is never deleted under a hold made after the delete checked it', async () => {
+      const { moderator, base, hold } = await ready();
+      const queries = ctx.moduleRef.get(HotelReservationQueries);
+      const original = queries.wasEverReserved.bind(queries);
+      let held: request.Response | undefined;
+      const spy = jest
+        .spyOn(queries, 'wasEverReserved')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          held = await hold();
+          return result;
+        });
+      try {
+        const removed = await moderator.client.delete(base);
+        expect(held?.status).toBe(201);
+        expect(removed.status).toBe(409);
+        expect(codeOf(removed)).toBe('ROOM_HAS_RESERVATIONS');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe('hotel photos (HTL-01, GEN-08)', () => {
     const upload = (client: Agent, hotelId: string, count = 1) => {
       const req = client.post(`/api/hotels/${hotelId}/images`);
@@ -736,6 +873,21 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
       await moderator.client
         .delete(`/api/hotels/${hotel.id}/images/${added.photos[0].id}`)
         .expect(404);
+    });
+
+    it('deletes the file when another moderator of the same hotel removes the photo', async () => {
+      const { hotel, moderator } = await hotelWithModerator();
+      const colleague = await loggedInAs(Role.HOTEL_MODERATOR, hotel.id);
+      const added = (await upload(moderator.client, hotel.id).expect(201))
+        .body as { photos: { id: string; url: string }[] };
+      const name = added.photos[0].url.split('/').pop() as string;
+      expect(await readdir(dir)).toContain(name);
+
+      await colleague.client
+        .delete(`/api/hotels/${hotel.id}/images/${added.photos[0].id}`)
+        .expect(200);
+      expect(await readdir(dir)).not.toContain(name);
+      await guest().get(`/uploads/${name}`).expect(404);
     });
 
     it('keeps everyone else out, and stores nothing for them', async () => {

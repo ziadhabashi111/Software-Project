@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import request from 'supertest';
+import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { UploadsModule } from '../src/uploads/uploads.module';
 import { Upload } from '../src/uploads/upload.schema';
@@ -28,7 +29,9 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
   let ctx: TestApp;
   let dir: string;
   let cookie: string[];
+  let modCookie: string[];
   let aliceId: string;
+  let modId: string;
   let bobId: string;
 
   beforeAll(async () => {
@@ -50,13 +53,25 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
       email: 'other@example.com',
       passwordHash,
     });
+    const mod = await users.create({
+      name: 'Airline moderator',
+      email: 'airline-mod@example.com',
+      passwordHash,
+      role: Role.AIRLINE_MODERATOR,
+    });
     aliceId = alice._id.toString();
     bobId = bob._id.toString();
+    modId = mod._id.toString();
     const login = await request(ctx.server)
       .post('/api/auth/login')
       .send({ email: 'uploader@example.com', password: 'Passw0rd!' })
       .expect(200);
     cookie = login.get('Set-Cookie') ?? [];
+    const modLogin = await request(ctx.server)
+      .post('/api/auth/login')
+      .send({ email: 'airline-mod@example.com', password: 'Passw0rd!' })
+      .expect(200);
+    modCookie = modLogin.get('Set-Cookie') ?? [];
   }, 180_000);
 
   afterAll(async () => {
@@ -126,7 +141,7 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
 
     const logos = await request(ctx.server)
       .post('/api/uploads/images?kind=airlineLogo')
-      .set('Cookie', cookie)
+      .set('Cookie', modCookie)
       .attach('images', PNG, 'a.png')
       .attach('images', PNG, 'b.png')
       .expect(400);
@@ -134,7 +149,7 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
 
     await request(ctx.server)
       .post('/api/uploads/images?kind=airlineLogo')
-      .set('Cookie', cookie)
+      .set('Cookie', modCookie)
       .attach('images', PNG, 'logo.png')
       .expect(201);
   });
@@ -154,11 +169,72 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
       .expect(400);
   });
 
+  it('lets each role upload only for what it owns (airline logo: airline moderator; post or activity: user)', async () => {
+    const userLogo = await request(ctx.server)
+      .post('/api/uploads/images?kind=airlineLogo')
+      .set('Cookie', cookie)
+      .attach('images', PNG, 'logo.png')
+      .expect(403);
+    expect(userLogo.status).toBe(403);
+    await request(ctx.server)
+      .post('/api/uploads/images?kind=hotel')
+      .set('Cookie', cookie)
+      .attach('images', PNG, 'h.png')
+      .expect(403);
+    await request(ctx.server)
+      .post('/api/uploads/images?kind=post')
+      .set('Cookie', modCookie)
+      .attach('images', PNG, 'p.png')
+      .expect(403);
+    await request(ctx.server)
+      .post('/api/uploads/images?kind=activity')
+      .set('Cookie', cookie)
+      .attach('images', PNG, 'a.png')
+      .expect(201);
+  });
+
   it('never serves files outside the upload folder', async () => {
     await request(ctx.server)
       .get('/uploads/..%2F..%2Fpackage.json')
       .expect(404);
     await request(ctx.server).get('/uploads/.env').expect(404);
+  });
+
+  it('deletes stand-alone uploads nobody attached within a day, and keeps the rest (GEN-08)', async () => {
+    const uploads = ctx.moduleRef.get(UploadsService);
+    const records = ctx.moduleRef.get<Model<Upload>>(
+      getModelToken(Upload.name),
+    );
+    const send = async (kind: string, as: string[]) =>
+      (
+        (
+          await request(ctx.server)
+            .post(`/api/uploads/images?kind=${kind}`)
+            .set('Cookie', as)
+            .attach('images', PNG, 'x.png')
+            .expect(201)
+        ).body as { images: StoredImage[] }
+      ).images[0];
+    const abandoned = await send('post', cookie);
+    const used = await send('post', cookie);
+    const recent = await send('post', cookie);
+    const logo = await send('airlineLogo', modCookie);
+    await uploads.attach([used.url], aliceId);
+
+    const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await records.collection.updateMany(
+      { filename: { $in: [abandoned.id, used.id, logo.id] } },
+      { $set: { createdAt: dayAgo } },
+    );
+
+    await expect(uploads.removeUnattached()).resolves.toBe(1);
+    const left = await readdir(dir);
+    expect(left).not.toContain(abandoned.id);
+    expect(left).toEqual(expect.arrayContaining([used.id, recent.id, logo.id]));
+    expect(await records.exists({ filename: abandoned.id })).toBeNull();
+    await expect(
+      uploads.attach([abandoned.url], aliceId),
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   describe('ownership (GEN-08: only the uploader may reuse or delete a file)', () => {
@@ -167,7 +243,7 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
     beforeAll(async () => {
       const res = await request(ctx.server)
         .post('/api/uploads/images?kind=airlineLogo')
-        .set('Cookie', cookie)
+        .set('Cookie', modCookie)
         .attach('images', PNG, 'logo.png')
         .expect(201);
       [logo] = (res.body as { images: StoredImage[] }).images;
@@ -178,17 +254,18 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
         getModelToken(Upload.name),
       );
       const record = await records.findOne({ filename: logo.id }).lean();
-      expect(record?.ownerId.toString()).toBe(aliceId);
+      expect(record?.ownerId.toString()).toBe(modId);
       expect(record?.kind).toBe('airlineLogo');
       expect(record?.url).toBe(logo.url);
     });
 
     it("accepts the uploader's URL and rejects it for anyone else", async () => {
       const uploads = ctx.moduleRef.get(UploadsService);
-      await expect(uploads.isUploadedUrl(logo.url, aliceId)).resolves.toBe(
-        true,
-      );
+      await expect(uploads.isUploadedUrl(logo.url, modId)).resolves.toBe(true);
       await expect(uploads.isUploadedUrl(logo.url, bobId)).resolves.toBe(false);
+      await expect(uploads.isUploadedUrl(logo.url, aliceId)).resolves.toBe(
+        false,
+      );
       await expect(
         uploads.assertOwnedUpload(logo.url, bobId, 'logoUrl'),
       ).rejects.toMatchObject({ status: 400 });
@@ -200,7 +277,7 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
       expect(await readdir(dir)).toContain(logo.id);
       await request(ctx.server).get(`/uploads/${logo.id}`).expect(200);
 
-      await expect(uploads.remove(logo.url, aliceId)).resolves.toBe(true);
+      await expect(uploads.remove(logo.url, modId)).resolves.toBe(true);
       expect(await readdir(dir)).not.toContain(logo.id);
       await request(ctx.server).get(`/uploads/${logo.id}`).expect(404);
     });

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ClientSession } from 'mongoose';
 
 /** What the booking module needs to know about a hotel. */
 export interface InventoryHotel {
@@ -51,6 +52,19 @@ export interface HotelInventory {
     hotelId: string,
     roomIds: string[],
     stay: { checkIn: Date; checkOut: Date },
+  ): Promise<InventoryRoom[]>;
+  /**
+   * HTL-06, HTL-18: the same rooms as `findRooms`, read again inside the
+   * hold's transaction after writing to each room document. The write makes
+   * a moderator's change to these rooms (block, availability, deactivate,
+   * delete) and the hold serialize: whichever commits second sees the other.
+   * Optional so test doubles can leave it out.
+   */
+  lockRooms?(
+    hotelId: string,
+    roomIds: string[],
+    stay: { checkIn: Date; checkOut: Date },
+    session: ClientSession,
   ): Promise<InventoryRoom[]>;
 }
 

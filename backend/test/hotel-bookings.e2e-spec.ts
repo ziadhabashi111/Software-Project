@@ -7,6 +7,7 @@ import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { BlogModule } from '../src/blog/blog.module';
 import { HotelBookingsModule } from '../src/hotel-bookings/hotel-bookings.module';
 import {
   HotelInventoryRegistry,
@@ -22,6 +23,7 @@ import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation
 import { ReviewModerator } from '../src/hotel-bookings/review-moderator';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../src/common/booking-status/hold';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
 import type { HotelReviewView } from '../src/hotel-bookings/review-view';
 import { UserStatus } from '../src/users/user-status';
@@ -134,6 +136,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       extraModules: [
         AuditModule,
         AdminModule,
+        BlogModule,
         HotelBookingsModule,
         FakeSharedServicesModule,
       ],
@@ -764,6 +767,26 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         held.id,
       );
     });
+
+    it('leaves a hold the user already paid to the webhook, until Stripe stops retrying (HTL-18, PAY-01)', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-20', '2027-10-21');
+      paymentService.cancelPendingPayment.mockResolvedValue('not_cancellable');
+      try {
+        await service.expireDueHolds(new Date(Date.now() + 11 * 60_000));
+        const kept = await reservations.findById(held.id).lean();
+        expect(kept?.status).toBe(ReservationStatus.PENDING_PAYMENT);
+        expect(await nights.countDocuments({ reservation: kept?._id })).toBe(1);
+
+        await service.expireDueHolds(
+          new Date(Date.now() + 11 * 60_000 + STRIPE_WEBHOOK_RETRY_MS),
+        );
+        const expired = await reservations.findById(held.id).lean();
+        expect(expired?.status).toBe(ReservationStatus.EXPIRED);
+      } finally {
+        paymentService.cancelPendingPayment.mockResolvedValue(undefined);
+      }
+    });
   });
 
   describe('my reservations (HTL-20) and details', () => {
@@ -1339,6 +1362,31 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       );
       expect((again.body as ErrorBody).code).toBe('REVIEW_EXISTS');
       expect((await reviewsOf(hotel.id)).ratingCount).toBe(1);
+    });
+
+    it('reports on reviews need a visible review by someone else (GEN-09)', async () => {
+      const guest = await loggedInAs();
+      const reporter = await loggedInAs();
+      const stay = await completedStay(guest.client, newHotel());
+      const created = (
+        await review(guest.client, stay.id, { rating: 2 }).expect(201)
+      ).body as HotelReviewView;
+      const report = (client: Client, contentId: string) =>
+        client.post('/api/reports').send({
+          contentType: 'review',
+          contentId,
+          reason: 'Fake review',
+        });
+
+      await report(reporter.client, new Types.ObjectId().toHexString()).expect(
+        404,
+      );
+      await report(guest.client, created.id).expect(400);
+      await report(reporter.client, created.id).expect(201);
+
+      await ctx.moduleRef.get(ReviewModerator).hide(created.id);
+      const other = await loggedInAs();
+      await report(other.client, created.id).expect(404);
     });
 
     it('two reviews of one stay at once: exactly one is stored', async () => {

@@ -1,9 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Matches } from 'class-validator';
+import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { DATE_ONLY } from '../../itineraries/dto/transforms';
 
-/** Query for `GET /api/hotels/:id/availability` (HTL-08). */
-export class AvailabilityQueryDto {
+/** Query for `GET /api/hotels/:id/availability` (HTL-08); pages through the rooms. */
+export class AvailabilityQueryDto extends PaginationQueryDto {
   @ApiProperty({ example: '2027-03-01', description: 'First day, YYYY-MM-DD' })
   @Matches(DATE_ONLY, { message: 'Use a date as YYYY-MM-DD' })
   from!: string;

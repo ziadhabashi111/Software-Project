@@ -51,7 +51,8 @@ function build(found: ReturnType<typeof postDoc> | null = postDoc()) {
     findById: jest.fn().mockResolvedValue(found),
   };
   const uploads = {
-    isUploadedUrl: jest.fn().mockResolvedValue(true),
+    attach: jest.fn().mockResolvedValue(undefined),
+    detach: jest.fn().mockResolvedValue(undefined),
     saveImages: jest.fn(),
     remove: jest.fn().mockResolvedValue(true),
     assertCanAdd: jest.fn(),
@@ -86,9 +87,9 @@ describe('PostsService.create (BLG-01, BLG-08)', () => {
   });
 
   // GEN-08: you may only attach images you uploaded, or you could later delete someone else's file.
-  it('rejects image URLs the author did not upload', async () => {
+  it('rejects image URLs the author did not upload, or that another post uses', async () => {
     const { service, uploads, posts } = build();
-    uploads.isUploadedUrl.mockResolvedValue(false);
+    uploads.attach.mockRejectedValue(new BadRequestException('not yours'));
     await expect(
       service.create(author, {
         title: 'Trip',
@@ -97,6 +98,21 @@ describe('PostsService.create (BLG-01, BLG-08)', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(posts.create).not.toHaveBeenCalled();
+  });
+
+  it('frees the claimed images when saving the post fails', async () => {
+    const { service, uploads, posts } = build();
+    posts.create.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      service.create(author, {
+        title: 'Trip',
+        body: 'Body',
+        imageUrls: ['http://localhost:3000/uploads/a.png'],
+      }),
+    ).rejects.toThrow('db down');
+    expect(uploads.detach).toHaveBeenCalledWith([
+      'http://localhost:3000/uploads/a.png',
+    ]);
   });
 });
 

@@ -275,7 +275,12 @@ describe('Browse, search, post page and author page (BLG-02, BLG-09, BLG-12)', (
       expect(page).toMatchObject({ id: writer.id, name: 'Author Page' });
       expect(new Date(page.joinedAt).getTime()).not.toBeNaN();
       expect(page.posts.items.map((p) => p.title)).toEqual(['Published one']);
-      expect(page.itineraries).toEqual({ items: [], total: 0 });
+      expect(page.itineraries).toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        limit: 10,
+      });
     });
 
     it('lists public itineraries once the itinerary module registers its source', async () => {
@@ -303,6 +308,29 @@ describe('Browse, search, post page and author page (BLG-02, BLG-09, BLG-12)', (
         'Egypt in a week',
       );
       expect(asked).toEqual([writer.id]);
+    });
+
+    it('pages through public itineraries, 10 at a time (BLG-12, GEN-05)', async () => {
+      const writer = await member();
+      const asked: { skip: number; limit: number }[] = [];
+      ctx.moduleRef.get(AuthorItineraries).register({
+        publicForAuthor: (_authorId, page) => {
+          asked.push(page);
+          return Promise.resolve({ items: [], total: 15 });
+        },
+      });
+      const res = await api()
+        .get(`/api/authors/${writer.id}?itinerariesPage=2`)
+        .expect(200);
+      expect((res.body as AuthorPageView).itineraries).toMatchObject({
+        total: 15,
+        page: 2,
+        limit: 10,
+      });
+      expect(asked).toEqual([{ skip: 10, limit: 10 }]);
+      await api()
+        .get(`/api/authors/${writer.id}?itinerariesPage=0`)
+        .expect(400);
     });
 
     it('answers 404 for unknown or deactivated authors', async () => {

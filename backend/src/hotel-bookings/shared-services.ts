@@ -7,6 +7,7 @@ import {
 import {
   PAYMENT_SERVICE,
   PaymentService,
+  PendingPaymentCancellation,
 } from '../payments/payment.service.interface';
 import {
   REFUND_SERVICE,
@@ -51,15 +52,24 @@ export class SharedServices {
     }
   }
 
-  /** Cancels the open PaymentIntent of an expired hold; failures are logged. */
-  async cancelPendingPayment(reservationId: string): Promise<void> {
+  /**
+   * Cancels the open PaymentIntent of a run-out hold (PAY-01). Failures are
+   * logged and answered `error`; `not_cancellable` means Stripe already took
+   * the payment, so the webhook decides what happens to the hold.
+   */
+  async cancelPendingPayment(
+    reservationId: string,
+  ): Promise<PendingPaymentCancellation> {
     try {
-      await this.payments()?.cancelPendingPayment('hotel', reservationId);
+      const payments = this.payments();
+      if (!payments) return 'none';
+      return await payments.cancelPendingPayment('hotel', reservationId);
     } catch (error) {
       this.logger.error(
         `Could not cancel the payment of hotel reservation ${reservationId}`,
         error instanceof Error ? error.stack : String(error),
       );
+      return 'error';
     }
   }
 

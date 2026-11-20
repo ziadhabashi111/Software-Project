@@ -71,7 +71,7 @@ export class HotelPhotosService {
       }
       return toHotelView(updated, await this.ratings.forHotel(hotelId));
     } catch (error) {
-      await this.discard(urls, user.id);
+      await this.discard(urls);
       throw error;
     }
   }
@@ -93,7 +93,9 @@ export class HotelPhotosService {
     );
     // A parallel request removed it first: nothing left to delete.
     if (!updated) throw new NotFoundException('Photo not found');
-    await this.discard([photo.url], user.id);
+    // The photo belonged to this hotel, which the caller moderates: its file
+    // goes too, also when another moderator of the hotel uploaded it.
+    await this.discard([photo.url]);
     return toHotelView(updated, await this.ratings.forHotel(hotelId));
   }
 
@@ -109,9 +111,9 @@ export class HotelPhotosService {
    * Deletes the files of photos that are gone. Best effort: the database is
    * already right, so a file that cannot be deleted is logged, never reported.
    */
-  private async discard(urls: string[], ownerId: string): Promise<void> {
+  private async discard(urls: string[]): Promise<void> {
     const results = await Promise.allSettled(
-      urls.map((url) => this.uploads.remove(url, ownerId)),
+      urls.map((url) => this.uploads.removeForItem(url)),
     );
     const failed = results.filter((r) => r.status === 'rejected').length;
     if (failed > 0) {

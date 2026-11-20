@@ -71,7 +71,7 @@ function build(current: ReturnType<typeof hotelDoc> | null = hotelDoc()) {
         ),
       ),
     assertCanAdd: jest.fn(),
-    remove: jest.fn().mockResolvedValue(true),
+    removeForItem: jest.fn().mockResolvedValue(true),
   };
   const ratings = {
     forHotel: jest
@@ -144,7 +144,7 @@ describe('HotelPhotosService.add (HTL-01, GEN-08)', () => {
     await expect(
       service.add(moderator, HOTEL_ID, [file]),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(uploads.remove).toHaveBeenCalledWith('/uploads/n0.jpg', 'm1');
+    expect(uploads.removeForItem).toHaveBeenCalledWith('/uploads/n0.jpg');
   });
 
   it('deletes the stored files if the database write fails', async () => {
@@ -153,7 +153,7 @@ describe('HotelPhotosService.add (HTL-01, GEN-08)', () => {
     await expect(service.add(moderator, HOTEL_ID, [file])).rejects.toThrow(
       'db down',
     );
-    expect(uploads.remove).toHaveBeenCalledWith('/uploads/n0.jpg', 'm1');
+    expect(uploads.removeForItem).toHaveBeenCalledWith('/uploads/n0.jpg');
   });
 });
 
@@ -172,7 +172,7 @@ describe('HotelPhotosService.remove (HTL-01, GEN-08)', () => {
     ];
     expect(filter).toHaveProperty(['photos._id']);
     expect(update.$pull.photos._id.toString()).toBe(gone._id.toString());
-    expect(uploads.remove).toHaveBeenCalledWith('/uploads/gone.jpg', 'm1');
+    expect(uploads.removeForItem).toHaveBeenCalledWith('/uploads/gone.jpg');
     expect(view.photos.map((p) => p.url)).toEqual(['/uploads/keep.jpg']);
   });
 
@@ -181,7 +181,7 @@ describe('HotelPhotosService.remove (HTL-01, GEN-08)', () => {
     await expect(
       service.remove(moderator, HOTEL_ID, new Types.ObjectId().toString()),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(uploads.remove).not.toHaveBeenCalled();
+    expect(uploads.removeForItem).not.toHaveBeenCalled();
   });
 
   it('is only for the hotel’s own moderator', async () => {
@@ -189,14 +189,14 @@ describe('HotelPhotosService.remove (HTL-01, GEN-08)', () => {
     await expect(
       service.remove(otherModerator, HOTEL_ID, new Types.ObjectId().toString()),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(uploads.remove).not.toHaveBeenCalled();
+    expect(uploads.removeForItem).not.toHaveBeenCalled();
   });
 
   it('does not fail the request if the file cannot be deleted', async () => {
     const gone = photo('/uploads/gone.jpg');
     const { service, hotels, uploads } = build(hotelDoc([gone]));
     hotels.findOneAndUpdate.mockResolvedValue(hotelDoc());
-    uploads.remove.mockRejectedValue(new Error('disk'));
+    uploads.removeForItem.mockRejectedValue(new Error('disk'));
     await expect(
       service.remove(moderator, HOTEL_ID, gone._id.toString()),
     ).resolves.toMatchObject({ photos: [] });

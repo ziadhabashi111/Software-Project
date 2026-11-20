@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { TAG_MAX_LENGTH } from './post.dto';
 
@@ -35,5 +42,19 @@ export class SearchPostsQueryDto extends PaginationQueryDto {
   q!: string;
 }
 
-/** Query for `GET /api/authors/:id` (BLG-12): pages through the posts. */
-export class AuthorPageQueryDto extends PaginationQueryDto {}
+/**
+ * Query for `GET /api/authors/:id` (BLG-12): `page`/`limit` page through the
+ * posts, `itinerariesPage` through the public itineraries (10 per page).
+ */
+export class AuthorPageQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    minimum: 1,
+    default: 1,
+    description: 'Page of public itineraries (10 per page)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  itinerariesPage = 1;
+}

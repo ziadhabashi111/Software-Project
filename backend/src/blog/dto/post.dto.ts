@@ -7,6 +7,7 @@ import {
 import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsEnum,
   IsNotEmpty,
@@ -86,6 +87,7 @@ export class CreatePostDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(IMAGES_MAX, { message: `At most ${IMAGES_MAX} images` })
+  @ArrayUnique({ message: 'Each image can be added only once' })
   @IsUrl(
     { require_tld: false, require_protocol: true },
     { each: true, message: 'Each image must be a URL from the upload helper' },

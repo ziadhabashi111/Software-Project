@@ -12,6 +12,7 @@ import { HotelsService } from './hotels.service';
 import { RoomsController } from './rooms.controller';
 import { RoomsService } from './rooms.service';
 import { Hotel, HotelSchema } from './schemas/hotel.schema';
+import { City, CitySchema } from '../reference-data/schemas/city.schema';
 import { Room, RoomSchema } from './schemas/room.schema';
 import { HotelSearchController } from './search/hotel-search.controller';
 import { HotelSearchService } from './search/hotel-search.service';
@@ -37,6 +38,8 @@ import { ModeratorReservationsService } from './search/moderator-reservations.se
     MongooseModule.forFeature([
       { name: Hotel.name, schema: HotelSchema },
       { name: Room.name, schema: RoomSchema },
+      // Read-only reference data: a hotel's city must be in its country.
+      { name: City.name, schema: CitySchema },
     ]),
     AdminModule,
     HotelBookingsModule,

@@ -6,6 +6,7 @@ import {
   assertCanTransition,
   BookingStatus,
 } from '../common/booking-status/booking-status';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../common/booking-status/hold';
 import { FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import {
@@ -19,8 +20,6 @@ import { SharedServices } from './shared-services';
 export const EXPIRY_SWEEP_MS = 30_000;
 /** Bookings handled per sweep, so one run stays short. */
 const BATCH = 500;
-/** Stripe retries a webhook for up to 3 days. */
-export const STRIPE_WEBHOOK_RETRY_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * GEN-11 timed transitions:

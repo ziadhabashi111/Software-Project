@@ -6,6 +6,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
+import {
+  DEFAULT_PAGE_SIZE,
+  skipFor,
+  toPage,
+} from '../common/pagination/pagination';
+import type { Paginated } from '../common/pagination/pagination';
 import { fieldError } from '../common/validation/validation-errors';
 import { HotelReservationQueries } from '../hotel-bookings/hotel-reservation-queries';
 import { formatDate } from '../hotel-bookings/stay-rules';
@@ -40,13 +46,19 @@ export interface RoomNightView extends NightInfo {
   date: string;
 }
 
-/** HTL-08: every room of a hotel, night by night, for a chosen period. */
+/** HTL-08: the hotel's rooms (one page of them), night by night, for a chosen period. */
 export interface AvailabilityView {
   hotelId: string;
   from: string;
   to: string;
   rooms: { roomId: string; name: string; nights: RoomNightView[] }[];
+  /** All rooms of the hotel; `rooms` holds page `page` of `limit` (GEN-05). */
+  total: number;
+  page: number;
+  limit: number;
 }
+
+type PageQuery = { page: number; limit: number };
 
 const dayAfter = (day: Date): Date => new Date(day.getTime() + MS_PER_DAY);
 
@@ -125,12 +137,15 @@ export class RoomsService {
     }
   }
 
-  async list(user: Caller, hotelId: string): Promise<RoomView[]> {
+  /** HTL-03: the hotel's rooms by number or name, 10 per page (GEN-05). */
+  async list(
+    user: Caller,
+    hotelId: string,
+    query: PageQuery,
+  ): Promise<Paginated<RoomView>> {
     assertOwnHotel(user, hotelId);
-    const rooms = await this.rooms
-      .find({ hotel: new Types.ObjectId(hotelId) })
-      .sort({ name: 1 });
-    return rooms.map(toRoomView);
+    const { rooms, total } = await this.roomsPage(hotelId, query);
+    return toPage(rooms.map(toRoomView), total, query);
   }
 
   /** HTL-05: beds, occupancy, price and type. Reservations keep the price they were made at. */
@@ -290,21 +305,33 @@ export class RoomsService {
   /** HTL-06: delete a room, but only one that has never been reserved. */
   async remove(user: Caller, hotelId: string, roomId: string): Promise<void> {
     assertOwnHotel(user, hotelId);
-    const room = await this.load(hotelId, roomId);
-    if (await this.reservations.wasEverReserved(room.id)) {
-      throw conflict(
-        'ROOM_HAS_RESERVATIONS',
-        'A room that has ever been reserved cannot be deleted; deactivate it instead',
-      );
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const room = await this.load(hotelId, roomId);
+      if (await this.reservations.wasEverReserved(room.id)) {
+        throw conflict(
+          'ROOM_HAS_RESERVATIONS',
+          'A room that has ever been reserved cannot be deleted; deactivate it instead',
+        );
+      }
+      // Versioned: a hold locks the room (HotelCatalog.lockRooms) by bumping
+      // its version, so a hold made after the check above stops the delete.
+      const { deletedCount } = await this.rooms.deleteOne({
+        _id: room._id,
+        __v: room.__v,
+      });
+      if (deletedCount === 1) return;
+      await pause(Math.random() * 15);
     }
-    await this.rooms.deleteOne({ _id: room._id });
+    throw new ConflictException(
+      'The room is being changed by other requests, please try again',
+    );
   }
 
   /** HTL-08: each room, night by night: Available, Booked (with the reference) or Blocked. */
   async availabilityView(
     user: Caller,
     hotelId: string,
-    period: { from: string; to: string },
+    period: { from: string; to: string } & Partial<PageQuery>,
   ): Promise<AvailabilityView> {
     assertOwnHotel(user, hotelId);
     const range = parseRange(period.from, period.to);
@@ -315,9 +342,11 @@ export class RoomsService {
         `Choose a period of at most ${MAX_VIEW_NIGHTS} days`,
       );
     }
-    const rooms = await this.rooms
-      .find({ hotel: new Types.ObjectId(hotelId) })
-      .sort({ name: 1 });
+    const page = {
+      page: period.page ?? 1,
+      limit: period.limit ?? DEFAULT_PAGE_SIZE,
+    };
+    const { rooms, total } = await this.roomsPage(hotelId, page);
     const activity =
       rooms.length > 0
         ? await this.reservations.roomActivity(
@@ -352,10 +381,29 @@ export class RoomsService {
           };
         }),
       })),
+      total,
+      page: page.page,
+      limit: page.limit,
     };
   }
 
   // helpers -------------------------------------------------------------
+
+  private async roomsPage(
+    hotelId: string,
+    query: PageQuery,
+  ): Promise<{ rooms: RoomDocument[]; total: number }> {
+    const filter = { hotel: new Types.ObjectId(hotelId) };
+    const [rooms, total] = await Promise.all([
+      this.rooms
+        .find(filter)
+        .sort({ name: 1, _id: 1 })
+        .skip(skipFor(query))
+        .limit(query.limit),
+      this.rooms.countDocuments(filter),
+    ]);
+    return { rooms, total };
+  }
 
   private async load(hotelId: string, roomId: string): Promise<RoomDocument> {
     const room =

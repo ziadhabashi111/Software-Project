@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { ClientSession } from 'mongoose';
 import { ProviderDirectory, ProviderType } from '../admin/provider-directory';
 import type {
   ProviderChange,
@@ -16,6 +17,7 @@ import { HotelReservationQueries } from '../hotel-bookings/hotel-reservation-que
 import { roomBookable } from './date-ranges';
 import { Hotel } from './schemas/hotel.schema';
 import { Room } from './schemas/room.schema';
+import type { RoomDocument } from './schemas/room.schema';
 
 /**
  * The hotel catalogue as the rest of the platform sees it:
@@ -66,13 +68,50 @@ export class HotelCatalog
     roomIds: string[],
     stay: { checkIn: Date; checkOut: Date },
   ): Promise<InventoryRoom[]> {
+    const filter = this.roomsFilter(hotelId, roomIds);
+    if (!filter) return [];
+    const rooms = await this.rooms.find(filter);
+    return rooms.map((room) => this.toInventoryRoom(hotelId, room, stay));
+  }
+
+  /**
+   * HTL-06, HTL-18: bumps each room's version inside the hold's transaction,
+   * then reads the rooms again. Moderator changes save rooms with optimistic
+   * concurrency (`RoomsService.change`, versioned delete), so they cannot
+   * commit between this read and the hold's commit: they retry and then see
+   * the hold's nights. A change committed first makes this read see it.
+   */
+  async lockRooms(
+    hotelId: string,
+    roomIds: string[],
+    stay: { checkIn: Date; checkOut: Date },
+    session: ClientSession,
+  ): Promise<InventoryRoom[]> {
+    const filter = this.roomsFilter(hotelId, roomIds);
+    if (!filter) return [];
+    await this.rooms.updateMany(filter, { $inc: { __v: 1 } }, { session });
+    const rooms = await this.rooms.find(filter).session(session);
+    return rooms.map((room) => this.toInventoryRoom(hotelId, room, stay));
+  }
+
+  private roomsFilter(
+    hotelId: string,
+    roomIds: string[],
+  ): { hotel: Types.ObjectId; _id: { $in: Types.ObjectId[] } } | null {
     const ids = roomIds.filter((id) => Types.ObjectId.isValid(id));
-    if (!Types.ObjectId.isValid(hotelId) || ids.length === 0) return [];
-    const rooms = await this.rooms.find({
+    if (!Types.ObjectId.isValid(hotelId) || ids.length === 0) return null;
+    return {
       hotel: new Types.ObjectId(hotelId),
       _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
-    });
-    return rooms.map((room) => ({
+    };
+  }
+
+  private toInventoryRoom(
+    hotelId: string,
+    room: RoomDocument,
+    stay: { checkIn: Date; checkOut: Date },
+  ): InventoryRoom {
+    return {
       id: room.id,
       hotelId,
       name: room.name,
@@ -80,7 +119,7 @@ export class HotelCatalog
       maxOccupancy: room.maxOccupancy,
       pricePerNight: room.pricePerNight,
       bookable: roomBookable(room, stay.checkIn, stay.checkOut),
-    }));
+    };
   }
 
   // ProviderHandler -----------------------------------------------------
