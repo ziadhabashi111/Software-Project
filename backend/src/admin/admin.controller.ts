@@ -52,7 +52,7 @@ import { ListAuditLogsQueryDto } from './dto/list-audit-logs.dto';
 import { ListBookingsQueryDto } from './dto/list-bookings.dto';
 import { ListReportsQueryDto } from './dto/list-reports.dto';
 import { ModerateContentQueryDto } from './dto/moderate-content.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
+import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import { ResolveReportDto } from './dto/resolve-report.dto';
 import { ProviderType } from './provider-directory';
 
@@ -114,7 +114,7 @@ export class AdminController {
   resetPassword(
     @CurrentUser() admin: AuthUser,
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: ResetPasswordDto,
+    @Body() dto: AdminResetPasswordDto,
   ): Promise<void> {
     return this.accounts.resetPassword(admin.id, id, dto.temporaryPassword);
   }

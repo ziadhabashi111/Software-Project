@@ -6,7 +6,7 @@ import {
 } from '../../auth/password.service';
 
 /** Body for `POST /api/admin/users/:id/reset-password` (ACC-07a). */
-export class ResetPasswordDto {
+export class AdminResetPasswordDto {
   @ApiProperty({
     example: 'Temp0rary1',
     description: `The temporary password the admin hands over. ${PASSWORD_RULE_MESSAGE}`,
