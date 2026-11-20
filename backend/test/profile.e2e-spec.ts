@@ -251,6 +251,29 @@ describe('Profile and deactivation (ACC-09, ACC-11, ACC-12; real MongoDB in memo
       await client.get('/api/users/me').expect(200);
     });
 
+    it('marks the account deactivated before checking bookings, so a booking confirmed meanwhile is seen (ACC-12)', async () => {
+      const { email, client } = await loggedInClient();
+      const me = await client.get('/api/users/me').expect(200);
+      const userId = (me.body as { id: string }).id;
+      const statusesSeen: (string | undefined)[] = [];
+      ctx.moduleRef.get(DeactivationBlockers).register({
+        hasUpcomingConfirmedBookings: async (id) => {
+          if (id !== userId) return false;
+          statusesSeen.push((await userModel.findById(id).lean())?.status);
+          // A payment webhook confirms a booking right now.
+          return true;
+        },
+      });
+
+      await client.delete('/api/users/me?confirm=true').expect(409);
+      expect(statusesSeen).toEqual([UserStatus.DEACTIVATED]);
+      // Refused: the account is active again and still signed in.
+      expect((await userModel.findOne({ email }))?.status).toBe(
+        UserStatus.ACTIVE,
+      );
+      await client.get('/api/users/me').expect(200);
+    });
+
     it('is only for regular users, not admins or moderators', async () => {
       for (const role of [
         Role.ADMIN,

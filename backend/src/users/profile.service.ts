@@ -6,6 +6,7 @@ import {
   Optional,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Role } from '../auth/auth.types';
 import { SessionService } from '../auth/sessions/session.service';
 import { fieldError } from '../common/validation/validation-errors';
 import { CURRENCY_CATALOG } from './currency-catalog';
@@ -64,7 +65,26 @@ export class ProfileService {
    * posts and public itineraries are hidden by those modules.
    */
   async deactivate(userId: string): Promise<void> {
-    if (await this.blockers.hasUpcomingBookings(userId)) {
+    // Mark the account first, then look for bookings: a booking confirmed
+    // while this runs is then seen by the check (instead of landing on an
+    // account that was checked a moment earlier).
+    const marked = await this.users.transitionStatus(
+      userId,
+      UserStatus.ACTIVE,
+      UserStatus.DEACTIVATED,
+      [Role.USER],
+    );
+    if (!marked) throw new UnauthorizedException('Not logged in');
+
+    let blocked: boolean;
+    try {
+      blocked = await this.blockers.hasUpcomingBookings(userId);
+    } catch (error) {
+      await this.restore(userId);
+      throw error;
+    }
+    if (blocked) {
+      await this.restore(userId);
       throw new ConflictException({
         statusCode: 409,
         error: 'Conflict',
@@ -73,7 +93,16 @@ export class ProfileService {
         code: 'UPCOMING_BOOKINGS',
       });
     }
-    await this.users.setStatus(userId, UserStatus.DEACTIVATED);
     await this.sessions.revokeAllForUser(userId);
+  }
+
+  /** Undoes the deactivation mark when deactivation is refused. */
+  private async restore(userId: string): Promise<void> {
+    await this.users.transitionStatus(
+      userId,
+      UserStatus.DEACTIVATED,
+      UserStatus.ACTIVE,
+      [Role.USER],
+    );
   }
 }
