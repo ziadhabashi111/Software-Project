@@ -915,3 +915,15 @@ Finish my remaining bonuses: link bookings to itinerary days (ITN-27), export an
 How the output was used:
 Built test-first on feature/ITN-27-28-BLG-13-itinerary-bonuses. ITN-27: a link stores only the booking reference; its reference, status and price are read from the booking modules as the owner each time, so a cancelled booking stops counting and someone else's booking can never be linked; linked bookings feed the owner's budget (flight as intercity transport, hotel as accommodation) and never the public summary or a clone. ITN-28: a pure model mapper plus a pdfkit renderer; the owner gets bookings and budget, everyone else only the public copy, otherwise 404; the file name is sanitised for the header. BLG-13: the blog's AuthorItineraries port gained ownedBy and publicSummary, implemented by the itinerary module, so readers see the link only while the itinerary stays public. I reviewed the full diff and the unit and e2e tests.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ACC-07a, ACC-07, PAY-01, GEN-13
+Prompt:
+Fix the two problems found when checking the backend through Swagger UI: two DTO classes both named ResetPasswordDto, and the app failing to start when STRIPE_SECRET_KEY is blank.
+
+How the output was used:
+Built test-first. The admin reset-password body is now AdminResetPasswordDto, so Swagger documents each reset endpoint with its own request body; a unit test checks that every DTO class name in the app is unique and an e2e test checks the generated OpenAPI document. The Stripe provider now treats a blank or whitespace key like an unset one (the app boots and payment calls fail later, as designed), with unit tests. I reviewed the full diff.
+================================================
