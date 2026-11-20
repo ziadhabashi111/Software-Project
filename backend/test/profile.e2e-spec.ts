@@ -274,6 +274,30 @@ describe('Profile and deactivation (ACC-09, ACC-11, ACC-12; real MongoDB in memo
       await client.get('/api/users/me').expect(200);
     });
 
+    it('ends the unpaid holds after marking the account and before checking bookings, so a late payment is refunded (ACC-12)', async () => {
+      const { client } = await loggedInClient();
+      const me = await client.get('/api/users/me').expect(200);
+      const userId = (me.body as { id: string }).id;
+      const steps: string[] = [];
+      ctx.moduleRef.get(DeactivationBlockers).register({
+        endPendingHolds: async (id) => {
+          if (id !== userId) return;
+          const status = (await userModel.findById(id).lean())?.status;
+          steps.push(`end holds (${status})`);
+        },
+        hasUpcomingConfirmedBookings: (id) => {
+          if (id === userId) steps.push('check bookings');
+          return Promise.resolve(false);
+        },
+      });
+
+      await client.delete('/api/users/me?confirm=true').expect(204);
+      expect(steps).toEqual([
+        `end holds (${UserStatus.DEACTIVATED})`,
+        'check bookings',
+      ]);
+    });
+
     it('is only for regular users, not admins or moderators', async () => {
       for (const role of [
         Role.ADMIN,

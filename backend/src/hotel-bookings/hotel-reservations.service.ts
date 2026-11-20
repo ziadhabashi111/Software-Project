@@ -224,6 +224,37 @@ export class HotelReservationsService {
   }
 
   /**
+   * ACC-12: the account is being deactivated, so its unpaid holds end now
+   * (rooms released, PaymentIntent cancelled). A payment that still lands is
+   * refunded by the webhook instead of confirming a stay.
+   */
+  async endHoldsOfUser(userId: string, now: Date = new Date()): Promise<void> {
+    if (!Types.ObjectId.isValid(userId)) return;
+    const pending = await this.reservations
+      .find(
+        {
+          user: new Types.ObjectId(userId),
+          status: ReservationStatus.PENDING_PAYMENT,
+        },
+        { _id: 1 },
+      )
+      .lean();
+    for (const { _id } of pending) {
+      const ended = await this.connection.transaction(async (session) => {
+        const result = await this.reservations.updateOne(
+          { _id, status: ReservationStatus.PENDING_PAYMENT },
+          { $set: { status: ReservationStatus.EXPIRED, expiredAt: now } },
+          { session },
+        );
+        if (result.modifiedCount === 0) return false;
+        await this.roomNights.deleteMany({ reservation: _id }, { session });
+        return true;
+      });
+      if (ended) await this.shared.cancelPendingPayment(_id.toString());
+    }
+  }
+
+  /**
    * PAY-01, HTL-18: before a run-out hold expires, its PaymentIntent is
    * cancelled. If Stripe says the user already paid (in the last seconds of
    * the hold), the hold is left to the webhook, which confirms it or refunds

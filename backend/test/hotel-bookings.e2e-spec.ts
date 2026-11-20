@@ -1637,6 +1637,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         ).expect(201);
         await guest.client.delete('/api/users/me?confirm=true').expect(204);
       });
+
+      it('ends an unpaid hold when the account is deactivated, freeing its rooms', async () => {
+        const guest = await loggedInAs();
+        const res = await hold(
+          guest.client,
+          body([addRoom()], '2028-03-12', '2028-03-13'),
+        ).expect(201);
+        const held = res.body as HotelReservationView;
+        await guest.client.delete('/api/users/me?confirm=true').expect(204);
+
+        const ended = await reservations.findById(held.id).lean();
+        expect(ended?.status).toBe(ReservationStatus.EXPIRED);
+        expect(await nights.countDocuments({ reservation: ended?._id })).toBe(
+          0,
+        );
+      });
     });
 
     describe('ACC-17: hotel reservations in the admin booking list', () => {

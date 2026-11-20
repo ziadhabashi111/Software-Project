@@ -60,7 +60,8 @@ export class ProfileService {
   }
 
   /**
-   * ACC-12: blocked while the user has upcoming Confirmed bookings. A
+   * ACC-12: blocked while the user has upcoming Confirmed bookings; unpaid
+   * holds are ended (a refused deactivation does not bring them back). A
    * deactivated user is signed out everywhere and cannot log in again; their
    * posts and public itineraries are hidden by those modules.
    */
@@ -78,6 +79,9 @@ export class ProfileService {
 
     let blocked: boolean;
     try {
+      // Unpaid holds end first: a payment arriving after this is refunded,
+      // and one that confirmed just before is seen by the check below.
+      await this.blockers.endPendingHolds(userId);
       blocked = await this.blockers.hasUpcomingBookings(userId);
     } catch (error) {
       await this.restore(userId);

@@ -7,6 +7,7 @@ import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { FlightBookingExpiryService } from '../src/flight-bookings/flight-booking-expiry.service';
+import { BookingStatus } from '../src/common/booking-status/booking-status';
 import { FlightBookingPayments } from '../src/flight-bookings/flight-booking-payments';
 import { FlightBookingsModule } from '../src/flight-bookings/flight-bookings.module';
 import {
@@ -1355,13 +1356,17 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .expect(409);
     });
 
-    it('allows deactivation with only an unpaid hold', async () => {
+    it('allows deactivation with only an unpaid hold, and ends that hold', async () => {
       const flight = await makeFlight();
-      const { user } = await heldBooking(flight);
+      const { user, booking } = await heldBooking(flight);
       const res = await user.client
         .delete('/api/users/me')
         .query({ confirm: 'true' });
       expect(res.status).toBeLessThan(300);
+      // A payment landing after this is refunded, not confirmed (ACC-12).
+      const ended = await bookings.findById(booking.id).lean();
+      expect(ended?.status).toBe(BookingStatus.EXPIRED);
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
     it('shows flight bookings in the admin bookings list', async () => {

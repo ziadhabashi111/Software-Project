@@ -14,6 +14,7 @@ import {
   DeactivationBlocker,
   DeactivationBlockers,
 } from '../../users/deactivation-blockers';
+import { FlightBookingExpiryService } from '../flight-booking-expiry.service';
 import { parseStatus } from '../rules/status-labels';
 import {
   FlightBooking,
@@ -39,11 +40,31 @@ export class FlightBookingRegistrations
     private readonly airlines: Model<AirlineDocument>,
     private readonly blockers: DeactivationBlockers,
     private readonly sources: BookingSources,
+    private readonly expiry: FlightBookingExpiryService,
   ) {}
 
   onModuleInit(): void {
     this.blockers.register(this);
     this.sources.register(this);
+  }
+
+  /**
+   * ACC-12: the account is being deactivated, so its unpaid holds end now
+   * (seats released, PaymentIntent cancelled). A payment that still lands is
+   * refunded by the webhook instead of confirming a booking.
+   */
+  async endPendingHolds(userId: string, now: Date = new Date()): Promise<void> {
+    if (!Types.ObjectId.isValid(userId)) return;
+    const pending = await this.bookings
+      .find({
+        user: new Types.ObjectId(userId),
+        status: BookingStatus.PENDING_PAYMENT,
+      })
+      .select('_id')
+      .lean();
+    for (const { _id } of pending) {
+      await this.expiry.expireOne(_id, now, { force: true });
+    }
   }
 
   /** ACC-12: a Confirmed booking whose last flight has not landed yet. */
