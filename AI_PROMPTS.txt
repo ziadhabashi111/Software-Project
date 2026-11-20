@@ -717,3 +717,19 @@ Add the hotel photos on top of the hotel catalogue: POST /api/hotels/:id/images 
 How the output was used:
 Wrote the service spec first (ownership before any file is written, files stored as the moderator, the 5-photo limit inside the database write so parallel uploads cannot exceed it, files deleted when the write fails or the photo is removed, best-effort file deletion). HotelPhotosService and HotelPhotosController follow the same upload pattern as the activity images. Added e2e tests (add/remove with files on disk, other moderators/admins/travellers/guests refused with nothing stored, fake files, the limit, parallel uploads) and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+While verifying that every module's notification events fire (Issue 28), I found that suspending a user account sends no in-app notification. Habashi approved fixing it: add the account suspension and reactivation notifications using the same ADMIN_NOTIFIER pattern as provider deactivation.
+
+How the output was used:
+Claude wrote the change and I applied it as a patch on a new branch from the latest develop. AdminAccountsService now injects the optional ADMIN_NOTIFIER and sends ACCOUNT_SUSPENDED after suspend() 
+and ACCOUNT_REACTIVATED after reactivate(),
+only to the affected account. A notification failure is logged and never undoes the status change. 
+Added 6 unit tests in admin-accounts.service.spec.ts (notified on suspend and reactivate, nothing sent when the change is rejected, works without a notifier, suspension still succeeds if the notifier throws). 
+I ran lint and the full test suite myself; the only failing test is the existing uploads read-only-folder test, which is unrelated and fails on develop too.
+================================================
