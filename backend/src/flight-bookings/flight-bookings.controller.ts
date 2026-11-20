@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -32,11 +33,16 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { BookingRequestDto } from './dto/booking-request.dto';
 import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
+import { ChangeFlightDto } from './dto/change-flight.dto';
 import { ListFlightBookingsDto } from './dto/list-flight-bookings.dto';
 import {
   CancellationResult,
   FlightBookingCancellationsService,
 } from './flight-booking-cancellations.service';
+import {
+  FlightBookingChangesService,
+  FlightChangeView,
+} from './flight-booking-changes.service';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import {
   BookingQuoteView,
@@ -55,6 +61,7 @@ export class FlightBookingsController {
     private readonly holds: FlightBookingHoldsService,
     private readonly mine: MyFlightBookingsService,
     private readonly cancellations: FlightBookingCancellationsService,
+    private readonly changes: FlightBookingChangesService,
   ) {}
 
   @Post()
@@ -149,6 +156,36 @@ export class FlightBookingsController {
     @Body() dto: CancelFlightBookingDto,
   ): Promise<CancellationResult> {
     return this.cancellations.cancel(id, user, dto.confirm === true);
+  }
+
+  @Patch(':id/change-flight')
+  @Roles(Role.USER)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    ['FLT-27', 'PAY-01', 'PAY-03'],
+    'Change my booking to another flight (see the fare difference first)',
+    `Bonus FLT-27. Move the outbound (segmentIndex 0) or the return (1) of your own Confirmed booking to another flight of the same airline, the same departure and arrival airports and the same cabin, that has not departed and has seats for all your passengers. Without \`?confirm=true\` nothing changes and you get the fare difference (\`action\`: pay, refund or none). With \`?confirm=true\`: a same-fare or cheaper change is applied at once and a lower fare is refunded to your card; a dearer change holds the new seats for ${HOLD_MINUTES} minutes and returns a \`changeId\` to pay with POST /api/payments { bookingType: "flight-change", bookingId: changeId } (the webhook then applies it). Passenger types are checked again on the new outbound date. You get an in-app notification when the change is applied.`,
+  )
+  @ApiOkResponse({
+    description:
+      '{ changed, action, segmentIndex, newFlight, currentSegmentTotal, newSegmentTotal, difference, newTotal, currency, changeId?, holdExpiresAt?, booking?, message }',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Not the same airline, route or cabin, already departed, out of order, no return flight, or a passenger type no longer matches',
+  })
+  @ApiConflictResponse({
+    description:
+      'NOT_CHANGEABLE, CHANGE_PENDING, SEATS_UNAVAILABLE or PRICE_CHANGED',
+  })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  changeFlight(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: ChangeFlightDto,
+    @Query('confirm') confirm?: string,
+  ): Promise<FlightChangeView> {
+    return this.changes.change(id, user, dto, confirm === 'true');
   }
 
   @Get(':id/e-ticket')

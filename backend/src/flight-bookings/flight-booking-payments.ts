@@ -16,6 +16,7 @@ import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import {
   FINAL_REFUND_STATUSES,
   type RefundResult,
+  type RefundStatus,
 } from '../payments/refund.service.interface';
 import {
   isDuplicateReference,
@@ -351,7 +352,9 @@ export class FlightBookingPayments {
       !doc ||
       doc.status !== BookingStatus.CANCELLED ||
       !doc.refund?.status ||
-      !doc.payment?.paymentIntentId
+      !doc.payment?.paymentIntentId ||
+      // FLT-27: paid with several payments, refunded in parts instead.
+      doc.refund.parts?.length
     ) {
       return null;
     }
@@ -380,6 +383,14 @@ export class FlightBookingPayments {
   ): Promise<boolean> {
     if (!Types.ObjectId.isValid(bookingId)) return false;
     const id = new Types.ObjectId(bookingId);
+    if (
+      await this.bookings.exists({
+        _id: id,
+        'refund.parts.refundId': result.refundId,
+      })
+    ) {
+      return this.updatePart(id, { refundId: result.refundId }, result);
+    }
     const filter = {
       _id: id,
       status: BookingStatus.CANCELLED,
@@ -395,6 +406,71 @@ export class FlightBookingPayments {
     if (updated.matchedCount === 1) return true;
     // A Pending result that lost to a final one was still "recorded".
     return pending && (await this.bookings.exists(filter)) !== null;
+  }
+
+  /**
+   * FLT-27: the outcome of one part of a refund split over several payments
+   * (from `issue` or a failure). The booking's refund status then sums the
+   * parts up: Refunded when all are, Failed if any failed, else Pending.
+   */
+  async recordRefundPart(
+    bookingId: string,
+    paymentIntentId: string,
+    result:
+      | RefundResult
+      | { status: 'FAILED'; failureReason: string; refundId?: undefined },
+  ): Promise<boolean> {
+    if (!Types.ObjectId.isValid(bookingId)) return false;
+    return this.updatePart(
+      new Types.ObjectId(bookingId),
+      { paymentIntentId },
+      result,
+    );
+  }
+
+  /** Updates one refund part (never final -> Pending) and the summed status. */
+  private async updatePart(
+    id: Types.ObjectId,
+    match: { refundId?: string; paymentIntentId?: string },
+    result: {
+      status: RefundStatus;
+      refundId?: string;
+      failureReason?: string;
+    },
+  ): Promise<boolean> {
+    return this.connection.transaction(async (session) => {
+      const doc = await this.bookings.findById(id).session(session);
+      const parts = doc?.refund?.parts;
+      if (!doc?.refund || !parts?.length) return false;
+      const part = parts.find((p) =>
+        match.refundId
+          ? p.refundId === match.refundId
+          : p.paymentIntentId === match.paymentIntentId,
+      );
+      if (!part) return false;
+      const isFinal = FINAL_REFUND_STATUSES.includes(part.status ?? 'PENDING');
+      if (!(isFinal && result.status === 'PENDING')) {
+        if (result.refundId) part.refundId = result.refundId;
+        part.status = result.status;
+        if (result.status === 'FAILED') {
+          part.failureReason = result.failureReason ?? 'unknown';
+        } else {
+          part.failureReason = undefined;
+        }
+      }
+      const failed = parts.find((p) => p.status === 'FAILED');
+      const status: RefundStatus = failed
+        ? 'FAILED'
+        : parts.every((p) => p.status === 'REFUNDED')
+          ? 'REFUNDED'
+          : 'PENDING';
+      doc.refund.status = status;
+      doc.refund.refundId = parts.find((p) => p.refundId)?.refundId;
+      doc.refund.failureReason = failed?.failureReason;
+      doc.markModified('refund');
+      await doc.save({ session });
+      return true;
+    });
   }
 
   private async confirmOnce(
