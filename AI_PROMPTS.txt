@@ -771,3 +771,15 @@ Finish the hotel search and filters (HTL-11, 12) and the free rooms of a hotel (
 How the output was used:
 Built test-first. Pure, unit-tested rules (a room is free only if active, inside its availability, not blocked and not taken; enough free rooms whose largest occupancies cover the guests; cheapest free room as the hotel price; inclusive price range and minimum rating with unrated hotels left out only when a rating filter is set; stable sort with unrated last) and HotelSearchService around them. Reservations are read through HotelReservationQueries and ratings through HotelRatings, never their collections. Stay validation is reused from the booking module, so search and booking agree. The service registers with HotelSearchHook, so GET /api/itineraries/:id/hotels now works instead of answering 503. HotelSearchController is listed before HotelsController so GET /api/hotels/search is not read as a hotel id. HTL-22 already existed with its own e2e spec, so only a stale comment was corrected. Added an e2e spec and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: PAY-01, PAY-03, FLT-22, HTL-18, FLT-25, GEN-01, GEN-11, ITN-26, FLT-12
+Prompt:
+Audit everything we built for M1 against the project description and fix every bug found, important first then minor. For payments and bookings: the Stripe webhook marks an event handled before processing it, a payment that succeeded inside the hold is refunded if its webhook arrives late, refunds of rejected payments skip the refund records and notifications, a pending refund result can overwrite a final one, flights return NOT_PAYABLE instead of HOLD_EXPIRED, the hold length is duplicated, completing landed bookings stops at 500, and itinerary round-trip search lists returns the booking rule rejects.
+
+How the output was used:
+Claude wrote each fix test-first on fix/PAY-01-payment-and-booking-review-fixes; I reviewed the full diff. Webhook events are recorded only after handling (handlers are idempotent). "Paid on time" uses Stripe's event time, and the flight expiry sweep leaves a hold alone when Stripe says it was already paid. Rejected-payment refunds are Refund records (kind rejected_payment) with a notification; the old unique refund index is replaced by a partial one. Refund results never go from final back to pending and keep the failure reason. Flights answer 409 HOLD_EXPIRED; one shared HOLD_MINUTES constant; completeDue pages through every Confirmed booking; a return may use other airports of the same two cities. Cancellation refunds keep the tiers accepted at booking (team decision). Lint, unit, build and e2e pass.
+================================================

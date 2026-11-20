@@ -1,3 +1,4 @@
+import { HOLD_MINUTES } from '../common/booking-status/hold';
 import {
   Body,
   Controller,
@@ -78,8 +79,8 @@ export class FlightBookingsController {
   @Roles(Role.USER)
   @ApiReq(
     ['FLT-22', 'FLT-12'],
-    'Proceed to payment: hold the seats for 10 minutes',
-    'Same body and checks as the booking summary. Atomically reserves the seats (adults + children; infants take none) on every chosen flight only if enough remain, and creates one booking in Pending Payment status, held for 10 minutes. A round trip is one booking: if either flight lacks seats, nothing is held (409 SEATS_UNAVAILABLE). Concurrent requests never hold more seats than exist. Pay within the hold (PAY-01); otherwise the booking becomes Expired and the seats are released. Prices are fixed at this moment.',
+    `Proceed to payment: hold the seats for ${HOLD_MINUTES} minutes`,
+    `Same body and checks as the booking summary. Atomically reserves the seats (adults + children; infants take none) on every chosen flight only if enough remain, and creates one booking in Pending Payment status, held for ${HOLD_MINUTES} minutes. A round trip is one booking: if either flight lacks seats, nothing is held (409 SEATS_UNAVAILABLE). Concurrent requests never hold more seats than exist. Pay within the hold (PAY-01); otherwise the booking becomes Expired and the seats are released. Prices are fixed at this moment.`,
   )
   @ApiCreatedResponse({
     description: 'The Pending Payment booking with its hold expiry',

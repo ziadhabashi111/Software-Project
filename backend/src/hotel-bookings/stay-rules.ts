@@ -3,8 +3,8 @@ import type { InventoryRoom } from './hotel-inventory';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** How long a Pending Payment reservation holds its rooms (HTL-18). */
-export const HOLD_MINUTES = 10;
+/** How long a Pending Payment reservation holds its rooms (HTL-18, shared with flights). */
+export { HOLD_MINUTES } from '../common/booking-status/hold';
 
 /**
  * The longest stay one reservation may cover. Every night becomes a `RoomNight`

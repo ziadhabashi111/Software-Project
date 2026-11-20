@@ -10,9 +10,13 @@ import {
   assertCanTransition,
   BookingStatus,
 } from '../common/booking-status/booking-status';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { effectiveStatus, FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+} from '../payments/refund.service.interface';
 import {
   isDuplicateReference,
   newFlightBookingReference,
@@ -49,6 +53,12 @@ export interface VerifiedFlightPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (FLT-22). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
 export type FlightConfirmRejection =
@@ -148,7 +158,8 @@ export class FlightBookingPayments {
 
   /**
    * The amount to charge for the user's own live hold. 404 when it is not
-   * theirs; 409 NOT_PAYABLE once it is expired, paid or cancelled.
+   * theirs; 409 HOLD_EXPIRED once the hold ran out, 409 NOT_PAYABLE once it
+   * is paid, cancelled or otherwise not waiting for payment.
    */
   async forPayment(
     bookingId: string,
@@ -162,7 +173,7 @@ export class FlightBookingPayments {
       doc.holdExpiresAt.getTime() <= now.getTime()
     ) {
       await this.expiry.expireOne(doc._id, now);
-      throw notPayable('The 10-minute hold has expired. Start a new booking.');
+      throw holdExpired();
     }
     if (doc.status !== BookingStatus.PENDING_PAYMENT || !doc.holdExpiresAt) {
       throw notPayable('This booking is not waiting for payment.');
@@ -358,27 +369,32 @@ export class FlightBookingPayments {
     };
   }
 
-  /** Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03). */
+  /**
+   * Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03).
+   * A Pending result never overwrites a final one (a webhook may land before
+   * `issue()` returns); a Failed one keeps its reason, a Refunded one clears it.
+   */
   async recordRefundResult(
     bookingId: string,
     result: RefundResult,
   ): Promise<boolean> {
     if (!Types.ObjectId.isValid(bookingId)) return false;
+    const id = new Types.ObjectId(bookingId);
+    const filter = {
+      _id: id,
+      status: BookingStatus.CANCELLED,
+      refund: { $exists: true },
+    };
+    const pending = result.status === 'PENDING';
     const updated = await this.bookings.updateOne(
-      {
-        _id: new Types.ObjectId(bookingId),
-        status: BookingStatus.CANCELLED,
-        refund: { $exists: true },
-      },
-      {
-        $set: {
-          'refund.refundId': result.refundId,
-          'refund.status': result.status,
-        },
-        $unset: { 'refund.failureReason': 1 },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      refundUpdate(result),
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    // A Pending result that lost to a final one was still "recorded".
+    return pending && (await this.bookings.exists(filter)) !== null;
   }
 
   private async confirmOnce(
@@ -402,7 +418,11 @@ export class FlightBookingPayments {
           ? { outcome: 'already_confirmed', booking: doc }
           : { outcome: 'already_processed', booking: doc };
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = paid.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' };
       }
       if (
@@ -484,6 +504,20 @@ export class FlightBookingPayments {
   }
 }
 
+/** The booking update for a refund result (see `recordRefundResult`). */
+function refundUpdate(result: RefundResult) {
+  const set: Record<string, unknown> = {
+    'refund.refundId': result.refundId,
+    'refund.status': result.status,
+  };
+  if (result.status === 'FAILED' && result.failureReason) {
+    set['refund.failureReason'] = result.failureReason;
+  }
+  return result.status === 'REFUNDED'
+    ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+    : { $set: set };
+}
+
 function toObjectId(id: string): Types.ObjectId {
   if (!Types.ObjectId.isValid(id)) {
     throw new NotFoundException('Booking not found');
@@ -497,6 +531,16 @@ function notPayable(message: string): ConflictException {
     error: 'Conflict',
     message,
     code: 'NOT_PAYABLE',
+  });
+}
+
+/** Same 409 code as hotel reservations and the PAY-01 Swagger text. */
+function holdExpired(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    message: holdExpiredMessage(),
+    code: 'HOLD_EXPIRED',
   });
 }
 

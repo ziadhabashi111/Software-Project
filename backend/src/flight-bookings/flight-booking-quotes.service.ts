@@ -101,6 +101,12 @@ export class FlightBookingQuotesService {
     const segments = [outbound];
     if (dto.return) {
       const ret = await this.loadSegment(dto.return, 'return', now);
+      const airports = await this.views.airportsFor([
+        outbound.flight.departureAirport,
+        outbound.flight.arrivalAirport,
+        ret.flight.departureAirport,
+        ret.flight.arrivalAirport,
+      ]);
       assertReturnMatches(
         {
           id: outbound.flight.id,
@@ -114,6 +120,7 @@ export class FlightBookingQuotesService {
           arrivalAirport: ret.flight.arrivalAirport,
           departureUtc: ret.flight.departureUtc,
         },
+        (code) => airports.get(code)?.cityId,
       );
       segments.push(ret);
     }
