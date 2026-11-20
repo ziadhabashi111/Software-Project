@@ -51,4 +51,21 @@ describe('HTTP hardening (ACC-05, ACC-19, real HTTP)', () => {
     expect((limited.body as { code?: string }).code).toBe('RATE_LIMITED');
     expect(limited.headers['retry-after']).toBeDefined();
   });
+
+  // One person testing several roles in Swagger, or a whole class behind one
+  // address, must not be locked out after a handful of sign-ups.
+  it('allows 20 registrations per minute from one address, then answers 429', async () => {
+    const register = (n: number) =>
+      request(ctx.server)
+        .post('/api/auth/register')
+        .send({
+          name: 'Limit Test',
+          email: `limit${n}@example.com`,
+          password: 'Passw0rdOk',
+          consent: true,
+        });
+    for (let i = 0; i < 20; i += 1) await register(i).expect(201);
+    const limited = await register(20).expect(429);
+    expect((limited.body as { code?: string }).code).toBe('RATE_LIMITED');
+  });
 });

@@ -69,7 +69,9 @@ function AUTH_AND_UPLOAD_LIMITS(): RouteRateLimit[] {
       method: 'POST',
       path: /^\/api\/auth\/register$/,
       name: 'register',
-      limiter: new RateLimiter(5, MINUTE),
+      // Generous on purpose: someone testing every role in Swagger, or a class
+      // sharing one address, signs up several accounts in a minute.
+      limiter: new RateLimiter(20, MINUTE),
     },
     {
       method: 'POST',
