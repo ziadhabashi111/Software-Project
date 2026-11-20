@@ -18,6 +18,7 @@ import type {
 } from './payment.service.interface';
 import { fromMinorUnits, toMinorUnits } from './money';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
+import { BOOKING_TYPES } from './refund.service.interface';
 import type { BookingType } from './refund.service.interface';
 import { RefundsService, toRefundStatus } from './refunds.service';
 import { Payment, PaymentDocument } from './schemas/payment.schema';
@@ -410,10 +411,9 @@ function readReference(
   intent: Stripe.PaymentIntent,
 ): { type: BookingType; bookingId: string } | null {
   const { bookingType, bookingId } = intent.metadata ?? {};
-  if ((bookingType !== 'flight' && bookingType !== 'hotel') || !bookingId) {
-    return null;
-  }
-  return { type: bookingType, bookingId };
+  const type = BOOKING_TYPES.find((t) => t === bookingType);
+  if (!type || !bookingId) return null;
+  return { type, bookingId };
 }
 
 function isDuplicateKey(error: unknown): boolean {

@@ -54,16 +54,15 @@ export class SharedServices {
    */
   async cancelPendingPayment(
     bookingId: string,
+    type: 'flight' | 'flight-change' = 'flight',
   ): Promise<PendingPaymentCancellation> {
     try {
       const payments = this.find<PaymentService>(PAYMENT_SERVICE);
       if (!payments) return 'none';
-      return (
-        (await payments.cancelPendingPayment('flight', bookingId)) ?? 'none'
-      );
+      return (await payments.cancelPendingPayment(type, bookingId)) ?? 'none';
     } catch (error) {
       this.logger.error(
-        `Could not cancel the payment of flight booking ${bookingId}`,
+        `Could not cancel the payment of ${type} ${bookingId}`,
         error instanceof Error ? error.stack : String(error),
       );
       return 'error';

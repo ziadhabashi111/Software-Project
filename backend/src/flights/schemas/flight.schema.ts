@@ -38,6 +38,21 @@ export class Cabin {
   /** Maximum weight per bag in kg; extra bags use the same limit (FLT-08). */
   @Prop({ type: Number, required: true, min: 0 })
   maxBagWeightKg!: number;
+
+  /**
+   * Seats per row for the seat map (FLT-28). Unset: 6 in Economy and
+   * Premium Economy, 4 in Business and First (`seatsPerRowOf`).
+   */
+  @Prop({ type: Number, min: 2, max: 10 })
+  seatsPerRow?: number;
+
+  /**
+   * Bumped by flight bookings whenever a seat is assigned (FLT-28), so a
+   * layout change (fewer seats, another seats-per-row) made at the same
+   * moment fails and is retried instead of removing an assigned seat.
+   */
+  @Prop({ type: Number, default: 0, min: 0 })
+  seatMapVersion!: number;
 }
 export const CabinSchema = SchemaFactory.createForClass(Cabin);
 

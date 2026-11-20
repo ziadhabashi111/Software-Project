@@ -5,6 +5,7 @@ import type { AirlineDocument } from './schemas/airline.schema';
 import type { AirportDocument } from './schemas/airport.schema';
 import type { FlightDocument } from './schemas/flight.schema';
 import { durationMinutes, utcToLocal } from './time-zones';
+import { seatsPerRowOf } from './seat-layout';
 
 export interface FlightEndView {
   airport: {
@@ -29,6 +30,8 @@ export interface CabinView {
   seatsRemaining: number;
   freeBags: number;
   maxBagWeightKg: number;
+  /** Seats per row of the seat map (FLT-28). */
+  seatsPerRow: number;
 }
 
 export interface FlightView {
@@ -69,6 +72,7 @@ export function toCabinView(
     seatsRemaining: seatsRemaining(cabin),
     freeBags: cabin.freeBags,
     maxBagWeightKg: cabin.maxBagWeightKg,
+    seatsPerRow: seatsPerRowOf(cabin),
   };
 }
 

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { FlightBookingChangesService } from '../flight-bookings/flight-booking-changes.service';
 import { FlightBookingPayments } from '../flight-bookings/flight-booking-payments';
 import { HotelInventoryRegistry } from '../hotel-bookings/hotel-inventory';
 import { HotelReservationPayments } from '../hotel-bookings/hotel-reservation-payments';
@@ -82,6 +83,7 @@ export type ConfirmOutcome =
 export class BookingPaymentGateway {
   constructor(
     private readonly flights: FlightBookingPayments,
+    private readonly changes: FlightBookingChangesService,
     private readonly hotels: HotelReservationPayments,
     @InjectModel(HotelReservation.name)
     private readonly reservations: Model<HotelReservationDocument>,
@@ -94,10 +96,13 @@ export class BookingPaymentGateway {
     bookingId: string,
     userId: string,
   ): Promise<BookingPoliciesView> {
-    if (type === 'flight') {
-      const p = await this.flights.policiesFor(bookingId, userId);
+    if (type === 'flight' || type === 'flight-change') {
+      const p =
+        type === 'flight'
+          ? await this.flights.policiesFor(bookingId, userId)
+          : await this.changes.policiesFor(bookingId, userId);
       return {
-        bookingType: 'flight',
+        bookingType: type,
         cancellationTiers: p.cancellationTiers,
         baggage: {
           baggagePolicy: p.baggagePolicy,
@@ -139,6 +144,9 @@ export class BookingPaymentGateway {
     if (type === 'flight') {
       return this.flights.forPayment(bookingId, userId);
     }
+    if (type === 'flight-change') {
+      return this.changes.forPayment(bookingId, userId);
+    }
     const r = await this.hotels.forPayment(bookingId, userId);
     return {
       bookingId: r.reservationId,
@@ -158,6 +166,8 @@ export class BookingPaymentGateway {
   ): Promise<void> {
     if (type === 'flight') {
       await this.flights.attachPaymentIntent(bookingId, paymentIntentId);
+    } else if (type === 'flight-change') {
+      await this.changes.attachPaymentIntent(bookingId, paymentIntentId);
     } else {
       await this.hotels.attachPaymentIntent(bookingId, paymentIntentId, status);
     }
@@ -170,6 +180,8 @@ export class BookingPaymentGateway {
   ): Promise<void> {
     if (type === 'flight') {
       await this.flights.recordPaymentFailure(bookingId);
+    } else if (type === 'flight-change') {
+      await this.changes.recordPaymentFailure(bookingId);
     } else {
       await this.hotels.recordPaymentFailure(bookingId, paymentIntentId);
     }
@@ -181,6 +193,9 @@ export class BookingPaymentGateway {
     bookingId: string,
     paid: VerifiedPaid,
   ): Promise<ConfirmOutcome> {
+    if (type === 'flight-change') {
+      return (await this.changes.confirmPaid(bookingId, paid)).outcome;
+    }
     const result =
       type === 'flight'
         ? await this.flights.confirmPaid(bookingId, paid)
@@ -193,6 +208,7 @@ export class BookingPaymentGateway {
     type: BookingType,
     bookingId: string,
   ): Promise<RefundPreview | null> {
+    if (type === 'flight-change') return null; // a change is not cancelled on its own
     const quote =
       type === 'flight'
         ? await this.flights.refundQuote(bookingId)
@@ -214,6 +230,7 @@ export class BookingPaymentGateway {
       const b = await this.flights.refundBasis(bookingId);
       return b;
     }
+    if (type === 'flight-change') return null;
     const b = await this.hotels.refundBasis(bookingId);
     return b && { ...b, bookingId: b.reservationId };
   }
@@ -226,8 +243,25 @@ export class BookingPaymentGateway {
   ): Promise<void> {
     if (type === 'flight') {
       await this.flights.recordRefundResult(bookingId, result);
+    } else if (type === 'flight-change') {
+      await this.changes.recordRefundResult(bookingId, result);
     } else {
       await this.hotels.recordRefundResult(bookingId, result);
     }
+  }
+
+  /**
+   * PAY-02: whose accepted policies cover a payment. A flight change keeps
+   * the policies the user accepted for the booking it changes (FLT-27).
+   */
+  async acceptanceTarget(
+    type: BookingType,
+    bookingId: string,
+  ): Promise<{ type: BookingType; bookingId: string }> {
+    if (type !== 'flight-change') return { type, bookingId };
+    const booking = await this.changes.bookingOf(bookingId);
+    return booking
+      ? { type: 'flight', bookingId: booking }
+      : { type, bookingId };
   }
 }

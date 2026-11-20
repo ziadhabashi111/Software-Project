@@ -70,10 +70,17 @@ export class PolicyAcceptanceService {
     bookingId: string,
     userId: string,
   ): Promise<void> {
+    // A flight change is covered by the booking's acceptance (FLT-27).
+    const target = await this.gateway.acceptanceTarget(type, bookingId);
     const found = await this.acceptances.exists({
-      bookingType: type,
-      bookingId: new Types.ObjectId(bookingId),
       userId: new Types.ObjectId(userId),
+      $or: [
+        { bookingType: type, bookingId: new Types.ObjectId(bookingId) },
+        {
+          bookingType: target.type,
+          bookingId: new Types.ObjectId(target.bookingId),
+        },
+      ],
     });
     if (!found) {
       throw new ConflictException({

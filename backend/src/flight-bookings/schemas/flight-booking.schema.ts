@@ -137,6 +137,44 @@ export class BookingPayment {
 }
 const BookingPaymentSchema = SchemaFactory.createForClass(BookingPayment);
 
+/** One Stripe payment of the booking: the original one, or a change (FLT-27). */
+@Schema({ _id: false })
+export class LedgerPayment {
+  @Prop({ type: String, required: true })
+  paymentIntentId!: string;
+
+  @Prop({ type: Number, required: true, min: 0 })
+  amount!: number;
+
+  /** Already promised back by refunds (created or reserved). */
+  @Prop({ type: Number, default: 0, min: 0 })
+  refunded!: number;
+}
+const LedgerPaymentSchema = SchemaFactory.createForClass(LedgerPayment);
+
+/**
+ * A piece of a cancellation refund taken from one payment, when the booking
+ * was paid with more than one (FLT-27).
+ */
+@Schema({ _id: false })
+export class RefundPartRecord {
+  @Prop({ type: String, required: true })
+  paymentIntentId!: string;
+
+  @Prop({ type: Number, required: true, min: 0 })
+  amount!: number;
+
+  @Prop({ type: String })
+  refundId?: string;
+
+  @Prop({ type: String })
+  status?: RefundStatus;
+
+  @Prop({ type: String })
+  failureReason?: string;
+}
+const RefundPartRecordSchema = SchemaFactory.createForClass(RefundPartRecord);
+
 /** The refund of a cancelled booking (PAY-03). */
 @Schema({ _id: false })
 export class BookingRefund {
@@ -159,6 +197,13 @@ export class BookingRefund {
   /** Why the refund failed, when FAILED. A short code, never a stack/secret. */
   @Prop({ type: String })
   failureReason?: string;
+
+  /**
+   * Set only when the booking was paid with several payments (FLT-27): one
+   * Stripe refund per payment; `status` then sums them up.
+   */
+  @Prop({ type: [RefundPartRecordSchema], default: undefined })
+  parts?: RefundPartRecord[];
 }
 const BookingRefundSchema = SchemaFactory.createForClass(BookingRefund);
 
@@ -226,6 +271,13 @@ export class FlightBooking {
 
   @Prop({ type: BookingPaymentSchema })
   payment?: BookingPayment;
+
+  /**
+   * Every payment of the booking, oldest first (FLT-27). Absent until the
+   * booking is first changed: `payment` is then the only one.
+   */
+  @Prop({ type: [LedgerPaymentSchema], default: undefined })
+  payments?: LedgerPayment[];
 
   @Prop({ type: BookingRefundSchema })
   refund?: BookingRefund;

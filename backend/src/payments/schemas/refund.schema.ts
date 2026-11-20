@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { BOOKING_TYPES } from '../refund.service.interface';
 import type { BookingType, RefundStatus } from '../refund.service.interface';
 
 export const REFUND_STATUSES: RefundStatus[] = [
@@ -13,8 +14,17 @@ export const REFUND_STATUSES: RefundStatus[] = [
  * - `cancellation`: the booking was cancelled (tier or airline refund).
  * - `rejected_payment`: a payment the booking could not accept (the hold had
  *   ended, wrong amount, booking no longer payable) was refunded in full.
+ * - `fare_difference`: a flight change to a cheaper fare (FLT-27); bookingType
+ *   `flight-change`, bookingId = the change.
+ * - `cancellation_part`: one payment's share of a cancellation refund, when a
+ *   changed booking was paid with several payments (FLT-27).
  */
-export const REFUND_KINDS = ['cancellation', 'rejected_payment'] as const;
+export const REFUND_KINDS = [
+  'cancellation',
+  'rejected_payment',
+  'fare_difference',
+  'cancellation_part',
+] as const;
 export type RefundKind = (typeof REFUND_KINDS)[number];
 
 /** Name of the index before rejected-payment refunds were recorded. */
@@ -30,7 +40,7 @@ export class Refund {
   @Prop({ type: String, enum: REFUND_KINDS, default: 'cancellation' })
   kind!: RefundKind;
 
-  @Prop({ type: String, enum: ['flight', 'hotel'], required: true })
+  @Prop({ type: String, enum: BOOKING_TYPES, required: true })
   bookingType!: BookingType;
 
   @Prop({ type: Types.ObjectId, required: true })
