@@ -32,7 +32,11 @@ export class DeactivationBlockers {
   /** Ends every module's unpaid holds of the user (see `endPendingHolds`). */
   async endPendingHolds(userId: string): Promise<void> {
     await Promise.all(
-      this.blockers.map((blocker) => blocker.endPendingHolds?.(userId)),
+      this.blockers.map((blocker) =>
+        blocker.endPendingHolds
+          ? blocker.endPendingHolds(userId)
+          : Promise.resolve(),
+      ),
     );
   }
 
