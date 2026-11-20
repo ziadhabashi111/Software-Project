@@ -1,0 +1,54 @@
+import request from 'supertest';
+import { createTestApp, TestApp } from './helpers/app';
+
+/**
+ * The HTTP hardening as the real app applies it (configureApp): security
+ * headers, the same-origin check for state changes, and the per-IP rate
+ * limit, which the other suites switch off by running with NODE_ENV=test.
+ */
+describe('HTTP hardening (ACC-05, ACC-19, real HTTP)', () => {
+  let ctx: TestApp;
+  const previousEnv = process.env.NODE_ENV;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'development';
+    ctx = await createTestApp();
+  }, 180_000);
+
+  afterAll(async () => {
+    await ctx.close();
+    process.env.NODE_ENV = previousEnv;
+  });
+
+  const login = () =>
+    request(ctx.server)
+      .post('/api/auth/login')
+      .send({ email: 'nobody@example.com', password: 'Wrong1234' });
+
+  it('sends the security headers and hides the framework', async () => {
+    const res = await request(ctx.server).get('/api/auth/me');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['x-frame-options']).toBe('DENY');
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
+    expect(res.headers['x-powered-by']).toBeUndefined();
+  });
+
+  it('refuses a state-changing request from another site', async () => {
+    const res = await request(ctx.server)
+      .post('/api/auth/logout')
+      .set('Origin', 'https://evil.example')
+      .expect(403);
+    expect((res.body as { code?: string }).code).toBe('ORIGIN_NOT_ALLOWED');
+    await request(ctx.server)
+      .post('/api/auth/logout')
+      .set('Origin', 'http://localhost:3001')
+      .expect((r) => expect(r.status).not.toBe(403));
+  });
+
+  it('allows 10 logins per minute from one address, then answers 429', async () => {
+    for (let i = 0; i < 10; i += 1) await login().expect(401);
+    const limited = await login().expect(429);
+    expect((limited.body as { code?: string }).code).toBe('RATE_LIMITED');
+    expect(limited.headers['retry-after']).toBeDefined();
+  });
+});
