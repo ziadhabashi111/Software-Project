@@ -729,3 +729,33 @@ The blog module (Ahmed) had no unit tests, the only module without them. Add uni
 How the output was used:
 Added 7 co-located unit specs for the blog (post-view mappers, post-access visibility, likes, posts, comments, reports, moderation): 53 tests. They follow the project's existing pattern (Jest built-in mocking: jest.fn/jest.spyOn, no extra mocking library), assert real behaviour (one like per user, hidden content hidden from strangers, comment counts only move on a real state change, duplicate-key races become 409, ownership 403-vs-404), and each non-obvious test has a short comment. Ran the blog suite, lint and tsc.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+While verifying that every module's notification events fire (Issue 28), I found that suspending a user account sends no in-app notification. Habashi approved fixing it: add the account suspension and reactivation notifications using the same ADMIN_NOTIFIER pattern as provider deactivation.
+
+How the output was used:
+Claude wrote the change and I applied it as a patch on a new branch from the latest develop. AdminAccountsService now injects the optional ADMIN_NOTIFIER and sends ACCOUNT_SUSPENDED after suspend() 
+and ACCOUNT_REACTIVATED after reactivate(),
+only to the affected account. A notification failure is logged and never undoes the status change. 
+Added 6 unit tests in admin-accounts.service.spec.ts (notified on suspend and reactivate, nothing sent when the change is rejected, works without a notifier, suspension still succeeds if the notifier throws). 
+I ran lint and the full test suite myself; the only failing test is the existing uploads read-only-folder test, which is unrelated and fails on develop too.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-02, HTL-09 (issue 26)
+Prompt:
+GET /api/bookings/hotel/:id/policies shows the hotel's cancellation tiers and the stay dates but not the hotel's check-in and check-out times, which PAY-02 requires. Habashi explained that the times are set by the hotel moderator in the hotel policies (PUT /api/hotels/:id/policies, HTL-09) and the dates belong to the booking. Add the times to the hotel policies response, and return an error when the hotel cannot be found.
+
+How the output was used:
+The hotel policies response now includes the hotel's checkInTime and checkOutTime (HH:mm) next to the booking's stay dates. BookingPaymentGateway reads the times through the existing hotel inventory hook, and two optional fields were added to InventoryHotel (hotel-bookings) 
+and to the hotel catalog mapping (hotels). After Habashi's feedback, a hotel that cannot be found now returns a 404 instead of answering without times. 
+Added 4 unit tests in booking-payment-gateway.spec.ts (times shown, hotel not found, hotels module not registered, another user's reservation) and updated the Swagger description. I ran lint and the tests myself.
+================================================

@@ -2,8 +2,11 @@ import {
   ConflictException,
   ForbiddenException,
   HttpException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AuditAction } from '../audit/audit-action';
@@ -16,6 +19,8 @@ import { fieldError } from '../common/validation/validation-errors';
 import { toProfile, UserProfile } from '../users/user-profile';
 import { UserStatus } from '../users/user-status';
 import { UsersService } from '../users/users.service';
+import { ADMIN_NOTIFIER } from './admin-notifier';
+import type { AdminNotifier } from './admin-notifier';
 import { CreateModeratorDto } from './dto/create-moderator.dto';
 import { ListAccountsQueryDto } from './dto/list-accounts.dto';
 import { ProviderDirectory, ProviderType } from './provider-directory';
@@ -38,12 +43,17 @@ function isDuplicateKey(error: unknown): boolean {
 /** ACC-07a, ACC-13, ACC-14, ACC-15 (moderators), ACC-16. */
 @Injectable()
 export class AdminAccountsService {
+  private readonly logger = new Logger(AdminAccountsService.name);
+
   constructor(
     private readonly users: UsersService,
     private readonly passwords: PasswordService,
     private readonly sessions: SessionService,
     private readonly audit: AuditLogService,
     private readonly providers: ProviderDirectory,
+    @Optional()
+    @Inject(ADMIN_NOTIFIER)
+    private readonly notifier?: AdminNotifier,
   ) {}
 
   /** ACC-14 */
@@ -151,6 +161,11 @@ export class AdminAccountsService {
       targetId,
       details: { role: updated.role },
     });
+    await this.notifyAccount(
+      targetId,
+      'ACCOUNT_SUSPENDED',
+      'Your account was suspended by an administrator. You cannot log in until it is reactivated. Your existing confirmed bookings stay valid.',
+    );
     return toProfile(updated);
   }
 
@@ -180,7 +195,32 @@ export class AdminAccountsService {
       targetId,
       details: { role: updated.role },
     });
+    await this.notifyAccount(
+      targetId,
+      'ACCOUNT_REACTIVATED',
+      'Your account was reactivated. You can log in again.',
+    );
     return toProfile(updated);
+  }
+
+  /**
+   * GEN-01: tells the account's owner about a suspension or reactivation. A
+   * failure is logged and never undoes the status change.
+   */
+  private async notifyAccount(
+    userId: string,
+    type: 'ACCOUNT_SUSPENDED' | 'ACCOUNT_REACTIVATED',
+    message: string,
+  ): Promise<void> {
+    if (!this.notifier) return;
+    try {
+      await this.notifier.notify([userId], { type, message });
+    } catch (error) {
+      this.logger.error(
+        `Could not send ${type} to user ${userId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /** 404 when it does not exist, 403 for administrators (never managed through the API). */

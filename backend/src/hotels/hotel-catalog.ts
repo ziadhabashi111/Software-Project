@@ -56,6 +56,8 @@ export class HotelCatalog
         daysBefore: tier.daysBefore,
         refundPercent: tier.refundPercent,
       })),
+      checkInTime: hotel.checkInTime,
+      checkOutTime: hotel.checkOutTime,
     };
   }
 
