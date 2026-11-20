@@ -52,7 +52,7 @@ export class ReviewModerator
   }
 
   onApplicationBootstrap(): void {
-    let targets: ReportTargets | undefined;
+    let targets: ReportTargets;
     try {
       targets = this.moduleRef.get(ReportTargets, { strict: false });
     } catch {
