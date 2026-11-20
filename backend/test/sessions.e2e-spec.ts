@@ -47,6 +47,17 @@ describe('SessionService (ACC-06, real MongoDB in memory)', () => {
     expect(await sessions.validateAndTouch('not-an-id')).toBe(false);
   });
 
+  it('rejects a token whose session belongs to another user', async () => {
+    const session = await sessions.create(userId, 'jti-1');
+    expect(await sessions.validateAndTouch(session.id, userId)).toBe(true);
+    expect(
+      await sessions.validateAndTouch(
+        session.id,
+        new Types.ObjectId().toString(),
+      ),
+    ).toBe(false);
+  });
+
   it('rejects revoked sessions', async () => {
     const session = await sessions.create(userId, 'jti-1');
     await sessions.revoke(session.id);
