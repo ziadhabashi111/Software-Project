@@ -1,5 +1,21 @@
 import PDFDocument from 'pdfkit';
+import { PassengerType } from '../../flights/passenger-rules';
 import type { FlightBookingView } from '../flight-booking-view';
+
+type Passenger = FlightBookingView['passengers'][number];
+
+/** FLT-28: the passenger's seat line on the e-ticket. */
+export function seatText(
+  view: FlightBookingView,
+  passenger: Passenger,
+): string {
+  if (passenger.type === PassengerType.INFANT) {
+    return 'No seat (infant on lap)';
+  }
+  const label = (seat: string | null | undefined) => seat ?? 'not selected';
+  if (view.segments.length < 2) return `Seat ${label(passenger.seats[0])}`;
+  return `Seats: outbound ${label(passenger.seats[0])}, return ${label(passenger.seats[1])}`;
+}
 
 /**
  * FLT-23: the downloadable e-ticket. Every time is printed in the airport's
@@ -52,7 +68,7 @@ export function renderETicket(view: FlightBookingView): Promise<Buffer> {
           ? `, ${p.extraBags} extra bag${p.extraBags === 1 ? '' : 's'}${p.extraBagWeightKg ? ` (${p.extraBagWeightKg} kg)` : ''}`
           : '';
       doc.text(
-        `${p.fullName} (${p.type}), document ${p.documentNumber}${bags}`,
+        `${p.fullName} (${p.type}), document ${p.documentNumber}${bags}. ${seatText(view, p)}`,
       );
     }
 
