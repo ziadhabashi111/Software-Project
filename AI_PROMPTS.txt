@@ -819,3 +819,15 @@ Fix the two remaining known issues (a new hotel hold could take the rooms of a h
 How the output was used:
 Claude wrote each fix test-first on fix/GEN-07-moderation-audit-and-paid-holds; I reviewed the full diff. Content moderation and report resolution now write the audit record before acting, claim the report first so two admins cannot both act, and undo the records and reopen the report if the action fails. A new hotel hold only takes over run-out holds whose payment Stripe has stopped. Security: each login attempt is claimed atomically before the password check (parallel guesses can no longer bypass the 5-attempt lock), wrong current passwords on change-password count toward the lock, a token's session must belong to its user, security headers and a same-origin check for state-changing requests were added, auth and upload routes are rate limited per IP (built in, no new package), and unused stand-alone uploads are capped at 20 per user with a cleanup that removes every abandoned file. A new e2e test boots the real AppModule and checks every hook, registry and token plus the main flows end to end. Not changed: the minimum JWT secret length (raising it could stop teammates' servers from starting) and Swagger stays public for the M1 evaluation. Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: HTL-05, HTL-06, GEN-13 (Milestone 1 completeness)
+Prompt:
+Make sure all of Milestone 1 is done: compare every mandatory requirement and every endpoint in the project description (sections 8.1-8.10) with develop, and check Swagger, the seed and the docs.
+
+How the output was used:
+All mandatory backend requirements are implemented; the only ones without backend code are frontend requirements for Milestone 2 (ACC-10, GEN-04, GEN-14..17). The one documented endpoint that did not exist, PATCH /api/hotels/:id/rooms/:roomId/availability, was added test-first: it replaces a room's bookable ranges, rejects overlaps and refuses to drop nights a reservation holds (409). The full-app wiring test now builds the Swagger document for the whole AppModule and fails if any operation lacks a requirement ID. docs/erd.md was rewritten from the real Mongoose schemas (collections, references, embedded documents, booking lifecycle). Lint, unit, build and e2e pass.
+================================================
