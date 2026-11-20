@@ -13,6 +13,7 @@ import {
   FlightBooking,
   FlightBookingDocument,
 } from './schemas/flight-booking.schema';
+import { SeatAssignments } from './seat-assignments';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -40,6 +41,7 @@ export class FlightBookingExpiryService {
     @InjectModel(Flight.name) private readonly flights: Model<FlightDocument>,
     private readonly seats: SeatInventory,
     private readonly shared: SharedServices,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   @Interval(EXPIRY_SWEEP_MS)
@@ -97,6 +99,8 @@ export class FlightBookingExpiryService {
         { returnDocument: 'after', session },
       );
       if (!doc) return false;
+      // FLT-28: a hold cannot pick seats, but never leave any behind.
+      await this.seatAssignments.releaseBooking(doc._id, session);
       for (const segment of doc.segments) {
         await this.seats.release(
           segment.flight,

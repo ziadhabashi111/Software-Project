@@ -1,10 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { BOOKING_TYPES } from '../refund.service.interface';
 import type { BookingType } from '../refund.service.interface';
 
 @Schema({ timestamps: true })
 export class Payment {
-  @Prop({ type: String, enum: ['flight', 'hotel'], required: true })
+  @Prop({ type: String, enum: BOOKING_TYPES, required: true })
   bookingType!: BookingType;
 
   @Prop({ type: Types.ObjectId, required: true })

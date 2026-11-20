@@ -16,6 +16,9 @@ function setup() {
   };
   const gateway = {
     payable: jest.fn().mockResolvedValue({}),
+    acceptanceTarget: jest.fn((type: string, bookingId: string) =>
+      Promise.resolve({ type, bookingId }),
+    ),
     policies: jest
       .fn()
       .mockResolvedValue({ bookingType: 'flight', cancellationTiers: [] }),
