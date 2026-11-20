@@ -10,6 +10,7 @@ import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import { durationMinutes, utcToLocal } from '../flights/time-zones';
 import type { UserRefundQuote } from './rules/cancellation-rules';
 import { statusLabel } from './rules/status-labels';
+import { SeatAssignments, seatKey } from './seat-assignments';
 import type {
   FlightBookingDocument,
   TripType,
@@ -62,6 +63,8 @@ export interface FlightBookingView {
     extraBagWeightKg: number | null;
     fare: number;
     baggageFee: number;
+    /** FLT-28: the passenger's seat on each flight, in segment order; null when not selected (always null for infants). */
+    seats: (string | null)[];
   }[];
   seats: number;
   price: {
@@ -113,6 +116,7 @@ export class FlightBookingViews {
     @InjectModel(Flight.name) private readonly flights: Model<FlightDocument>,
     @InjectModel(Airline.name)
     private readonly airlines: Model<AirlineDocument>,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   /** Airports of the given codes, by IATA code. */
@@ -169,6 +173,9 @@ export class FlightBookingViews {
     const airports = await this.airportsFor(
       flights.flatMap((f) => [f.departureAirport, f.arrivalAirport]),
     );
+    const seatsByBooking = await this.seatAssignments.forBookings(
+      docs.map((d) => d._id),
+    );
 
     return docs.map((doc) => ({
       id: doc.id,
@@ -195,7 +202,7 @@ export class FlightBookingViews {
           },
         ];
       }),
-      passengers: doc.passengers.map((p) => ({
+      passengers: doc.passengers.map((p, passengerIndex) => ({
         fullName: p.fullName,
         dateOfBirth: p.dateOfBirth.toISOString().slice(0, 10),
         documentNumber: p.documentNumber,
@@ -204,6 +211,12 @@ export class FlightBookingViews {
         extraBagWeightKg: p.extraBagWeightKg ?? null,
         fare: p.fare,
         baggageFee: p.baggageFee,
+        seats: doc.segments.map(
+          (_, segmentIndex) =>
+            seatsByBooking
+              .get(doc.id)
+              ?.get(seatKey(segmentIndex, passengerIndex)) ?? null,
+        ),
       })),
       seats: doc.seats,
       price: {

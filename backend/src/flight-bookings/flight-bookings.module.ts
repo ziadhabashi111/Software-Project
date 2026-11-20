@@ -17,12 +17,19 @@ import {
 } from './schemas/flight-booking.schema';
 import { MyFlightBookingsService } from './my-flight-bookings.service';
 import { FlightBookingRegistrations } from './registrations/flight-booking-registrations';
+import { FlightSeatsController } from './flight-seats.controller';
+import {
+  SeatAssignment,
+  SeatAssignmentSchema,
+} from './schemas/seat-assignment.schema';
+import { SeatAssignments } from './seat-assignments';
 import { SeatInventory } from './seat-inventory';
+import { SeatSelectionService } from './seat-selection.service';
 import { SharedServices } from './shared-services';
 
 /**
  * Owner: Yahia Tarek (member 3)
- * Requirements: FLT-12, FLT-19, FLT-21, FLT-22, FLT-23, FLT-25, FLT-26,
+ * Requirements: FLT-12, FLT-19, FLT-21, FLT-22, FLT-23, FLT-25, FLT-26, FLT-28,
  * GEN-06, GEN-11; hooks for FLT-05/06/29, PAY-01..03, ACC-12, ACC-17.
  * Design: docs/design/2026-11-16-flight-bookings-design.md
  *
@@ -34,12 +41,13 @@ import { SharedServices } from './shared-services';
   imports: [
     MongooseModule.forFeature([
       { name: FlightBooking.name, schema: FlightBookingSchema },
+      { name: SeatAssignment.name, schema: SeatAssignmentSchema },
     ]),
     FlightsModule,
     UsersModule,
     AdminModule,
   ],
-  controllers: [FlightBookingsController],
+  controllers: [FlightBookingsController, FlightSeatsController],
   providers: [
     SharedServices,
     SeatInventory,
@@ -52,7 +60,9 @@ import { SharedServices } from './shared-services';
     FlightBookingCancellationsService,
     FlightBookingLinkAdapter,
     FlightBookingRegistrations,
+    SeatAssignments,
+    SeatSelectionService,
   ],
-  exports: [FlightBookingPayments],
+  exports: [FlightBookingPayments, SeatAssignments],
 })
 export class FlightBookingsModule {}

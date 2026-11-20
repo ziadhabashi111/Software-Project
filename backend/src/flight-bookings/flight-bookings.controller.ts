@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -37,6 +38,7 @@ import {
   CancellationResult,
   FlightBookingCancellationsService,
 } from './flight-booking-cancellations.service';
+import { PickSeatDto } from './dto/seat.dto';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import {
   BookingQuoteView,
@@ -44,6 +46,7 @@ import {
 } from './flight-booking-quotes.service';
 import type { FlightBookingView } from './flight-booking-view';
 import { MyFlightBookingsService } from './my-flight-bookings.service';
+import { SeatSelectionService } from './seat-selection.service';
 
 /** Routes of PDF section 8.4 (Flight Booking). HTTP only; logic lives in the services. */
 @ApiTags('flight-bookings')
@@ -55,6 +58,7 @@ export class FlightBookingsController {
     private readonly holds: FlightBookingHoldsService,
     private readonly mine: MyFlightBookingsService,
     private readonly cancellations: FlightBookingCancellationsService,
+    private readonly seatSelection: SeatSelectionService,
   ) {}
 
   @Post()
@@ -149,6 +153,32 @@ export class FlightBookingsController {
     @Body() dto: CancelFlightBookingDto,
   ): Promise<CancellationResult> {
     return this.cancellations.cancel(id, user, dto.confirm === true);
+  }
+
+  @Patch(':id/seat')
+  @Roles(Role.USER)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    'FLT-28',
+    'Pick a seat for a passenger',
+    'Choose a seat for one passenger of your own Confirmed booking on one of its flights (`segmentIndex` 0 = outbound, 1 = return; default 0). Picking again moves the passenger to the new seat. Infants have no seat of their own. See the seat map at GET /api/flights/:id/seats. 400 when the seat does not exist in that cabin; 409 SEAT_TAKEN when someone else has it, NOT_CONFIRMED before payment, SEAT_CHANGE_CLOSED once the flight is cancelled or has departed. Seats are freed when the booking is cancelled.',
+  )
+  @ApiOkResponse({
+    description: "The booking, with each passenger's seats",
+  })
+  @ApiBadRequestResponse({
+    description: 'No such seat, passenger or flight in the booking',
+  })
+  @ApiConflictResponse({
+    description: 'SEAT_TAKEN, NOT_CONFIRMED or SEAT_CHANGE_CLOSED',
+  })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  pickSeat(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: PickSeatDto,
+  ): Promise<FlightBookingView> {
+    return this.seatSelection.pick(id, user, dto);
   }
 
   @Get(':id/e-ticket')
