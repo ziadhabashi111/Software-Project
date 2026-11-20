@@ -12,7 +12,10 @@ import {
 } from '../common/booking-status/booking-status';
 import { effectiveStatus, FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+} from '../payments/refund.service.interface';
 import {
   isDuplicateReference,
   newFlightBookingReference,
@@ -364,27 +367,32 @@ export class FlightBookingPayments {
     };
   }
 
-  /** Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03). */
+  /**
+   * Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03).
+   * A Pending result never overwrites a final one (a webhook may land before
+   * `issue()` returns); a Failed one keeps its reason, a Refunded one clears it.
+   */
   async recordRefundResult(
     bookingId: string,
     result: RefundResult,
   ): Promise<boolean> {
     if (!Types.ObjectId.isValid(bookingId)) return false;
+    const id = new Types.ObjectId(bookingId);
+    const filter = {
+      _id: id,
+      status: BookingStatus.CANCELLED,
+      refund: { $exists: true },
+    };
+    const pending = result.status === 'PENDING';
     const updated = await this.bookings.updateOne(
-      {
-        _id: new Types.ObjectId(bookingId),
-        status: BookingStatus.CANCELLED,
-        refund: { $exists: true },
-      },
-      {
-        $set: {
-          'refund.refundId': result.refundId,
-          'refund.status': result.status,
-        },
-        $unset: { 'refund.failureReason': 1 },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      refundUpdate(result),
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    // A Pending result that lost to a final one was still "recorded".
+    return pending && (await this.bookings.exists(filter)) !== null;
   }
 
   private async confirmOnce(
@@ -492,6 +500,20 @@ export class FlightBookingPayments {
     }
     return doc;
   }
+}
+
+/** The booking update for a refund result (see `recordRefundResult`). */
+function refundUpdate(result: RefundResult) {
+  const set: Record<string, unknown> = {
+    'refund.refundId': result.refundId,
+    'refund.status': result.status,
+  };
+  if (result.status === 'FAILED' && result.failureReason) {
+    set['refund.failureReason'] = result.failureReason;
+  }
+  return result.status === 'REFUNDED'
+    ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+    : { $set: set };
 }
 
 function toObjectId(id: string): Types.ObjectId {

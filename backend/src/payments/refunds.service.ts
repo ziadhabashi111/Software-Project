@@ -327,6 +327,9 @@ function toResult(doc: RefundDocument): RefundResult {
     amount: doc.amount,
     status: doc.status,
     currency: doc.currency,
+    ...(doc.status === 'FAILED' && doc.failureReason
+      ? { failureReason: doc.failureReason }
+      : {}),
   };
 }
 

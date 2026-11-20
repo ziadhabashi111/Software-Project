@@ -6,7 +6,10 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+} from '../payments/refund.service.interface';
 import { newBookingReference } from './booking-reference';
 import { RefundQuote, quoteRefund } from './cancellation-rules';
 import { ReservationStatus, assertCanTransition } from './reservation-status';
@@ -378,22 +381,32 @@ export class HotelReservationPayments {
     reservationId: string,
     result: RefundResult,
   ): Promise<boolean> {
+    // A Pending result never overwrites a final one (a webhook may land
+    // before `issue()` returns); Failed keeps its reason, Refunded clears it.
+    const filter = {
+      _id: new Types.ObjectId(reservationId),
+      status: ReservationStatus.CANCELLED,
+    };
+    const pending = result.status === 'PENDING';
+    const set: Record<string, unknown> = {
+      'refund.stripeRefundId': result.refundId,
+      'refund.amount': result.amount,
+      'refund.currency': result.currency,
+      'refund.status': result.status,
+    };
+    if (result.status === 'FAILED' && result.failureReason) {
+      set['refund.failureReason'] = result.failureReason;
+    }
     const updated = await this.reservations.updateOne(
-      {
-        _id: new Types.ObjectId(reservationId),
-        status: ReservationStatus.CANCELLED,
-      },
-      {
-        $set: {
-          'refund.stripeRefundId': result.refundId,
-          'refund.amount': result.amount,
-          'refund.currency': result.currency,
-          'refund.status': result.status,
-        },
-        $unset: { 'refund.failureReason': 1 },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      result.status === 'REFUNDED'
+        ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+        : { $set: set },
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    return pending && (await this.reservations.exists(filter)) !== null;
   }
 
   private async findOwned(

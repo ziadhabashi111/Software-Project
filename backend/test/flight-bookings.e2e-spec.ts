@@ -29,7 +29,10 @@ import { Flight, FlightDocument } from '../src/flights/schemas/flight.schema';
 import { utcToLocal } from '../src/flights/time-zones';
 import { NOTIFICATION_SERVICE } from '../src/notifications/notification.service.interface';
 import { PAYMENT_SERVICE } from '../src/payments/payment.service.interface';
-import { REFUND_SERVICE } from '../src/payments/refund.service.interface';
+import {
+  REFUND_SERVICE,
+  type RefundResult,
+} from '../src/payments/refund.service.interface';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
@@ -63,13 +66,14 @@ const paymentService = {
 };
 const refundService = {
   preview: jest.fn(),
-  issue: jest.fn((_type: string, id: string) =>
-    Promise.resolve({
-      refundId: `re_${id}`,
-      amount: 0,
-      status: 'REFUNDED' as const,
-      currency: 'USD',
-    }),
+  issue: jest.fn(
+    (_type: string, id: string): Promise<RefundResult> =>
+      Promise.resolve({
+        refundId: `re_${id}`,
+        amount: 0,
+        status: 'REFUNDED',
+        currency: 'USD',
+      }),
   ),
 };
 
@@ -1020,6 +1024,47 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         stripeRefundId: `re_retry_${booking.id}`,
         failureReason: null,
       });
+    });
+
+    it('a late Pending result never overwrites a refund already Refunded by its webhook', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const payments = ctx.moduleRef.get(FlightBookingPayments);
+      refundService.issue.mockImplementationOnce(async (_type, id) => {
+        // The refund.updated webhook lands before issue() returns Pending.
+        await payments.recordRefundResult(id, {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+        return {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'PENDING',
+          currency: 'USD',
+        } satisfies RefundResult;
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect((await bookings.findById(booking.id).lean())!.refund).toMatchObject(
+        { status: 'REFUNDED', refundId: `re_${booking.id}` },
+      );
+    });
+
+    it('a Failed result keeps its failure reason', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockResolvedValueOnce({
+        refundId: `re_${booking.id}`,
+        amount: booking.price.total,
+        status: 'FAILED',
+        currency: 'USD',
+        failureReason: 'expired_or_canceled_card',
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect((await bookings.findById(booking.id).lean())!.refund).toMatchObject(
+        { status: 'FAILED', failureReason: 'expired_or_canceled_card' },
+      );
     });
 
     it('keeps the refund Pending when no refund service is wired', async () => {
