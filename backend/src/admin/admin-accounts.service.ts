@@ -9,6 +9,8 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { InjectConnection } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { AuditAction } from '../audit/audit-action';
 import { AuditLogService } from '../audit/audit-log.service';
 import { Role } from '../auth/auth.types';
@@ -51,6 +53,7 @@ export class AdminAccountsService {
     private readonly sessions: SessionService,
     private readonly audit: AuditLogService,
     private readonly providers: ProviderDirectory,
+    @InjectConnection() private readonly connection: Connection,
     @Optional()
     @Inject(ADMIN_NOTIFIER)
     private readonly notifier?: AdminNotifier,
@@ -85,28 +88,38 @@ export class AdminAccountsService {
     }
     if (await this.users.findByEmail(dto.email)) throw emailTaken();
 
+    const passwordHash = await this.passwords.hash(dto.temporaryPassword);
     let created;
     try {
-      created = await this.users.create({
-        name: dto.name,
-        email: dto.email,
-        passwordHash: await this.passwords.hash(dto.temporaryPassword),
-        role: dto.role,
-        providerId: dto.providerId,
-        mustChangePassword: true,
+      // GEN-07: the account and its audit record are saved together.
+      created = await this.connection.transaction(async (session) => {
+        const user = await this.users.create(
+          {
+            name: dto.name,
+            email: dto.email,
+            passwordHash,
+            role: dto.role,
+            providerId: dto.providerId,
+            mustChangePassword: true,
+          },
+          session,
+        );
+        await this.audit.log(
+          {
+            actorId: adminId,
+            action: AuditAction.MODERATOR_CREATED,
+            targetType: 'user',
+            targetId: user.id,
+            details: { role: dto.role, providerId: dto.providerId },
+          },
+          session,
+        );
+        return user;
       });
     } catch (error) {
       if (isDuplicateKey(error)) throw emailTaken();
       throw error;
     }
-
-    await this.audit.log({
-      actorId: adminId,
-      action: AuditAction.MODERATOR_CREATED,
-      targetType: 'user',
-      targetId: created.id,
-      details: { role: dto.role, providerId: dto.providerId },
-    });
     return toProfile(created);
   }
 
@@ -120,16 +133,20 @@ export class AdminAccountsService {
     temporaryPassword: string,
   ): Promise<void> {
     await this.loadManageable(targetId);
-    await this.users.setTemporaryPassword(
-      targetId,
-      await this.passwords.hash(temporaryPassword),
-    );
-    await this.sessions.revokeAllForUser(targetId);
-    await this.audit.log({
-      actorId: adminId,
-      action: AuditAction.PASSWORD_RESET,
-      targetType: 'user',
-      targetId,
+    const passwordHash = await this.passwords.hash(temporaryPassword);
+    // GEN-07: the reset, the sign-out and the audit record commit together.
+    await this.connection.transaction(async (session) => {
+      await this.users.setTemporaryPassword(targetId, passwordHash, session);
+      await this.sessions.revokeAllForUser(targetId, session);
+      await this.audit.log(
+        {
+          actorId: adminId,
+          action: AuditAction.PASSWORD_RESET,
+          targetType: 'user',
+          targetId,
+        },
+        session,
+      );
     });
   }
 
@@ -144,22 +161,30 @@ export class AdminAccountsService {
         'The account was deactivated by its owner and cannot be suspended',
       );
     }
-    const updated = await this.users.transitionStatus(
-      targetId,
-      UserStatus.ACTIVE,
-      UserStatus.SUSPENDED,
-      MANAGEABLE_ROLES,
-    );
-    if (!updated) {
-      throw new ConflictException('The account changed, please try again');
-    }
-    await this.sessions.revokeAllForUser(targetId);
-    await this.audit.log({
-      actorId: adminId,
-      action: AuditAction.ACCOUNT_SUSPENDED,
-      targetType: 'user',
-      targetId,
-      details: { role: updated.role },
+    // GEN-07: the suspension, the sign-out and the audit record commit together.
+    const updated = await this.connection.transaction(async (session) => {
+      const user = await this.users.transitionStatus(
+        targetId,
+        UserStatus.ACTIVE,
+        UserStatus.SUSPENDED,
+        MANAGEABLE_ROLES,
+        session,
+      );
+      if (!user) {
+        throw new ConflictException('The account changed, please try again');
+      }
+      await this.sessions.revokeAllForUser(targetId, session);
+      await this.audit.log(
+        {
+          actorId: adminId,
+          action: AuditAction.ACCOUNT_SUSPENDED,
+          targetType: 'user',
+          targetId,
+          details: { role: user.role },
+        },
+        session,
+      );
+      return user;
     });
     await this.notifyAccount(
       targetId,
@@ -179,21 +204,29 @@ export class AdminAccountsService {
         'The account was deactivated by its owner and cannot be reactivated here',
       );
     }
-    const updated = await this.users.transitionStatus(
-      targetId,
-      UserStatus.SUSPENDED,
-      UserStatus.ACTIVE,
-      MANAGEABLE_ROLES,
-    );
-    if (!updated) {
-      throw new ConflictException('The account changed, please try again');
-    }
-    await this.audit.log({
-      actorId: adminId,
-      action: AuditAction.ACCOUNT_REACTIVATED,
-      targetType: 'user',
-      targetId,
-      details: { role: updated.role },
+    // GEN-07: the reactivation and its audit record commit together.
+    const updated = await this.connection.transaction(async (session) => {
+      const user = await this.users.transitionStatus(
+        targetId,
+        UserStatus.SUSPENDED,
+        UserStatus.ACTIVE,
+        MANAGEABLE_ROLES,
+        session,
+      );
+      if (!user) {
+        throw new ConflictException('The account changed, please try again');
+      }
+      await this.audit.log(
+        {
+          actorId: adminId,
+          action: AuditAction.ACCOUNT_REACTIVATED,
+          targetType: 'user',
+          targetId,
+          details: { role: user.role },
+        },
+        session,
+      );
+      return user;
     });
     await this.notifyAccount(
       targetId,

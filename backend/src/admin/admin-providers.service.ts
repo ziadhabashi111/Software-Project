@@ -49,6 +49,26 @@ export class AdminProvidersService {
     if (!change) throw new NotFoundException(`${type} not found`);
 
     if (change.changed) {
+      await this.auditOrUndo(adminId, type, id, active, change.name);
+      await this.notifyAffected(type, id, change, active);
+    }
+    return { id, type, name: change.name, active, changed: change.changed };
+  }
+
+  /**
+   * GEN-07: the change is made by the airline or hotel module, so it cannot
+   * share a transaction with the audit record. If the record cannot be
+   * written, the change is put back and the request fails, so no provider
+   * change is left without its audit entry.
+   */
+  private async auditOrUndo(
+    adminId: string,
+    type: ProviderType,
+    id: string,
+    active: boolean,
+    name: string,
+  ): Promise<void> {
+    try {
       await this.audit.log({
         actorId: adminId,
         action: active
@@ -56,11 +76,19 @@ export class AdminProvidersService {
           : AuditAction.PROVIDER_DEACTIVATED,
         targetType: type,
         targetId: id,
-        details: { name: change.name },
+        details: { name },
       });
-      await this.notifyAffected(type, id, change, active);
+    } catch (error) {
+      try {
+        await this.directory.get(type)?.setActive(id, !active);
+      } catch (undoError) {
+        this.logger.error(
+          `Could not undo the ${type} ${id} change after the audit failed`,
+          undoError instanceof Error ? undoError.stack : String(undoError),
+        );
+      }
+      throw error;
     }
-    return { id, type, name: change.name, active, changed: change.changed };
   }
 
   /**

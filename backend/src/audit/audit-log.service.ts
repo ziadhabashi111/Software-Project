@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, QueryFilter, Types } from 'mongoose';
+import { ClientSession, Model, QueryFilter, Types } from 'mongoose';
 import { AuditAction } from './audit-action';
 import { AuditLog, AuditLogDocument } from './audit-log.schema';
 
@@ -24,8 +24,9 @@ export class AuditLogService {
     private readonly model: Model<AuditLogDocument>,
   ) {}
 
-  async log(entry: AuditLogEntry): Promise<void> {
-    await this.model.create({
+  /** Pass the action's `session` so the change and its record commit together. */
+  async log(entry: AuditLogEntry, session?: ClientSession): Promise<void> {
+    const record = {
       actor: new Types.ObjectId(entry.actorId),
       action: entry.action,
       targetType: entry.targetType,
@@ -33,7 +34,8 @@ export class AuditLogService {
         ? { targetId: new Types.ObjectId(entry.targetId) }
         : {}),
       ...(entry.details ? { details: entry.details } : {}),
-    });
+    };
+    await this.model.create([record], { session });
   }
 
   /** The admin audit trail (GEN-07): newest entries first. */

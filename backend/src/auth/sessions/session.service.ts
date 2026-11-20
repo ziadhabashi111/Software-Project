@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import {
   SESSION_IDLE_LIMIT_MS,
   SESSION_TOUCH_INTERVAL_MS,
@@ -98,11 +98,15 @@ export class SessionService implements SessionValidator {
       .exec();
   }
 
-  async revokeAllForUser(userId: string): Promise<void> {
+  async revokeAllForUser(
+    userId: string,
+    session?: ClientSession,
+  ): Promise<void> {
     await this.model
       .updateMany(
         { user: new Types.ObjectId(userId), revokedAt: null },
         { revokedAt: new Date() },
+        { session },
       )
       .exec();
   }

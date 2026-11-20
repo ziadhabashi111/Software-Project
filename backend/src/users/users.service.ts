@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, QueryFilter, Types } from 'mongoose';
+import { ClientSession, Model, QueryFilter, Types } from 'mongoose';
 import { Role } from '../auth/auth.types';
 import { LOCK_DURATION_MS, MAX_FAILED_LOGINS } from '../auth/login-policy';
 import { User, UserDocument } from './schemas/user.schema';
@@ -28,12 +28,12 @@ export class UsersService {
     @InjectModel(User.name) private readonly model: Model<UserDocument>,
   ) {}
 
-  create(input: NewUser): Promise<UserDocument> {
+  create(input: NewUser, session?: ClientSession): Promise<UserDocument> {
     const { providerId, ...rest } = input;
-    return this.model.create({
+    return new this.model({
       ...rest,
       ...(providerId ? { providerId: new Types.ObjectId(providerId) } : {}),
-    });
+    }).save({ session });
   }
 
   findById(id: string): Promise<UserDocument | null> {
@@ -125,12 +125,13 @@ export class UsersService {
     from: UserStatus,
     to: UserStatus,
     roles: Role[],
+    session?: ClientSession,
   ): Promise<UserDocument | null> {
     return this.model
       .findOneAndUpdate(
         { _id: userId, status: from, role: { $in: roles } },
         { status: to },
-        { new: true },
+        { new: true, session },
       )
       .exec();
   }
@@ -178,6 +179,7 @@ export class UsersService {
   async setTemporaryPassword(
     userId: string,
     passwordHash: string,
+    session?: ClientSession,
   ): Promise<void> {
     await this.model
       .updateOne(
@@ -188,6 +190,7 @@ export class UsersService {
           failedLoginAttempts: 0,
           $unset: { lockUntil: 1 },
         },
+        { session },
       )
       .exec();
   }

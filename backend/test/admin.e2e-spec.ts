@@ -24,6 +24,7 @@ import { User, UserDocument } from '../src/users/schemas/user.schema';
 import { UserStatus } from '../src/users/user-status';
 import { UsersService } from '../src/users/users.service';
 import { Global, Module } from '@nestjs/common';
+import { AuditLogService } from '../src/audit/audit-log.service';
 import { createTestApp, TestApp } from './helpers/app';
 
 const PASSWORD = 'Passw0rdOk';
@@ -94,8 +95,10 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
   let counter = 0;
 
   beforeAll(async () => {
+    // Admin actions and their audit records share a transaction (GEN-07).
     ctx = await createTestApp({
       extraModules: [AuditModule, AdminModule, NotifierModule],
+      replSet: true,
     });
     users = ctx.moduleRef.get(UsersService);
     passwords = ctx.moduleRef.get(PasswordService);
@@ -424,6 +427,31 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
       expect(entry?.actor.toString()).toBe(admin.id);
     });
 
+    it('changes nothing when the audit record cannot be written (GEN-07)', async () => {
+      const admin = await loggedInAs(Role.ADMIN);
+      const target = await createAccount();
+      const device = await login(target.email);
+      const audit = ctx.moduleRef.get(AuditLogService);
+      const spy = jest
+        .spyOn(audit, 'log')
+        .mockRejectedValue(new Error('audit store down'));
+      try {
+        await admin.client
+          .patch(`/api/admin/accounts/${target.id}/suspend`)
+          .expect(500);
+        await admin.client
+          .post(`/api/admin/users/${target.id}/reset-password`)
+          .send({ temporaryPassword: TEMP_PASSWORD })
+          .expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      const stored = await userModel.findById(target.id).lean();
+      expect(stored?.status).toBe(UserStatus.ACTIVE);
+      expect(stored?.mustChangePassword).toBe(false);
+      await device.get('/api/users/me').expect(200);
+    });
+
     it('suspends a moderator the same way', async () => {
       const admin = await loggedInAs(Role.ADMIN);
       const moderator = await createAccount({ role: Role.HOTEL_MODERATOR });
@@ -680,6 +708,24 @@ describe('Admin accounts, providers and bookings (ACC-07a, 13-17; real MongoDB i
         [moderator.id, 'traveller-1'].sort(),
       );
       expect(notifications[0].message).toContain('Nile Hotel');
+    });
+
+    it('undoes the deactivation when the audit record cannot be written (GEN-07)', async () => {
+      const admin = await loggedInAs(Role.ADMIN);
+      const audit = ctx.moduleRef.get(AuditLogService);
+      const spy = jest
+        .spyOn(audit, 'log')
+        .mockRejectedValue(new Error('audit store down'));
+      try {
+        await admin.client
+          .patch(`/api/admin/providers/hotel/${hotelId}/deactivate`)
+          .expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(active).toBe(true);
+      expect(setActiveCalls).toEqual([false, true]);
+      expect(notifications).toHaveLength(0);
     });
 
     it('reactivates it and records PROVIDER_REACTIVATED', async () => {

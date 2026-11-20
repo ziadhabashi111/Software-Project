@@ -145,7 +145,10 @@ describe('Admin moderation and audit logs (GEN-07, GEN-09, GEN-10; real MongoDB 
   const comments = new FakeContent();
 
   beforeAll(async () => {
-    ctx = await createTestApp({ extraModules: [AuditModule, AdminModule] });
+    ctx = await createTestApp({
+      extraModules: [AuditModule, AdminModule],
+      replSet: true,
+    });
     users = ctx.moduleRef.get(UsersService);
     passwords = ctx.moduleRef.get(PasswordService);
     moderators = ctx.moduleRef.get(ContentModerators);
