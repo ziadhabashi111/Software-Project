@@ -38,6 +38,8 @@ export interface ReportSource {
     id: string,
     resolution: { action: ReportAction; adminId: string },
   ): Promise<boolean>;
+  /** Undoes `resolve` when the admin's action failed: the report is open again. */
+  reopen(id: string): Promise<void>;
 }
 
 /** Holds the report module's source once it registers. */
