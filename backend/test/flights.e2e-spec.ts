@@ -814,8 +814,10 @@ describe('Flights (FLT-01..30; real MongoDB in memory)', () => {
 
   describe('the airline’s flight list (FLT-05)', () => {
     /** An airline of its own, so counts are exact. */
+    // A counter, not a random number: random codes collided on the unique index.
+    let nextCode = 10;
     async function freshAirline() {
-      const code = `Z${Math.floor(Math.random() * 90 + 10)}`;
+      const code = `Z${nextCode++}`;
       return airlines.create({ name: `List Air ${code}`, code });
     }
 
