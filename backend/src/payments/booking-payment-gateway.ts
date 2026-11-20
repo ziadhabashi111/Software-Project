@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { FlightBookingPayments } from '../flight-bookings/flight-booking-payments';
+import { HotelInventoryRegistry } from '../hotel-bookings/hotel-inventory';
 import { HotelReservationPayments } from '../hotel-bookings/hotel-reservation-payments';
 import {
   HotelReservation,
@@ -39,8 +40,16 @@ export interface BookingPoliciesView {
     freeBags: number[];
     maxBagWeightKg: number[];
   };
-  /** Hotels: the stay dates (check-in/out times come from the hotels module). */
-  stay?: { checkIn: Date; checkOut: Date };
+  /**
+   * Hotels: this booking's stay dates, plus the hotel's standard check-in and
+   * check-out times (HH:mm, set by its moderator, HTL-09).
+   */
+  stay?: {
+    checkIn: Date;
+    checkOut: Date;
+    checkInTime?: string;
+    checkOutTime?: string;
+  };
 }
 
 /** PAY-03: what is needed to refund a cancelled booking, for either type. */
@@ -74,6 +83,7 @@ export class BookingPaymentGateway {
     private readonly hotels: HotelReservationPayments,
     @InjectModel(HotelReservation.name)
     private readonly reservations: Model<HotelReservationDocument>,
+    private readonly inventory: HotelInventoryRegistry,
   ) {}
 
   /** Owner-only policies of a booking; 404 for anyone else's. */
@@ -100,13 +110,21 @@ export class BookingPaymentGateway {
     if (!doc || doc.user.toString() !== userId) {
       throw new NotFoundException('Reservation not found');
     }
+    // The times belong to the hotel (its policies), not to this reservation.
+    const hotel = await this.inventory.get()?.findHotel(doc.hotel.toString());
+    if (!hotel) throw new NotFoundException('Hotel not found');
     return {
       bookingType: 'hotel',
       cancellationTiers: doc.cancellationTiers.map((t) => ({
         daysBefore: t.daysBefore,
         refundPercent: t.refundPercent,
       })),
-      stay: { checkIn: doc.checkIn, checkOut: doc.checkOut },
+      stay: {
+        checkIn: doc.checkIn,
+        checkOut: doc.checkOut,
+        ...(hotel.checkInTime ? { checkInTime: hotel.checkInTime } : {}),
+        ...(hotel.checkOutTime ? { checkOutTime: hotel.checkOutTime } : {}),
+      },
     };
   }
 

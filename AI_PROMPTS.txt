@@ -717,3 +717,17 @@ Add the hotel photos on top of the hotel catalogue: POST /api/hotels/:id/images 
 How the output was used:
 Wrote the service spec first (ownership before any file is written, files stored as the moderator, the 5-photo limit inside the database write so parallel uploads cannot exceed it, files deleted when the write fails or the photo is removed, best-effort file deletion). HotelPhotosService and HotelPhotosController follow the same upload pattern as the activity images. Added e2e tests (add/remove with files on disk, other moderators/admins/travellers/guests refused with nothing stored, fake files, the limit, parallel uploads) and README rows. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-02, HTL-09 (issue 26)
+Prompt:
+GET /api/bookings/hotel/:id/policies shows the hotel's cancellation tiers and the stay dates but not the hotel's check-in and check-out times, which PAY-02 requires. Habashi explained that the times are set by the hotel moderator in the hotel policies (PUT /api/hotels/:id/policies, HTL-09) and the dates belong to the booking. Add the times to the hotel policies response, and return an error when the hotel cannot be found.
+
+How the output was used:
+The hotel policies response now includes the hotel's checkInTime and checkOutTime (HH:mm) next to the booking's stay dates. BookingPaymentGateway reads the times through the existing hotel inventory hook, and two optional fields were added to InventoryHotel (hotel-bookings) 
+and to the hotel catalog mapping (hotels). After Habashi's feedback, a hotel that cannot be found now returns a 404 instead of answering without times. 
+Added 4 unit tests in booking-payment-gateway.spec.ts (times shown, hotel not found, hotels module not registered, another user's reservation) and updated the Swagger description. I ran lint and the tests myself.
+================================================
