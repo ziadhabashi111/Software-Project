@@ -91,13 +91,24 @@ export class HotelReservationsService {
       checkOut,
     });
     const nights = nightsOf(checkIn, checkOut);
-    const priced = priceRooms(dto.rooms, available, nights.length);
+    let priced = priceRooms(dto.rooms, available, nights.length);
     const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
     const roomObjectIds = roomIds.map((id) => new Types.ObjectId(id));
 
     let released: Types.ObjectId[] = [];
     try {
       const reservation = await this.connection.transaction(async (session) => {
+        // HTL-06: re-check the rooms after locking them, so a block, an
+        // availability change or a deactivation saved meanwhile is seen.
+        if (inventory.lockRooms) {
+          const locked = await inventory.lockRooms(
+            hotel.id,
+            roomIds,
+            { checkIn, checkOut },
+            session,
+          );
+          priced = priceRooms(dto.rooms, locked, nights.length);
+        }
         released = await this.releaseExpiredNights(
           roomObjectIds,
           nights,

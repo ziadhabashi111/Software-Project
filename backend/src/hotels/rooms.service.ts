@@ -290,14 +290,26 @@ export class RoomsService {
   /** HTL-06: delete a room, but only one that has never been reserved. */
   async remove(user: Caller, hotelId: string, roomId: string): Promise<void> {
     assertOwnHotel(user, hotelId);
-    const room = await this.load(hotelId, roomId);
-    if (await this.reservations.wasEverReserved(room.id)) {
-      throw conflict(
-        'ROOM_HAS_RESERVATIONS',
-        'A room that has ever been reserved cannot be deleted; deactivate it instead',
-      );
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const room = await this.load(hotelId, roomId);
+      if (await this.reservations.wasEverReserved(room.id)) {
+        throw conflict(
+          'ROOM_HAS_RESERVATIONS',
+          'A room that has ever been reserved cannot be deleted; deactivate it instead',
+        );
+      }
+      // Versioned: a hold locks the room (HotelCatalog.lockRooms) by bumping
+      // its version, so a hold made after the check above stops the delete.
+      const { deletedCount } = await this.rooms.deleteOne({
+        _id: room._id,
+        __v: room.__v,
+      });
+      if (deletedCount === 1) return;
+      await pause(Math.random() * 15);
     }
-    await this.rooms.deleteOne({ _id: room._id });
+    throw new ConflictException(
+      'The room is being changed by other requests, please try again',
+    );
   }
 
   /** HTL-08: each room, night by night: Available, Booked (with the reference) or Blocked. */

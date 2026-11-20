@@ -6,7 +6,9 @@ import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
+import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation-queries';
 import { formatDate } from '../src/hotel-bookings/stay-rules';
+import { HotelCatalog } from '../src/hotels/hotel-catalog';
 import { HotelsModule } from '../src/hotels/hotels.module';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
@@ -705,6 +707,102 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
       await moderator.client.get(`${url}?from=oops&to=${day(1)}`).expect(400);
     });
   });
+  describe('moderator changes and guest holds never interleave (HTL-05, HTL-06, HTL-18)', () => {
+    async function ready() {
+      const { hotel, moderator } = await hotelWithModerator();
+      const room = (
+        await moderator.client
+          .post(`/api/hotels/${hotel.id}/rooms`)
+          .send({ name: '201', beds: 2, maxOccupancy: 3, pricePerNight: 100 })
+          .expect(201)
+      ).body as RoomBody;
+      const base = `/api/hotels/${hotel.id}/rooms/${room.id}`;
+      await moderator.client
+        .post(`${base}/availability`)
+        .send({ from: day(10), to: day(60) })
+        .expect(201);
+      const traveller = await loggedInAs();
+      const hold = () =>
+        traveller.client.post('/api/hotel-bookings').send({
+          hotelId: hotel.id,
+          checkIn: day(20),
+          checkOut: day(23),
+          rooms: [{ roomId: room.id, adults: 2, childrenAges: [] }],
+        });
+      return { moderator, base, hold };
+    }
+
+    it('a hold made after the block checked for reservations, but before it saved, wins and the block is refused', async () => {
+      const { moderator, base, hold } = await ready();
+      const queries = ctx.moduleRef.get(HotelReservationQueries);
+      const original = queries.takenRoomIds.bind(queries);
+      let held: request.Response | undefined;
+      const spy = jest
+        .spyOn(queries, 'takenRoomIds')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          held = await hold();
+          return result;
+        });
+      try {
+        const block = await moderator.client
+          .post(`${base}/blocks`)
+          .send({ from: day(21), to: day(21) });
+        expect(held?.status).toBe(201);
+        expect(block.status).toBe(409);
+        expect(codeOf(block)).toBe('ROOM_RESERVED');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a block saved after the hold read the room, but before the hold was stored, makes the hold fail', async () => {
+      const { moderator, base, hold } = await ready();
+      const catalog = ctx.moduleRef.get(HotelCatalog);
+      const original = catalog.findRooms.bind(catalog);
+      let blocked: request.Response | undefined;
+      const spy = jest
+        .spyOn(catalog, 'findRooms')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          blocked = await moderator.client
+            .post(`${base}/blocks`)
+            .send({ from: day(21), to: day(21) });
+          return result;
+        });
+      try {
+        const res = await hold();
+        expect(blocked?.status).toBe(201);
+        expect(res.status).toBe(400);
+        expect(codeOf(res)).toBe('ROOM_NOT_AVAILABLE');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a room is never deleted under a hold made after the delete checked it', async () => {
+      const { moderator, base, hold } = await ready();
+      const queries = ctx.moduleRef.get(HotelReservationQueries);
+      const original = queries.wasEverReserved.bind(queries);
+      let held: request.Response | undefined;
+      const spy = jest
+        .spyOn(queries, 'wasEverReserved')
+        .mockImplementationOnce(async (...args) => {
+          const result = await original(...args);
+          held = await hold();
+          return result;
+        });
+      try {
+        const removed = await moderator.client.delete(base);
+        expect(held?.status).toBe(201);
+        expect(removed.status).toBe(409);
+        expect(codeOf(removed)).toBe('ROOM_HAS_RESERVATIONS');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe('hotel photos (HTL-01, GEN-08)', () => {
     const upload = (client: Agent, hotelId: string, count = 1) => {
       const req = client.post(`/api/hotels/${hotelId}/images`);
