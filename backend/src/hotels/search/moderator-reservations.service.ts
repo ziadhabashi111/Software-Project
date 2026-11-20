@@ -17,8 +17,8 @@ export class ModeratorReservationsService {
   constructor(private readonly queries: HotelReservationQueries) {}
 
   /**
-   * Own hotel only for a moderator, any hotel for an admin. Until the Hotel
-   * schema exists (HTL-01) an unknown hotel id is an empty list, not a 404.
+   * Own hotel only for a moderator, any hotel for an admin. An admin asking
+   * for a hotel id that does not exist gets an empty list, not a 404.
    */
   async list(
     hotelId: string,
