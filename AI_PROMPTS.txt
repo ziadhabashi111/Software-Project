@@ -867,3 +867,15 @@ Implement the FLT-28 bonus: seat selection for flight bookings.
 How the output was used:
 Claude wrote it test-first on feature/FLT-28-seat-selection; I reviewed the full diff and added one fix. Each cabin has a seat layout (seatsPerRow, default 6 in Economy/Premium Economy and 4 in Business/First; labels 1A, 1B, ...). GET /api/flights/:id/seats shows free and taken seats with no personal data. PATCH /api/flight-bookings/:id/seat lets the owner of a Confirmed booking pick a seat per passenger per flight (not infants); a unique index makes parallel picks safe (409 SEAT_TAKEN), and the pick re-checks the booking inside its transaction so a booking cancelled at the same moment never gets a seat (my fix, with a test). Seats are freed on cancellation (user or airline) and expiry, shown on bookings and the e-ticket, and an airline cannot shrink or reshape a cabin in a way that drops a picked seat (409 SEATS_ASSIGNED). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: FLT-27 (bonus), PAY-01, PAY-03, FLT-28
+Prompt:
+Implement the FLT-27 bonus: change a Confirmed flight booking's date or flight (same route and cabin), paying the fare difference via Stripe or refunding a lower fare, subject to seat availability.
+
+How the output was used:
+Claude wrote it test-first on feature/FLT-27-change-flight (design in docs/design/2026-11-20-flight-change-design.md); I reviewed the full diff, merged FLT-28 in and wired the two together. PATCH /api/flight-bookings/:id/change-flight previews the difference, and with confirm=true applies a same-fare or cheaper change at once in one transaction (new seats booked, old ones returned, lower fare refunded) or holds the new seats for HOLD_MINUTES while the difference is paid as a 'flight-change' payment through the normal payments flow; the webhook applies it. Same airline, route and cabin only; round trips stay in order; passenger types are re-checked; one pending change per booking. The booking keeps a ledger of every payment, so a later cancellation refunds across payments newest first, never more than each received. Seats picked on the old flight are freed when the change applies (my integration, with a test). Lint, unit, build and e2e pass.
+================================================
