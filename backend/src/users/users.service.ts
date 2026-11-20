@@ -235,4 +235,23 @@ export class UsersService {
       .updateOne({ _id: userId }, { passwordHash, mustChangePassword })
       .exec();
   }
+
+  /**
+   * ACC-07: the user chose a new password through the emailed link, so it is
+   * a normal password (no forced change) and the account is no longer locked
+   * from earlier failed logins.
+   */
+  async resetPassword(userId: string, passwordHash: string): Promise<void> {
+    await this.model
+      .updateOne(
+        { _id: userId },
+        {
+          passwordHash,
+          mustChangePassword: false,
+          failedLoginAttempts: 0,
+          $unset: { lockUntil: 1 },
+        },
+      )
+      .exec();
+  }
 }
