@@ -10,9 +10,14 @@ import {
   assertCanTransition,
   BookingStatus,
 } from '../common/booking-status/booking-status';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { effectiveStatus, FlightStatus } from '../flights/flight-status';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+  type RefundStatus,
+} from '../payments/refund.service.interface';
 import {
   isDuplicateReference,
   newFlightBookingReference,
@@ -49,6 +54,12 @@ export interface VerifiedFlightPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (FLT-22). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
 export type FlightConfirmRejection =
@@ -95,7 +106,26 @@ export interface FlightRefundBasis {
   amount: number;
   percentage: number;
   currency: string;
+  /** PENDING, REFUNDED or FAILED. */
   status: string;
+  /**
+   * The Stripe refund already created for this cancellation, or `null` if
+   * none went out yet. A retrying caller must not create another one when
+   * this is set.
+   */
+  stripeRefundId: string | null;
+  /**
+   * Stable per booking: pass it as Stripe's `Idempotency-Key` when creating
+   * the refund so a retry after a timeout cannot refund twice.
+   */
+  idempotencyKey: string;
+  /** Why the last attempt failed (a short code, no secrets), when FAILED. */
+  failureReason: string | null;
+}
+
+/** The Stripe idempotency key for the refund of one flight booking (PAY-03). */
+export function flightRefundIdempotencyKey(bookingId: string): string {
+  return `flight-booking-refund-${bookingId}`;
 }
 
 type ConfirmAttempt =
@@ -129,7 +159,8 @@ export class FlightBookingPayments {
 
   /**
    * The amount to charge for the user's own live hold. 404 when it is not
-   * theirs; 409 NOT_PAYABLE once it is expired, paid or cancelled.
+   * theirs; 409 HOLD_EXPIRED once the hold ran out, 409 NOT_PAYABLE once it
+   * is paid, cancelled or otherwise not waiting for payment.
    */
   async forPayment(
     bookingId: string,
@@ -143,7 +174,7 @@ export class FlightBookingPayments {
       doc.holdExpiresAt.getTime() <= now.getTime()
     ) {
       await this.expiry.expireOne(doc._id, now);
-      throw notPayable('The 10-minute hold has expired. Start a new booking.');
+      throw holdExpired();
     }
     if (doc.status !== BookingStatus.PENDING_PAYMENT || !doc.holdExpiresAt) {
       throw notPayable('This booking is not waiting for payment.');
@@ -321,7 +352,9 @@ export class FlightBookingPayments {
       !doc ||
       doc.status !== BookingStatus.CANCELLED ||
       !doc.refund?.status ||
-      !doc.payment?.paymentIntentId
+      !doc.payment?.paymentIntentId ||
+      // FLT-27: paid with several payments, refunded in parts instead.
+      doc.refund.parts?.length
     ) {
       return null;
     }
@@ -333,29 +366,111 @@ export class FlightBookingPayments {
       percentage: doc.refund.percent,
       currency: doc.refund.currency,
       status: doc.refund.status,
+      stripeRefundId: doc.refund.refundId ?? null,
+      idempotencyKey: flightRefundIdempotencyKey(doc.id),
+      failureReason: doc.refund.failureReason ?? null,
     };
   }
 
-  /** Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03). */
+  /**
+   * Stores the refund outcome, e.g. from a Stripe refund webhook (PAY-03).
+   * A Pending result never overwrites a final one (a webhook may land before
+   * `issue()` returns); a Failed one keeps its reason, a Refunded one clears it.
+   */
   async recordRefundResult(
     bookingId: string,
     result: RefundResult,
   ): Promise<boolean> {
     if (!Types.ObjectId.isValid(bookingId)) return false;
+    const id = new Types.ObjectId(bookingId);
+    if (
+      await this.bookings.exists({
+        _id: id,
+        'refund.parts.refundId': result.refundId,
+      })
+    ) {
+      return this.updatePart(id, { refundId: result.refundId }, result);
+    }
+    const filter = {
+      _id: id,
+      status: BookingStatus.CANCELLED,
+      refund: { $exists: true },
+    };
+    const pending = result.status === 'PENDING';
     const updated = await this.bookings.updateOne(
-      {
-        _id: new Types.ObjectId(bookingId),
-        status: BookingStatus.CANCELLED,
-        refund: { $exists: true },
-      },
-      {
-        $set: {
-          'refund.refundId': result.refundId,
-          'refund.status': result.status,
-        },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      refundUpdate(result),
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    // A Pending result that lost to a final one was still "recorded".
+    return pending && (await this.bookings.exists(filter)) !== null;
+  }
+
+  /**
+   * FLT-27: the outcome of one part of a refund split over several payments
+   * (from `issue` or a failure). The booking's refund status then sums the
+   * parts up: Refunded when all are, Failed if any failed, else Pending.
+   */
+  async recordRefundPart(
+    bookingId: string,
+    paymentIntentId: string,
+    result:
+      | RefundResult
+      | { status: 'FAILED'; failureReason: string; refundId?: undefined },
+  ): Promise<boolean> {
+    if (!Types.ObjectId.isValid(bookingId)) return false;
+    return this.updatePart(
+      new Types.ObjectId(bookingId),
+      { paymentIntentId },
+      result,
+    );
+  }
+
+  /** Updates one refund part (never final -> Pending) and the summed status. */
+  private async updatePart(
+    id: Types.ObjectId,
+    match: { refundId?: string; paymentIntentId?: string },
+    result: {
+      status: RefundStatus;
+      refundId?: string;
+      failureReason?: string;
+    },
+  ): Promise<boolean> {
+    return this.connection.transaction(async (session) => {
+      const doc = await this.bookings.findById(id).session(session);
+      const parts = doc?.refund?.parts;
+      if (!doc?.refund || !parts?.length) return false;
+      const part = parts.find((p) =>
+        match.refundId
+          ? p.refundId === match.refundId
+          : p.paymentIntentId === match.paymentIntentId,
+      );
+      if (!part) return false;
+      const isFinal = FINAL_REFUND_STATUSES.includes(part.status ?? 'PENDING');
+      if (!(isFinal && result.status === 'PENDING')) {
+        if (result.refundId) part.refundId = result.refundId;
+        part.status = result.status;
+        if (result.status === 'FAILED') {
+          part.failureReason = result.failureReason ?? 'unknown';
+        } else {
+          part.failureReason = undefined;
+        }
+      }
+      const failed = parts.find((p) => p.status === 'FAILED');
+      const status: RefundStatus = failed
+        ? 'FAILED'
+        : parts.every((p) => p.status === 'REFUNDED')
+          ? 'REFUNDED'
+          : 'PENDING';
+      doc.refund.status = status;
+      doc.refund.refundId = parts.find((p) => p.refundId)?.refundId;
+      doc.refund.failureReason = failed?.failureReason;
+      doc.markModified('refund');
+      await doc.save({ session });
+      return true;
+    });
   }
 
   private async confirmOnce(
@@ -379,7 +494,11 @@ export class FlightBookingPayments {
           ? { outcome: 'already_confirmed', booking: doc }
           : { outcome: 'already_processed', booking: doc };
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = paid.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' };
       }
       if (
@@ -461,6 +580,20 @@ export class FlightBookingPayments {
   }
 }
 
+/** The booking update for a refund result (see `recordRefundResult`). */
+function refundUpdate(result: RefundResult) {
+  const set: Record<string, unknown> = {
+    'refund.refundId': result.refundId,
+    'refund.status': result.status,
+  };
+  if (result.status === 'FAILED' && result.failureReason) {
+    set['refund.failureReason'] = result.failureReason;
+  }
+  return result.status === 'REFUNDED'
+    ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+    : { $set: set };
+}
+
 function toObjectId(id: string): Types.ObjectId {
   if (!Types.ObjectId.isValid(id)) {
     throw new NotFoundException('Booking not found');
@@ -474,6 +607,16 @@ function notPayable(message: string): ConflictException {
     error: 'Conflict',
     message,
     code: 'NOT_PAYABLE',
+  });
+}
+
+/** Same 409 code as hotel reservations and the PAY-01 Swagger text. */
+function holdExpired(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    message: holdExpiredMessage(),
+    code: 'HOLD_EXPIRED',
   });
 }
 

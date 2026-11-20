@@ -150,10 +150,26 @@ describe('Profile and deactivation (ACC-09, ACC-11, ACC-12; real MongoDB in memo
       ['a numeric currency', { preferredCurrency: '123' }],
       ['an empty name', { name: '' }],
       ['a one letter name', { name: 'A' }],
+      ['a null name (GEN-13)', { name: null }],
+      ['a null currency (GEN-13)', { preferredCurrency: null }],
     ])('rejects %s', async (_label, patch) => {
       const { client } = await loggedInClient();
       const res = await client.patch('/api/users/me').send(patch).expect(400);
       expect(fieldsOf(res)).toEqual(Object.keys(patch));
+    });
+
+    it('clears the phone when it is sent as null', async () => {
+      const { client } = await loggedInClient();
+      await client
+        .patch('/api/users/me')
+        .send({ phone: '+201001234567' })
+        .expect(200);
+      const res = await client
+        .patch('/api/users/me')
+        .send({ phone: null })
+        .expect(200);
+      expect((res.body as { phone?: string }).phone ?? null).toBeNull();
+      expect((res.body as { name: string }).name).toBe('Profile User');
     });
 
     it('rejects an empty update', async () => {
@@ -233,6 +249,53 @@ describe('Profile and deactivation (ACC-09, ACC-11, ACC-12; real MongoDB in memo
         UserStatus.ACTIVE,
       );
       await client.get('/api/users/me').expect(200);
+    });
+
+    it('marks the account deactivated before checking bookings, so a booking confirmed meanwhile is seen (ACC-12)', async () => {
+      const { email, client } = await loggedInClient();
+      const me = await client.get('/api/users/me').expect(200);
+      const userId = (me.body as { id: string }).id;
+      const statusesSeen: (string | undefined)[] = [];
+      ctx.moduleRef.get(DeactivationBlockers).register({
+        hasUpcomingConfirmedBookings: async (id) => {
+          if (id !== userId) return false;
+          statusesSeen.push((await userModel.findById(id).lean())?.status);
+          // A payment webhook confirms a booking right now.
+          return true;
+        },
+      });
+
+      await client.delete('/api/users/me?confirm=true').expect(409);
+      expect(statusesSeen).toEqual([UserStatus.DEACTIVATED]);
+      // Refused: the account is active again and still signed in.
+      expect((await userModel.findOne({ email }))?.status).toBe(
+        UserStatus.ACTIVE,
+      );
+      await client.get('/api/users/me').expect(200);
+    });
+
+    it('ends the unpaid holds after marking the account and before checking bookings, so a late payment is refunded (ACC-12)', async () => {
+      const { client } = await loggedInClient();
+      const me = await client.get('/api/users/me').expect(200);
+      const userId = (me.body as { id: string }).id;
+      const steps: string[] = [];
+      ctx.moduleRef.get(DeactivationBlockers).register({
+        endPendingHolds: async (id) => {
+          if (id !== userId) return;
+          const status = (await userModel.findById(id).lean())?.status;
+          steps.push(`end holds (${status})`);
+        },
+        hasUpcomingConfirmedBookings: (id) => {
+          if (id === userId) steps.push('check bookings');
+          return Promise.resolve(false);
+        },
+      });
+
+      await client.delete('/api/users/me?confirm=true').expect(204);
+      expect(steps).toEqual([
+        `end holds (${UserStatus.DEACTIVATED})`,
+        'check bookings',
+      ]);
     });
 
     it('is only for regular users, not admins or moderators', async () => {

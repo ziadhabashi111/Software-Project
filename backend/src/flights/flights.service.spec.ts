@@ -7,7 +7,7 @@ import type { AirportsService } from './airports.service';
 import { CabinClass, FlightStatus } from './flight-status';
 import { FlightBookingHooks } from './flight-booking-hooks';
 import type { FlightBookingLink } from './flight-booking-hooks';
-import { FlightsService } from './flights.service';
+import { FlightsService, statusFilter } from './flights.service';
 import type { Flight } from './schemas/flight.schema';
 
 /** Arguments of one recorded call to a jest mock. */
@@ -112,7 +112,7 @@ function build(found: ReturnType<typeof flight> | null) {
     hooks,
     notifications,
   );
-  return { service, model, hooks, notifications };
+  return { service, model, hooks, notifications, airlinesService };
 }
 
 /** A booking link that only knows its Confirmed passengers. */
@@ -240,7 +240,10 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
 
   it('changes airports on an unbooked flight, guarded against a hold that arrives meanwhile', async () => {
     const { service, model } = build(flight());
-    await service.update('f1', moderator, { arrivalAirport: 'LHR' });
+    await service.update('f1', moderator, {
+      arrivalAirport: 'LHR',
+      arrivalTime: '2090-03-01T19:45',
+    });
     const filter = argsOf(model.findOneAndUpdate, 0)[0] as Record<
       string,
       unknown
@@ -270,6 +273,52 @@ describe('FlightsService.update (FLT-05, FLT-30)', () => {
       departureTime: '2090-03-01T14:30',
     });
     expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('needs the local time at the new airport when an airport changes (GEN-06)', async () => {
+    // Without it the stored UTC would turn 19:45 in New York into 00:45 in London.
+    for (const [change, field] of [
+      [{ arrivalAirport: 'LHR' }, 'arrivalTime'],
+      [{ departureAirport: 'LHR', departureTime: undefined }, 'departureTime'],
+    ] as const) {
+      const { service, model } = build(flight());
+      await expect(
+        service.update('f1', moderator, change),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: expect.objectContaining({
+          errors: [expect.objectContaining({ field }) as unknown],
+        }) as unknown,
+      });
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps the other end’s time when only one airport changes with its time', async () => {
+    const { service, model } = build(flight());
+    await service.update('f1', moderator, {
+      arrivalAirport: 'LHR',
+      arrivalTime: '2090-03-01T19:45',
+    });
+    const update = argsOf(model.findOneAndUpdate)[1] as {
+      $set: { arrivalUtc: Date; departureUtc: Date };
+    };
+    expect(update.$set.arrivalUtc.toISOString()).toBe(
+      '2090-03-01T19:45:00.000Z',
+    );
+    expect(update.$set.departureUtc.toISOString()).toBe(
+      '2090-03-01T12:30:00.000Z',
+    );
+  });
+
+  it('does not ask for a time when the airport is sent but did not change', async () => {
+    const { service } = build(flight());
+    await expect(
+      service.update('f1', moderator, {
+        arrivalAirport: 'JFK',
+        departureTime: '2090-03-01T15:00',
+      }),
+    ).resolves.toBeDefined();
   });
 
   it('rejects an empty change', async () => {
@@ -366,5 +415,151 @@ describe('FlightsService.markDeparted (FLT-30)', () => {
     ];
     expect(filter.status).toBe(FlightStatus.SCHEDULED);
     expect(update.$set.status).toBe(FlightStatus.DEPARTED);
+  });
+});
+
+describe('FlightsService.listForAirline (FLT-05)', () => {
+  const admin: AuthUser = { id: 'ad', role: Role.ADMIN };
+  const page = { page: 2, limit: 10 };
+
+  function withFlights(items: unknown[], total = items.length) {
+    const built = build(null);
+    const query = {
+      sort: jest.fn(),
+      skip: jest.fn(),
+      limit: jest.fn().mockResolvedValue(items),
+    };
+    query.sort.mockReturnValue(query);
+    query.skip.mockReturnValue(query);
+    const find = jest.fn().mockReturnValue(query);
+    const countDocuments = jest.fn().mockResolvedValue(total);
+    Object.assign(built.model, { find, countDocuments });
+    return { ...built, find, query, countDocuments };
+  }
+
+  it('lets the airline’s own moderator and an admin list, newest departure first, one page at a time', async () => {
+    for (const user of [moderator, admin]) {
+      const { service, query } = withFlights([flight()], 11);
+      const result = await service.listForAirline(user, AIRLINE_ID, page);
+      expect(query.sort).toHaveBeenCalledWith({ departureUtc: -1, _id: -1 });
+      expect(query.skip).toHaveBeenCalledWith(10);
+      expect(query.limit).toHaveBeenCalledWith(10);
+      expect(result).toMatchObject({ total: 11, page: 2, limit: 10 });
+      expect(result.items[0]).toMatchObject({
+        flightNumber: 'MS985',
+        departure: { localTime: '14:30' },
+      });
+    }
+  });
+
+  it('keeps other airlines’ moderators, users and hotel moderators out (403)', async () => {
+    for (const user of [
+      otherModerator,
+      { id: 'u1', role: Role.USER },
+      { id: 'h1', role: Role.HOTEL_MODERATOR, providerId: AIRLINE_ID },
+    ]) {
+      const { service, find } = withFlights([]);
+      await expect(
+        service.listForAirline(user, AIRLINE_ID, page),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(find).not.toHaveBeenCalled();
+    }
+  });
+
+  it('answers 404 for an airline that does not exist', async () => {
+    const { service, airlinesService } = withFlights([]);
+    airlinesService.findForFlights.mockResolvedValueOnce(null);
+    await expect(
+      service.listForAirline(admin, new Types.ObjectId().toString(), page),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('limits the query to the airline and the requested status', async () => {
+    const { service, find } = withFlights([]);
+    await service.listForAirline(moderator, AIRLINE_ID, {
+      ...page,
+      status: FlightStatus.CANCELLED,
+    });
+    const filter = (find.mock.calls[0] as unknown[])[0] as Record<
+      string,
+      unknown
+    >;
+    expect(String(filter.airlineId)).toBe(AIRLINE_ID);
+    expect(filter.status).toBe(FlightStatus.CANCELLED);
+  });
+});
+
+describe('statusFilter (FLT-30)', () => {
+  const now = new Date('2027-01-01T00:00:00Z');
+
+  it('Scheduled means not yet departed, even if the cron has not run', () => {
+    expect(statusFilter(FlightStatus.SCHEDULED, now)).toEqual({
+      status: FlightStatus.SCHEDULED,
+      departureUtc: { $gt: now },
+    });
+  });
+
+  it('Departed also covers Scheduled flights whose time has passed', () => {
+    expect(statusFilter(FlightStatus.DEPARTED, now)).toEqual({
+      $or: [
+        { status: FlightStatus.DEPARTED },
+        { status: FlightStatus.SCHEDULED, departureUtc: { $lte: now } },
+      ],
+    });
+  });
+
+  it('Cancelled is stored, and no status means no filter', () => {
+    expect(statusFilter(FlightStatus.CANCELLED, now)).toEqual({
+      status: FlightStatus.CANCELLED,
+    });
+    expect(statusFilter(undefined, now)).toEqual({});
+  });
+});
+
+describe('edits stop at departure (FLT-30)', () => {
+  it('only matches flights that have not departed, even before the minute job runs', async () => {
+    const economy = cabin();
+    const { service, model } = build(flight({ cabins: [economy] }));
+
+    await service.update('f1', moderator, {
+      departureTime: '2090-03-01T15:00',
+    });
+    await service.addCabin('f1', moderator, {
+      cabinClass: CabinClass.BUSINESS,
+      seats: 10,
+      price: 900,
+      freeBags: 2,
+      maxBagWeightKg: 32,
+    });
+    await service.updateCabin('f1', economy._id.toString(), moderator, {
+      price: 450,
+    });
+
+    expect(model.findOneAndUpdate).toHaveBeenCalledTimes(3);
+    for (const call of model.findOneAndUpdate.mock.calls as unknown[][]) {
+      const filter = call[0] as {
+        status: FlightStatus;
+        departureUtc: { $gt: Date };
+      };
+      expect(filter.status).toBe(FlightStatus.SCHEDULED);
+      expect(filter.departureUtc.$gt).toBeInstanceOf(Date);
+      expect(
+        Math.abs(filter.departureUtc.$gt.getTime() - Date.now()),
+      ).toBeLessThan(5000);
+    }
+  });
+
+  it('answers 409 when the flight departs between loading and saving', async () => {
+    const economy = cabin();
+    const { service, model } = build(flight({ cabins: [economy] }));
+    model.findOneAndUpdate.mockResolvedValue(null);
+    await expect(
+      service.update('f1', moderator, { departureTime: '2090-03-01T15:00' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      service.updateCabin('f1', economy._id.toString(), moderator, {
+        price: 1,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
   });
 });

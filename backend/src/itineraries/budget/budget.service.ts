@@ -8,12 +8,16 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import type { AuthUser } from '../../auth/auth.types';
+import { skipFor, toPage } from '../../common/pagination/pagination';
+import type { PaginationQueryDto } from '../../common/pagination/pagination';
 import { fieldError } from '../../common/validation/validation-errors';
 import { CURRENCY_CATALOG } from '../../users/currency-catalog';
 import type { CurrencyCatalog } from '../../users/currency-catalog';
 import { ItineraryRepository } from '../itinerary.repository';
 import { PlaceCatalog } from '../places';
+import { ItineraryBooking } from '../schemas/itinerary-booking.schema';
 import type { ItineraryDocument } from '../schemas/itinerary.schema';
+import { remapToClone } from './budget-clone';
 import { toBudgetEntryView, toTransportCostView } from './budget-view';
 import type {
   BudgetEntryView,
@@ -41,6 +45,8 @@ export class BudgetService {
     private readonly entries: Model<BudgetEntry>,
     @InjectModel(TransportCost.name)
     private readonly transport: Model<TransportCost>,
+    @InjectModel(ItineraryBooking.name)
+    private readonly links: Model<ItineraryBooking>,
     private readonly itineraries: ItineraryRepository,
     private readonly places: PlaceCatalog,
     @Optional()
@@ -49,16 +55,42 @@ export class BudgetService {
   ) {}
 
   /** The itinerary's entries and transport costs, for the budget screen. */
-  async list(user: Caller, itineraryId: string): Promise<BudgetListView> {
+  /**
+   * GEN-05: one page (10 rows) of entries and of transport costs, in the
+   * order they were added. The same page number applies to both lists; each
+   * reports its own total. Converted totals over every entry come from the
+   * budget summary.
+   */
+  async list(
+    user: Caller,
+    itineraryId: string,
+    page: PaginationQueryDto,
+  ): Promise<BudgetListView> {
     await this.itineraries.loadOwned(itineraryId, user);
     const filter = { itineraryId: new Types.ObjectId(itineraryId) };
-    const [entries, transportCosts] = await Promise.all([
-      this.entries.find(filter).sort({ createdAt: 1, _id: 1 }),
-      this.transport.find(filter).sort({ createdAt: 1, _id: 1 }),
-    ]);
+    const order = { createdAt: 1 as const, _id: 1 as const };
+    const [entries, entryCount, transportCosts, transportCount] =
+      await Promise.all([
+        this.entries
+          .find(filter)
+          .sort(order)
+          .skip(skipFor(page))
+          .limit(page.limit),
+        this.entries.countDocuments(filter),
+        this.transport
+          .find(filter)
+          .sort(order)
+          .skip(skipFor(page))
+          .limit(page.limit),
+        this.transport.countDocuments(filter),
+      ]);
     return {
-      entries: entries.map(toBudgetEntryView),
-      transportCosts: transportCosts.map(toTransportCostView),
+      entries: toPage(entries.map(toBudgetEntryView), entryCount, page),
+      transportCosts: toPage(
+        transportCosts.map(toTransportCostView),
+        transportCount,
+        page,
+      ),
     };
   }
 
@@ -165,7 +197,7 @@ export class BudgetService {
     await cost.deleteOne();
   }
 
-  /** ITN-07: a deleted day takes its budget entries and transport costs with it. */
+  /** ITN-07: a deleted day takes its budget entries, transport costs and linked bookings (ITN-27) with it. */
   async removeDay(itineraryId: string, dayId: string): Promise<void> {
     const filter = {
       itineraryId: new Types.ObjectId(itineraryId),
@@ -174,6 +206,7 @@ export class BudgetService {
     await Promise.all([
       this.entries.deleteMany(filter),
       this.transport.deleteMany(filter),
+      this.links.deleteMany(filter),
     ]);
   }
 
@@ -183,6 +216,25 @@ export class BudgetService {
     await Promise.all([
       this.entries.deleteMany(filter),
       this.transport.deleteMany(filter),
+      this.links.deleteMany(filter),
+    ]);
+  }
+
+  /** ITN-21: copies this itinerary's budget entries and transport costs onto its clone. */
+  async cloneInto(
+    fromItineraryId: string,
+    toItineraryId: string,
+    dayIdMap: Record<string, string>,
+  ): Promise<void> {
+    const source = { itineraryId: new Types.ObjectId(fromItineraryId) };
+    const target = new Types.ObjectId(toItineraryId);
+    const [entries, transportCosts] = await Promise.all([
+      this.entries.find(source).lean(),
+      this.transport.find(source).lean(),
+    ]);
+    await Promise.all([
+      this.entries.insertMany(remapToClone(entries, dayIdMap, target)),
+      this.transport.insertMany(remapToClone(transportCosts, dayIdMap, target)),
     ]);
   }
 

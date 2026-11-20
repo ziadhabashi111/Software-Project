@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../auth/auth.types';
+import { fieldError } from '../common/validation/validation-errors';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
+import { ActivityImagesService } from './activity-images.service';
 import { ItineraryRepository } from './itinerary.repository';
 import { ActivityView, toActivityView } from './itinerary-view';
 import type { Activity, ItineraryDocument } from './schemas/itinerary.schema';
@@ -24,7 +26,10 @@ function findActivity(
 /** ITN-10: activities of an itinerary day. */
 @Injectable()
 export class ActivitiesService {
-  constructor(private readonly repository: ItineraryRepository) {}
+  constructor(
+    private readonly repository: ItineraryRepository,
+    private readonly images: ActivityImagesService,
+  ) {}
 
   async add(
     user: Caller,
@@ -73,6 +78,13 @@ export class ActivitiesService {
         if (dto.currency !== undefined) {
           activity.currency = dto.currency ?? undefined;
         }
+        // A cost is meaningless without its currency (ITN-14, ITN-18).
+        if (activity.cost != null && !activity.currency) {
+          throw fieldError(
+            'currency',
+            'Give the currency of the cost, such as USD',
+          );
+        }
         return activity;
       },
     );
@@ -81,10 +93,14 @@ export class ActivitiesService {
 
   async remove(user: Caller, activityId: string): Promise<void> {
     const itineraryId = await this.itineraryOf(activityId);
+    let imageUrls: string[] = [];
     await this.repository.change(itineraryId, user, (itinerary) => {
       const { activities, index } = findActivity(itinerary, activityId);
+      imageUrls = activities[index].images.map((image) => image.url);
       activities.splice(index, 1);
     });
+    // The activity is gone, so are its pictures (ITN-12).
+    await this.images.discard(imageUrls, user.id);
   }
 
   /** Activities are addressed by their own id; find the itinerary that holds it. */

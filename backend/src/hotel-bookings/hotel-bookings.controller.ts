@@ -22,7 +22,9 @@ import {
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { HOLD_MINUTES } from '../common/booking-status/hold';
 import type { Paginated } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
@@ -53,10 +55,11 @@ export class HotelBookingsController {
 
   @Post()
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiReq(
     ['HTL-16', 'HTL-18'],
-    'Reserve rooms (10-minute hold)',
-    'Holds one or more rooms of the same hotel for the same dates as one Pending Payment reservation for 10 minutes. Guests are assigned per room (adults, children aged 0-17); the reservation needs at least one adult and no room may exceed its maximum occupancy. The total is the sum over rooms of nights x the price per night at booking time. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, the whole request is rejected (409) and nothing is held. Check-out must be after check-in, a stay covers at most 30 nights, and check-in cannot be in the past. Unpaid holds become Expired after 10 minutes and the rooms are released.',
+    `Reserve rooms (${HOLD_MINUTES}-minute hold)`,
+    `Holds one or more rooms of the same hotel for the same dates as one Pending Payment reservation for ${HOLD_MINUTES} minutes. Guests are assigned per room (adults, children aged 0-17); the reservation needs at least one adult and no room may exceed its maximum occupancy. The total is the sum over rooms of nights x the price per night at booking time. If any room overlaps a Confirmed reservation, an unexpired hold or a blocked range, the whole request is rejected (409) and nothing is held. Check-out must be after check-in, a stay covers at most 30 nights, and check-in cannot be in the past. Unpaid holds become Expired after ${HOLD_MINUTES} minutes and the rooms are released.`,
   )
   @ApiCreatedResponse({
     description: 'The Pending Payment reservation and its hold expiry',

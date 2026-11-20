@@ -66,7 +66,7 @@ export class AuthGuard implements CanActivate {
     if (this.sessions) {
       const alive =
         !!user.sessionId &&
-        (await this.sessions.validateAndTouch(user.sessionId));
+        (await this.sessions.validateAndTouch(user.sessionId, user.id));
       if (!alive) throw new UnauthorizedException('Session expired');
     }
     return user;

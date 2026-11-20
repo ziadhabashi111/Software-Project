@@ -11,6 +11,8 @@ import { CreateDayDto } from './dto/create-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { UpdateDayDto } from './dto/update-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
+import { imageUrlsOf } from './activity-images';
+import { ActivityImagesService } from './activity-images.service';
 import { parseDate } from './itinerary-dates';
 import { ItineraryBudgets } from './itinerary-budgets';
 import { ItineraryRepository } from './itinerary.repository';
@@ -26,8 +28,7 @@ import type {
   ItineraryDay,
   ItineraryDocument,
 } from './schemas/itinerary.schema';
-
-export const MAX_DAYS = 60;
+import { MAX_DAYS } from './itinerary-limits';
 
 type Caller = Pick<AuthUser, 'id' | 'role'>;
 
@@ -40,6 +41,7 @@ export class ItinerariesService {
     private readonly repository: ItineraryRepository,
     private readonly places: PlaceCatalog,
     private readonly budgets: ItineraryBudgets,
+    private readonly images: ActivityImagesService,
   ) {}
 
   async create(user: Caller, dto: CreateItineraryDto): Promise<ItineraryView> {
@@ -86,9 +88,11 @@ export class ItinerariesService {
 
   /** Clones other users made earlier are separate copies and stay untouched. */
   async remove(user: Caller, id: string): Promise<void> {
-    await this.repository.loadOwned(id, user);
+    const itinerary = await this.repository.loadOwned(id, user);
     await this.repository.deleteById(id);
     await this.tellBudgets((provider) => provider.removeItinerary(id));
+    // Its pictures go with it (ITN-12).
+    await this.images.discard(imageUrlsOf(itinerary.days), user.id);
   }
 
   async addDay(
@@ -132,11 +136,15 @@ export class ItinerariesService {
     id: string,
     dayId: string,
   ): Promise<ItineraryView> {
+    let imageUrls: string[] = [];
     const { itinerary } = await this.repository.change(id, user, (doc) => {
       const index = indexOfDay(doc, dayId);
+      imageUrls = imageUrlsOf([doc.days[index]]);
       doc.days.splice(index, 1);
     });
     await this.tellBudgets((provider) => provider.removeDay(id, dayId));
+    // The day's activities are gone, so are their pictures (ITN-12).
+    await this.images.discard(imageUrls, user.id);
     return this.view(itinerary);
   }
 

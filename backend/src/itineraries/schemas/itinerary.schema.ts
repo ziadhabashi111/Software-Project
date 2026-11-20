@@ -65,6 +65,25 @@ export class ItineraryDay {
 }
 const ItineraryDaySchema = SchemaFactory.createForClass(ItineraryDay);
 
+/** ITN-21: where a cloned itinerary came from, so the original author is credited. */
+@Schema({ _id: false })
+export class ClonedFrom {
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Itinerary',
+    required: true,
+  })
+  itinerary!: Types.ObjectId;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
+  author!: Types.ObjectId;
+
+  /** The author's name when it was cloned, so the credit survives a rename or deactivation. */
+  @Prop({ type: String, required: true })
+  authorName!: string;
+}
+const ClonedFromSchema = SchemaFactory.createForClass(ClonedFrom);
+
 /** Days and activities are bounded and owned by the itinerary, so they are embedded. */
 @Schema({ timestamps: true, optimisticConcurrency: true })
 export class Itinerary {
@@ -100,6 +119,10 @@ export class Itinerary {
 
   @Prop({ type: [ItineraryDaySchema], default: [] })
   days!: ItineraryDay[];
+
+  /** Set only on a clone (ITN-21). */
+  @Prop({ type: ClonedFromSchema })
+  clonedFrom?: ClonedFrom;
 
   createdAt!: Date;
   updatedAt!: Date;

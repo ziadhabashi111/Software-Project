@@ -10,15 +10,19 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsOptionalNonNull } from '../../common/validation/is-optional-non-null';
 import { CURRENCY_CODE, TIME_OF_DAY, trim, upper } from './transforms';
 
 /**
  * Body for `PATCH /api/activities/:id` (ITN-10). Send `null` to clear the
- * description, time, cost or currency.
+ * description, time, cost or currency. A cost always has a currency: a new
+ * cost keeps the activity's stored currency unless one is sent, and the
+ * currency cannot be cleared while a cost remains (checked by the service,
+ * which sees the stored activity).
  */
 export class UpdateActivityDto {
   @ApiPropertyOptional({ maxLength: 100 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @IsNotEmpty()
@@ -43,7 +47,12 @@ export class UpdateActivityDto {
   @Max(1_000_000_000)
   cost?: number | null;
 
-  @ApiPropertyOptional({ example: 'USD', nullable: true })
+  @ApiPropertyOptional({
+    example: 'USD',
+    nullable: true,
+    description:
+      'Currency of the cost. Required when setting a cost on an activity that has no currency yet.',
+  })
   @IsOptional()
   @Transform(upper)
   @Matches(CURRENCY_CODE, {

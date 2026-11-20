@@ -390,6 +390,27 @@ describe('Itineraries: structure, days and activities (ITN-01..10, 20; real Mong
       ]);
     });
 
+    it.each([['title'], ['countries'], ['startDate'], ['visibility']])(
+      'rejects a null %s with a field error and keeps the itinerary (GEN-13)',
+      async (field) => {
+        const { client } = await loggedInAs();
+        const created = await createItinerary(client);
+        const res = await client
+          .patch(`/api/itineraries/${created.id}`)
+          .send({ [field]: null })
+          .expect(400);
+        const errors = (res.body as { errors: { field: string }[] }).errors;
+        expect(errors.map((e) => e.field)).toEqual([field]);
+        const after = await client
+          .get(`/api/itineraries/${created.id}`)
+          .expect(200);
+        expect(after.body).toMatchObject({
+          title: created.title,
+          countries: created.countries,
+        });
+      },
+    );
+
     it('changes visibility and Private takes effect immediately', async () => {
       const { client } = await loggedInAs();
       const created = await createItinerary(client);
@@ -936,6 +957,7 @@ describe('Itineraries: structure, days and activities (ITN-01..10, 20; real Mong
       ['a time past midnight', { time: '24:00' }, 'time'],
       ['a negative cost', { cost: -1 }, 'cost'],
       ['a cost that is not a number', { cost: 'free' }, 'cost'],
+      ['a cost without a currency (ITN-18)', { cost: 10 }, 'currency'],
       ['a currency that is not a code', { currency: 'dollars' }, 'currency'],
     ])('rejects %s', async (_name, change, field) => {
       const { client } = await loggedInAs();
@@ -989,6 +1011,45 @@ describe('Itineraries: structure, days and activities (ITN-01..10, 20; real Mong
       expect(body.time).toBeUndefined();
       expect(body.cost).toBeUndefined();
       expect(body.name).toBe('Egyptian Museum');
+    });
+
+    it('never stores a cost without its currency (ITN-18)', async () => {
+      const { client } = await loggedInAs();
+      const { itineraryId, dayId } = await withDay(client);
+      const created = await client
+        .post(`/api/itineraries/${itineraryId}/days/${dayId}/activities`)
+        .send({ name: 'Museum', cost: 10, currency: 'EGP' })
+        .expect(201);
+      const id = (created.body as ActivityView).id;
+
+      // A new cost keeps the stored currency...
+      const edited = await client
+        .patch(`/api/activities/${id}`)
+        .send({ cost: 15 })
+        .expect(200);
+      expect(edited.body).toMatchObject({ cost: 15, currency: 'EGP' });
+
+      // ...but the currency cannot be cleared while the cost remains.
+      const cleared = await client
+        .patch(`/api/activities/${id}`)
+        .send({ currency: null })
+        .expect(400);
+      expect(fieldsOf(cleared)).toContain('currency');
+
+      // An activity with no cost and no currency needs one to get a cost.
+      const bare = await client
+        .post(`/api/itineraries/${itineraryId}/days/${dayId}/activities`)
+        .send({ name: 'Walk' })
+        .expect(201);
+      const priced = await client
+        .patch(`/api/activities/${(bare.body as ActivityView).id}`)
+        .send({ cost: 5 })
+        .expect(400);
+      expect(fieldsOf(priced)).toContain('currency');
+      await client
+        .patch(`/api/activities/${(bare.body as ActivityView).id}`)
+        .send({ cost: 5, currency: 'USD' })
+        .expect(200);
     });
 
     it('saves nothing when an edit is invalid', async () => {

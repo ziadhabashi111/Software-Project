@@ -101,6 +101,13 @@ class FakeReports implements ReportSource {
     this.resolved.push({ id, ...resolution });
     return Promise.resolve(true);
   }
+
+  reopen(id: string): Promise<void> {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.status = 'open';
+    this.resolved = this.resolved.filter((r) => r.id !== id);
+    return Promise.resolve();
+  }
 }
 
 /** An in-memory stand-in for a content module (posts, comments, itineraries). */
@@ -145,7 +152,10 @@ describe('Admin moderation and audit logs (GEN-07, GEN-09, GEN-10; real MongoDB 
   const comments = new FakeContent();
 
   beforeAll(async () => {
-    ctx = await createTestApp({ extraModules: [AuditModule, AdminModule] });
+    ctx = await createTestApp({
+      extraModules: [AuditModule, AdminModule],
+      replSet: true,
+    });
     users = ctx.moduleRef.get(UsersService);
     passwords = ctx.moduleRef.get(PasswordService);
     moderators = ctx.moduleRef.get(ContentModerators);

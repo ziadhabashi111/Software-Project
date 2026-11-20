@@ -10,6 +10,7 @@ import { Interval } from '@nestjs/schedule';
 import type { ClientSession, Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../common/booking-status/hold';
 import { PLATFORM_CURRENCY } from '../payments/platform-currency';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelInventoryRegistry } from './hotel-inventory';
@@ -65,7 +66,7 @@ export class HotelReservationsService {
     private readonly shared: SharedServices,
   ) {}
 
-  /** `POST /api/hotel-bookings`: hold the rooms for 10 minutes. */
+  /** `POST /api/hotel-bookings`: hold the rooms for HOLD_MINUTES. */
   async hold(
     user: AuthUser,
     dto: CreateHotelBookingDto,
@@ -91,17 +92,35 @@ export class HotelReservationsService {
       checkOut,
     });
     const nights = nightsOf(checkIn, checkOut);
-    const priced = priceRooms(dto.rooms, available, nights.length);
+    let priced = priceRooms(dto.rooms, available, nights.length);
     const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
     const roomObjectIds = roomIds.map((id) => new Types.ObjectId(id));
 
-    let released: Types.ObjectId[] = [];
+    // PAY-01: run-out holds on these rooms are released only once their
+    // payment is stopped; one the user already paid keeps its rooms.
+    const releasable = await this.releasableRunOutHolds(
+      roomObjectIds,
+      nights,
+      now,
+    );
     try {
       const reservation = await this.connection.transaction(async (session) => {
-        released = await this.releaseExpiredNights(
+        // HTL-06: re-check the rooms after locking them, so a block, an
+        // availability change or a deactivation saved meanwhile is seen.
+        if (inventory.lockRooms) {
+          const locked = await inventory.lockRooms(
+            hotel.id,
+            roomIds,
+            { checkIn, checkOut },
+            session,
+          );
+          priced = priceRooms(dto.rooms, locked, nights.length);
+        }
+        await this.releaseExpiredNights(
           roomObjectIds,
           nights,
           now,
+          releasable,
           session,
         );
 
@@ -149,7 +168,6 @@ export class HotelReservationsService {
         );
         return created;
       });
-      await this.cancelPayments(released);
       return toReservationView(reservation, now);
     } catch (error) {
       if (isDuplicateKey(error)) {
@@ -164,7 +182,7 @@ export class HotelReservationsService {
   }
 
   /**
-   * Turns unpaid holds whose 10 minutes are over into Expired and releases
+   * Turns unpaid holds whose HOLD_MINUTES are over into Expired and releases
    * their rooms (HTL-18). Runs every 30 seconds; safe to run concurrently.
    */
   @Interval('hotel-hold-expiry', 30_000)
@@ -175,14 +193,15 @@ export class HotelReservationsService {
           status: ReservationStatus.PENDING_PAYMENT,
           holdExpiresAt: { $lte: now },
         },
-        { _id: 1 },
+        { _id: 1, holdExpiresAt: 1 },
       )
       .limit(EXPIRY_BATCH)
       .lean();
 
     let expired = 0;
-    for (const { _id } of due) {
+    for (const { _id, holdExpiresAt } of due) {
       try {
+        if (!(await this.paymentStopped(_id, holdExpiresAt, now))) continue;
         const changed = await this.connection.transaction(async (session) => {
           const result = await this.reservations.updateOne(
             {
@@ -199,10 +218,7 @@ export class HotelReservationsService {
           await this.roomNights.deleteMany({ reservation: _id }, { session });
           return true;
         });
-        if (changed) {
-          expired += 1;
-          await this.shared.cancelPendingPayment(_id.toString());
-        }
+        if (changed) expired += 1;
       } catch (error) {
         this.logger.error(
           `Could not expire hotel reservation ${_id.toString()}`,
@@ -211,6 +227,59 @@ export class HotelReservationsService {
       }
     }
     return expired;
+  }
+
+  /**
+   * ACC-12: the account is being deactivated, so its unpaid holds end now
+   * (rooms released, PaymentIntent cancelled). A payment that still lands is
+   * refunded by the webhook instead of confirming a stay.
+   */
+  async endHoldsOfUser(userId: string, now: Date = new Date()): Promise<void> {
+    if (!Types.ObjectId.isValid(userId)) return;
+    const pending = await this.reservations
+      .find(
+        {
+          user: new Types.ObjectId(userId),
+          status: ReservationStatus.PENDING_PAYMENT,
+        },
+        { _id: 1 },
+      )
+      .lean();
+    for (const { _id } of pending) {
+      const ended = await this.connection.transaction(async (session) => {
+        const result = await this.reservations.updateOne(
+          { _id, status: ReservationStatus.PENDING_PAYMENT },
+          { $set: { status: ReservationStatus.EXPIRED, expiredAt: now } },
+          { session },
+        );
+        if (result.modifiedCount === 0) return false;
+        await this.roomNights.deleteMany({ reservation: _id }, { session });
+        return true;
+      });
+      if (ended) await this.shared.cancelPendingPayment(_id.toString());
+    }
+  }
+
+  /**
+   * PAY-01, HTL-18: before a run-out hold expires, its PaymentIntent is
+   * cancelled. If Stripe says the user already paid (in the last seconds of
+   * the hold), the hold is left to the webhook, which confirms it or refunds
+   * the payment. Once Stripe has stopped retrying webhooks the hold expires
+   * anyway, so rooms are never held forever.
+   */
+  private async paymentStopped(
+    reservationId: Types.ObjectId,
+    holdExpiresAt: Date | undefined,
+    now: Date,
+  ): Promise<boolean> {
+    const payment = await this.shared.cancelPendingPayment(
+      reservationId.toString(),
+    );
+    if (payment !== 'not_cancellable') return true;
+    return (
+      !!holdExpiresAt &&
+      now.getTime() - holdExpiresAt.getTime() >= STRIPE_WEBHOOK_RETRY_MS
+    );
   }
 
   /**
@@ -229,24 +298,58 @@ export class HotelReservationsService {
     return result.modifiedCount;
   }
 
-  /** Expired holds can no longer be paid: cancel their PaymentIntents (PAY-01). */
-  private async cancelPayments(ids: Types.ObjectId[]): Promise<void> {
-    for (const id of ids) {
-      await this.shared.cancelPendingPayment(id.toString());
+  /**
+   * The run-out holds on these rooms and nights that a new hold may take
+   * over. Each one's PaymentIntent is cancelled first (outside the hold's
+   * transaction, as it calls Stripe); a hold the user already paid in its
+   * last seconds is left out, so it keeps its rooms and the webhook confirms
+   * it. Holds already Expired are always releasable.
+   */
+  private async releasableRunOutHolds(
+    rooms: Types.ObjectId[],
+    nights: Date[],
+    now: Date,
+  ): Promise<Set<string>> {
+    const stale = await this.roomNights
+      .find(
+        {
+          room: { $in: rooms },
+          night: { $in: nights },
+          holdExpiresAt: { $lte: now },
+        },
+        { reservation: 1 },
+      )
+      .lean();
+    const ids = [...new Set(stale.map((row) => row.reservation.toString()))];
+    const releasable = new Set<string>();
+    if (ids.length === 0) return releasable;
+    const holds = await this.reservations
+      .find({ _id: { $in: ids } }, { _id: 1, status: 1, holdExpiresAt: 1 })
+      .lean();
+    for (const held of holds) {
+      if (
+        held.status !== ReservationStatus.PENDING_PAYMENT ||
+        (await this.paymentStopped(held._id, held.holdExpiresAt, now))
+      ) {
+        releasable.add(held._id.toString());
+      }
     }
+    return releasable;
   }
 
   /**
-   * Inside a hold: any night of these rooms still taken by a hold that has
-   * already expired is released, and that hold becomes Expired, so only
-   * Confirmed reservations and live holds can block the new request.
+   * Inside a hold: nights of these rooms still taken by a run-out hold in
+   * `releasable` (payment stopped, see `releasableRunOutHolds`) are released
+   * and that hold becomes Expired, so only Confirmed reservations, live holds
+   * and holds the user already paid can block the new request.
    */
   private async releaseExpiredNights(
     rooms: Types.ObjectId[],
     nights: Date[],
     now: Date,
+    releasable: Set<string>,
     session: ClientSession,
-  ): Promise<Types.ObjectId[]> {
+  ): Promise<void> {
     const stale = await this.roomNights
       .find(
         {
@@ -258,21 +361,17 @@ export class HotelReservationsService {
       )
       .session(session)
       .lean();
-    if (stale.length === 0) return [];
-
+    // Only holds whose payment was stopped before the transaction; any
+    // other night (a paid hold, or one that ran out just now) stays and the
+    // new hold is refused with 409.
     const ids = [
       ...new Map(
-        stale.map((row) => [row.reservation.toString(), row.reservation]),
+        stale
+          .filter((row) => releasable.has(row.reservation.toString()))
+          .map((row) => [row.reservation.toString(), row.reservation]),
       ).values(),
     ];
-    // The holds this request expires, so their PaymentIntents get cancelled.
-    const expiring = await this.reservations
-      .find(
-        { _id: { $in: ids }, status: ReservationStatus.PENDING_PAYMENT },
-        { _id: 1 },
-      )
-      .session(session)
-      .lean();
+    if (ids.length === 0) return;
     await this.reservations.updateMany(
       { _id: { $in: ids }, status: ReservationStatus.PENDING_PAYMENT },
       { $set: { status: ReservationStatus.EXPIRED, expiredAt: now } },
@@ -283,6 +382,5 @@ export class HotelReservationsService {
       { reservation: { $in: ids }, holdExpiresAt: { $lte: now } },
       { session },
     );
-    return expiring.map((row) => row._id);
   }
 }

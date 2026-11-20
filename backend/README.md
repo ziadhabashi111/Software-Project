@@ -105,6 +105,10 @@ await this.audit.log({ actorId: admin.id, action: AuditAction.ACCOUNT_SUSPENDED,
 | `POST /api/auth/logout` | anyone | clears the cookies and revokes the session, `204` |
 | `GET /api/auth/me` | logged in | the current user (this is how the frontend learns who is logged in) |
 | `PATCH /api/auth/change-password` | logged in | `currentPassword` + `newPassword`; signs out other devices, keeps this one, `204` |
+| `POST /api/auth/forgot-password` | guest | **ACC-07 (optional).** `email`. Emails a reset link when the address belongs to an active account; the answer is always the same, so it never reveals whether the address is registered. The link works once, for 30 minutes, and a newer request replaces an older link. 10 requests per minute per address |
+| `POST /api/auth/reset-password` | guest | **ACC-07 (optional).** `token` (from the email) + `newPassword` (password rules). Single-use and expires after 30 minutes (`400` field `token` otherwise). Signs the account out everywhere, clears a login lock and a forced password change. 10 requests per minute per address |
+| `GET /api/auth/verify-email?token=` | guest | **ACC-02 (optional).** Opens the link from the verification email (sent at registration, valid 24 hours, works once; `400` on field `token` otherwise). Marks the account verified. Users created before this, seeded, or made by an admin count as verified. 20 requests per minute per address |
+| `POST /api/auth/resend-verification` | logged in | **ACC-02 (optional).** Emails a new verification link, replacing the older one; sends nothing if already verified. 5 requests per minute per address |
 
 **For the frontend (Milestone 2):** tokens are never in the response body or readable by JavaScript; send requests with `credentials: 'include'`. The access token lives 15 minutes (`JWT_EXPIRES_IN`). On a `401`, call `POST /api/auth/refresh` once and retry; if that also fails, go to login (and return to the page afterwards, ACC-10). A `403` with `code: "PASSWORD_CHANGE_REQUIRED"` means a temporary password: send the user to the change-password page (only `me`, `change-password` and `logout` work until then).
 
@@ -171,7 +175,7 @@ Resolving a report and moderating content are audited (`REPORT_RESOLVED`, `CONTE
 - **Posts and comments (Ahmed), reviews (Amina), itineraries (Habashi):** inject `ContentModerators` and `register(ContentType.POST | COMMENT | REVIEW | ITINERARY, handler)`. The handler has `hide(id)` and `delete(id)`, each returning `{ authorId?, title? }` or `null` for an unknown id, and both must be safe to call twice. `hide` sets `isHidden`.
 - **Showing hidden content:** use `canViewContent(content, user)` or `assertContentVisible(content, user)` from `common/security/content-visibility.ts` wherever you read or list content. Hidden content is visible only to its author and to admins (everyone else gets a `404`).
 
-## Itineraries (ITN-01, 03, 05, 07, 08, 09, 10, 20; issue 7)
+## Itineraries (ITN-01, 03, 05, 07, 08, 09, 10, 20, 21, 25; issues 7 and 8)
 
 Regular users only (`403` for admins and moderators). An itinerary belongs to its owner: anyone else gets `404` (ACC-11).
 
@@ -187,17 +191,57 @@ Regular users only (`403` for admins and moderators). An itinerary belongs to it
 | `DELETE /api/itineraries/:id/days/:dayId?confirm=true` | the rest are renumbered and re-dated; returns the itinerary |
 | `PATCH /api/itineraries/:id/days/reorder` | `{ dayId, position }` moves one day (1 to the number of days) |
 | `POST /api/itineraries/:id/days/:dayId/activities` | `name`, optional `description`, `time` (`HH:mm`), `cost`, `currency` |
-| `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity |
+| `PATCH` / `DELETE /api/activities/:id` | edit (`null` clears optional fields) or delete an activity (its image files are deleted too) |
+| `POST /api/activities/:id/images` | **ITN-12.** Multipart field `images`: JPG or PNG (the real format is checked), <= 5 MB each, at most 5 per activity in total; all or nothing. Returns the activity |
+| `DELETE /api/activities/:id/images/:imageId` | removes the image and deletes its file; returns the activity |
+| `GET /api/itineraries/public/search` | **open to everyone (ITN-21).** Only public itineraries; `q` (title, or the name/code of a country or city), `country`, `city`, `minDays`, `maxDays`, newest first, 10 per page |
+| `GET /api/itineraries/public/:id` | **open to everyone (ITN-21).** Read-only: author, days, activities, groups and the `budget` in `?currency=` (USD by default). `404` for private, hidden or deactivated-author itineraries |
+| `POST /api/itineraries/:id/clone` | copy a public itinerary (or your own) into a **new private one of yours** (ITN-21): days, activities and budget entries; credits the original author in `clonedFrom`; independent of the original; activity images are not copied |
+| `GET /api/itineraries/:id/hotels` | hotels for a city group of **my** itinerary (ITN-25): `group` (from 1), `guests`, `rooms`; check-in = first day of the group, check-out = the day after its last. Uses the hotel search (HTL-11), so the same rules apply (a stay is at most 30 nights) |
+| `POST /api/itineraries/:id/bookings` | **optional bonus (ITN-27).** Link one of **my** Confirmed (or Completed) bookings to a day: `{ bookingType: "flight" | "hotel", bookingId, dayId }`. A flight counts as intercity transport and a hotel stay as accommodation in my budget summary on that day, in the booking's currency. `404` for a booking that is not mine, `409` if it is not confirmed or already linked |
+| `GET /api/itineraries/:id/bookings` | **optional bonus (ITN-27).** The linked bookings by day with reference, status, dates and price right now; `counted: false` once a booking is cancelled or expired (it no longer feeds the budget) |
+| `DELETE /api/itineraries/:id/bookings/:linkId` | **optional bonus (ITN-27).** Unlink (`204`); the booking itself is untouched. Linked bookings never appear on a public itinerary, its budget or a clone |
+| `GET /api/itineraries/:id/pdf` | **optional bonus (ITN-28).** PDF download (`?currency=`). The owner gets days, activities, linked bookings and their budget; anyone else, signed in or not, gets only the public copy of a public, visible itinerary (author, days, public budget, no bookings); everything else is `404` |
 
 A day has no stored number or date: both follow from its position and the start date, so deleting or moving a day can never leave them wrong. `groups` lists consecutive days in the same city with `startDay`, `endDay`, `dayCount`, dates and a `subtotal`. Days and activities are embedded in the itinerary, saved with optimistic concurrency, so parallel requests never push an itinerary past 60 days or lose a day.
 
-Admins can hide or delete any itinerary through `DELETE /api/admin/content/itinerary/:id` (GEN-10). A hidden itinerary (`isHidden: true`) stays visible to its owner and admins. The public search and the public view (issue 8) must leave out hidden itineraries and those of deactivated owners, and may use `canViewContent`.
+Admins can hide or delete any itinerary through `DELETE /api/admin/content/itinerary/:id` (GEN-10). A hidden itinerary (`isHidden: true`) stays visible to its owner and admins. The public search, the public view and the clone leave out hidden itineraries and those of deactivated owners (the owner is checked in the database query, not after the page is cut, so paging stays correct).
 
 **Hooks for the other modules** (import `ItinerariesModule` and register in `onModuleInit`):
 
-- **Countries and cities (Ahmed, GEN-12):** inject `PlaceCatalog` and `register({ isCountry(code), isCity(id) })`. Until then a country only has to look like `EG` and a city like `cairo`.
-- **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
-- **Activity images (ITN-12):** `images` is in the schema; the upload and delete endpoints follow once Ahmed's shared upload helper (GEN-08) exists.
+- **Countries and cities (Ahmed, GEN-12):** inject `PlaceCatalog` and `register({ isCountry(code), isCity(id), matchKeyword? })`. `matchKeyword(keyword)` returns the `countryCodes` and `cityIds` whose code, id or name contains the keyword, so the public search finds "egypt" or "cairo" (already done by `ReferenceDataService`). Until then a country only has to look like `EG` and a city like `cairo`.
+- **Hotel search (Noureldin, HTL-11, ITN-25):** inject `HotelSearchHook` and `register(port)` with `search({ city, checkIn, checkOut, guests, rooms, page, limit })` returning `Paginated<hotel>`. `GET /api/itineraries/:id/hotels` calls it for the dates of the chosen city group, so you do not build anything itinerary-specific; until you register it answers `503`.
+- **Blog author page (Ahmed, BLG-12):** the itinerary module registers itself with the blog's `AuthorItineraries`, so an author's public itineraries need nothing from you.
+- **Link an itinerary to a post (BLG-13, optional bonus):** `PATCH /api/posts/:id/itinerary` with `{ itineraryId }` (or `null` to unlink) links one of the author's own **public** itineraries to their post. The itinerary module answers the blog's `AuthorItineraries.ownedBy` (the author's own itinerary, public or not) and `publicSummary` (only while it is public, not hidden and its owner active). Readers of `GET /api/posts/:id` get `itinerary` (a summary) only while that holds; the author's own post views show it with `isPublic`. A private, hidden or deleted itinerary simply shows no link.
+- **Budgets (Youssef, ITN-14, 16, 18):** inject `ItineraryBudgets` and `register(provider)`. `dayTotals(itineraryId, ownerId)` returns `{ currency, byDay }` in the owner's preferred currency (keyed by day id; the day ids are stable when days move), which gives each group its `subtotal` (`null` until you register, or if it fails). `removeDay` and `removeItinerary` are called after a delete so you can remove the budget entries and transport costs. Optional `cloneBudgets(from, to, dayIdMap)` copies the budget onto a clone (ITN-21) and `publicSummary(itineraryId, currency?)` gives the budget of a public itinerary (both done by `BudgetProvider`). An activity `cost` is stored with its own optional `currency`; count it under Activities and convert it with your rates.
+- **Activity images (ITN-12):** done with Ahmed's upload helper (GEN-08). The files belong to the traveller who uploaded them, so only the itinerary's owner can add or remove them, and deleting an activity, a day or the whole itinerary (also by an admin) deletes the files. A clone does not copy images: the files belong to the original author.
+
+## Hotels, rooms and availability (HTL-01 to HTL-10; issues 31 to 33)
+
+Done in `src/hotels/`. A hotel has a profile, rooms, and per-room availability and blocked ranges (embedded in the room, both ends included, saved with optimistic concurrency so parallel requests never leave overlapping ranges).
+
+| Endpoint | Notes |
+| --- | --- |
+| `POST /api/hotels` | **admin only (HTL-01).** `name`, `address`, `city` (id from the cities list), `country` (code), `description`, `starClass` (1 to 5), `amenities`. Create its moderator afterwards with `POST /api/admin/moderators` |
+| `GET /api/hotels/:id` | **open to everyone (HTL-02, 09, 10).** Profile, photos, amenities, check-in/out times (default 14:00 / 12:00), `cancellationPolicy` (longest notice first) and `rating`. A deactivated hotel answers `404` except to admins and its own moderator |
+| `PATCH /api/hotels/:id` | the hotel's own moderator only (`403` for any other moderator and for admins) |
+| `PUT /api/hotels/:id/policies` | check-in/out times and/or the whole list of cancellation tiers (HTL-09, 10); same tier rule as flights |
+| `POST /api/hotels/:id/images` | **HTL-01, GEN-08.** The hotel's own moderator only. Multipart field `images`: JPG or PNG (the real format is checked), <= 5 MB each, at most 5 photos per hotel in total (checked inside the database write, so parallel uploads cannot exceed it); all or nothing. Returns the hotel |
+| `DELETE /api/hotels/:id/images/:imageId` | removes the photo and deletes its file; returns the hotel |
+| `POST` / `GET /api/hotels/:id/rooms` | **HTL-03.** Room `name` is unique within the hotel (`409`), `beds`, `maxOccupancy`, `pricePerNight`, optional `type` |
+| `PATCH` / `DELETE /api/hotels/:id/rooms/:roomId` | edit (the name cannot change), or delete a room nobody ever reserved (`409 ROOM_HAS_RESERVATIONS`) |
+| `PATCH /api/hotels/:id/rooms/:roomId/deactivate` / `reactivate` | deactivating is refused while a room has an upcoming reservation (`409 ROOM_RESERVED`) |
+| `POST /api/hotels/:id/rooms/:roomId/availability` | **HTL-04.** `{ from, to }`, both days included; ranges of one room may not overlap (`400`) and dates must exist (no 30 February) |
+| `PATCH` / `DELETE .../availability/:rangeId` | move or remove a range; refused (`409 AVAILABILITY_IN_USE`) if it would remove a night a reservation holds |
+| `POST .../blocks`, `DELETE .../blocks/:blockId` | **HTL-05.** Block nights (maintenance); refused (`409 ROOM_RESERVED`) over a held night |
+| `GET /api/hotels/:id/availability?from&to` | **HTL-08.** Every room, every night: `Available`, `Booked` (with `reservationId` and the booking `reference`, `null` until paid) or `Blocked`. At most 62 days |
+| `GET /api/hotels/search` | **open to everyone (HTL-11, 12).** `city` or `country`, `checkIn`, `checkOut`, `guests`, `rooms` (default 1). Active hotels with at least that many rooms free for the whole stay and combined maximum occupancy >= guests. Filters: inclusive `minPrice` / `maxPrice` per night (of the cheapest free room), `minRating` 1-5 (unrated hotels are left out when set). Sort: `sortBy=price|rating`, `order=asc|desc` (unrated last). Paginated (10 per page). `400`: no place, check-out not after check-in, check-in in the past, impossible date, rooms > guests, min price > max, stay over 30 nights |
+| `GET /api/hotels/:id/rooms/available?checkIn&checkOut` | **open to everyone (HTL-15).** Free rooms, cheapest first, with type, beds, maximum occupancy, `pricePerNight` and `totalPrice` (x nights). A deactivated hotel is `404` except to admins and its own moderator |
+| `GET /api/hotels/:id/reservations` | **HTL-22.** The hotel's own moderator (or an admin): guest, dates, status, reference, rooms, total; paginated |
+
+A room is **free** for a stay (search and free rooms) when it can be booked and no Confirmed reservation or unexpired hold has taken any night. A room can be booked for a stay only if the room and hotel are active, every night lies inside an availability range and no night is blocked (check-out day excluded). `HotelCatalog` is what the booking module and the admin see: it registers with `HotelInventoryRegistry` (so `POST /api/hotel-bookings` stops answering `503`) and `ProviderDirectory` (so a hotel moderator can be linked to a hotel and a hotel can be deactivated; confirmed guests are notified).
+
+**Search (issues 34, 35):** `HotelSearchService` (`src/hotels/search/`) reads reservations only through `HotelReservationQueries` and ratings through `HotelRatings`, and registers itself with `HotelSearchHook`, which is how `GET /api/itineraries/:id/hotels` reaches it. `GET hotels/:id` matches any single path segment, so `HotelSearchController` is listed **before** `HotelsController` in `HotelsModule`; keep it that way.
 
 ## Platform currency (PAY-04; issue 29)
 

@@ -3,20 +3,20 @@ import { Transform } from 'class-transformer';
 import {
   IsEnum,
   IsNumber,
-  IsOptional,
   IsString,
   Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsOptionalNonNull } from '../../../common/validation/is-optional-non-null';
 import { CURRENCY_CODE, trim, upper } from '../../dto/transforms';
 import { BudgetCategory } from '../budget-categories';
 
 /** Body for `PATCH /api/budgets/:id` (ITN-14). Send only what changes. */
 export class UpdateBudgetEntryDto {
   @ApiPropertyOptional({ enum: BudgetCategory })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsEnum(BudgetCategory, {
     message:
       'Category must be food, accommodation, in_city_transport or activities',
@@ -24,14 +24,14 @@ export class UpdateBudgetEntryDto {
   category?: BudgetCategory;
 
   @ApiPropertyOptional({ minimum: 0, example: 45 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Max(1_000_000_000)
   amount?: number;
 
   @ApiPropertyOptional({ example: 'EUR' })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(upper)
   @Matches(CURRENCY_CODE, {
     message: 'Use a three-letter currency code such as USD',
@@ -39,7 +39,7 @@ export class UpdateBudgetEntryDto {
   currency?: string;
 
   @ApiPropertyOptional({ maxLength: 200 })
-  @IsOptional()
+  @IsOptionalNonNull()
   @Transform(trim)
   @IsString()
   @MaxLength(200)

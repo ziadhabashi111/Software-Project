@@ -1,18 +1,18 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsIn,
-  IsISO8601,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Validate,
-} from 'class-validator';
+import { IsEnum, IsIn, IsISO8601, IsOptional, Validate } from 'class-validator';
+import { BookingStatus } from '../../common/booking-status/booking-status';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { IsNotBeforeFrom } from '../date-range';
 
-const trim = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim() : value;
+/** `Pending Payment`, `pending_payment` and `PENDING_PAYMENT` are the same status. */
+const toStatus = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string'
+    ? value
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, '_')
+    : value;
 
 /** Query for `GET /api/admin/bookings` (ACC-17). */
 export class ListBookingsQueryDto extends PaginationQueryDto {
@@ -24,13 +24,15 @@ export class ListBookingsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: 'Confirmed',
     description:
-      'Booking status: Pending Payment, Confirmed, Completed, Expired or Cancelled',
+      'Booking status (GEN-11): Pending Payment, Confirmed, Completed, Expired or Cancelled, in any letter case. Anything else is a 400.',
   })
   @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(40)
-  status?: string;
+  @Transform(toStatus)
+  @IsEnum(BookingStatus, {
+    message:
+      'Status must be Pending Payment, Confirmed, Completed, Expired or Cancelled',
+  })
+  status?: BookingStatus;
 
   @ApiPropertyOptional({
     example: '2027-01-01',

@@ -25,6 +25,7 @@ import { Role } from '../../auth/auth.types';
 import type { AuthUser } from '../../auth/auth.types';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
+import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../../common/swagger/api-req.decorator';
 import { BudgetSummaryService } from './budget-summary.service';
@@ -78,14 +79,19 @@ export class BudgetController {
   @ApiReq(
     ['ITN-14', 'ITN-16'],
     'List budget entries and transport costs',
-    'Every entry exactly as entered (original currency). Totals converted to your currency come from GET /api/itineraries/:id/budget-summary.',
+    'Entries exactly as entered (original currency), 10 per page (GEN-05). The page number applies to both lists; each has its own total. Totals over every entry, converted to your currency, come from GET /api/itineraries/:id/budget-summary.',
   )
   @ApiParam({ name: 'id', description: 'Itinerary id' })
   @ApiOkResponse({
     schema: {
       example: {
-        entries: [ENTRY_EXAMPLE],
-        transportCosts: [TRANSPORT_EXAMPLE],
+        entries: { items: [ENTRY_EXAMPLE], total: 1, page: 1, limit: 10 },
+        transportCosts: {
+          items: [TRANSPORT_EXAMPLE],
+          total: 1,
+          page: 1,
+          limit: 10,
+        },
       },
     },
   })
@@ -93,8 +99,9 @@ export class BudgetController {
   list(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseObjectIdPipe) id: string,
+    @Query() page: PaginationQueryDto,
   ): Promise<BudgetListView> {
-    return this.budget.list(user, id);
+    return this.budget.list(user, id, page);
   }
 
   @Post('itineraries/:id/days/:dayId/budgets')

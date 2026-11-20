@@ -7,12 +7,14 @@ import { AuditModule } from '../src/audit/audit.module';
 import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { FlightBookingExpiryService } from '../src/flight-bookings/flight-booking-expiry.service';
+import { BookingStatus } from '../src/common/booking-status/booking-status';
 import { FlightBookingPayments } from '../src/flight-bookings/flight-booking-payments';
 import { FlightBookingsModule } from '../src/flight-bookings/flight-bookings.module';
 import {
   FlightBooking,
   FlightBookingDocument,
 } from '../src/flight-bookings/schemas/flight-booking.schema';
+import { SharedServices } from '../src/flight-bookings/shared-services';
 import { FlightBookingHooks } from '../src/flights/flight-booking-hooks';
 import { CabinClass, FlightStatus } from '../src/flights/flight-status';
 import { FlightsModule } from '../src/flights/flights.module';
@@ -28,7 +30,10 @@ import { Flight, FlightDocument } from '../src/flights/schemas/flight.schema';
 import { utcToLocal } from '../src/flights/time-zones';
 import { NOTIFICATION_SERVICE } from '../src/notifications/notification.service.interface';
 import { PAYMENT_SERVICE } from '../src/payments/payment.service.interface';
-import { REFUND_SERVICE } from '../src/payments/refund.service.interface';
+import {
+  REFUND_SERVICE,
+  type RefundResult,
+} from '../src/payments/refund.service.interface';
 import { UsersService } from '../src/users/users.service';
 import { createTestApp, TestApp } from './helpers/app';
 
@@ -62,11 +67,11 @@ const paymentService = {
 };
 const refundService = {
   preview: jest.fn(),
-  issue: jest.fn((_type: string, id: string) =>
+  issue: jest.fn((_type: string, id: string): Promise<RefundResult> =>
     Promise.resolve({
       refundId: `re_${id}`,
       amount: 0,
-      status: 'REFUNDED' as const,
+      status: 'REFUNDED',
       currency: 'USD',
     }),
   ),
@@ -124,6 +129,13 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       {
         iataCode: 'DXB',
         name: 'Dubai International Airport',
+        cityId: 'dubai',
+        countryCode: 'AE',
+        timeZone: 'Asia/Dubai',
+      },
+      {
+        iataCode: 'DWC',
+        name: 'Al Maktoum International Airport',
         cityId: 'dubai',
         countryCode: 'AE',
         timeZone: 'Asia/Dubai',
@@ -446,6 +458,22 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect((await cabinOf(back)).heldSeats).toBe(1);
     });
 
+    it('books a round trip whose return leaves from another airport of the same city (ITN-26)', async () => {
+      const outbound = await makeFlight({ departInDays: 40 });
+      const back = await makeFlight({
+        from: 'DWC',
+        to: 'CAI',
+        departInDays: 45,
+      });
+      const { booking } = await heldBooking(outbound, [adult()], {
+        return: { flightId: back.id, cabinClass: 'Economy' },
+      });
+      expect(booking.segments.map((s) => s.flightId)).toEqual([
+        outbound.id,
+        back.id,
+      ]);
+    });
+
     it('cannot hold seats on a cancelled flight', async () => {
       const flight = await makeFlight();
       await flights.updateOne(
@@ -516,6 +544,65 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       ]);
       expect(a + b).toBe(1);
       expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('does not expire a hold whose payment already went through at the last moment (the webhook decides)', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await pastDue(booking.id);
+      paymentService.cancelPendingPayment.mockResolvedValueOnce(
+        'not_cancellable',
+      );
+      expect(await expiry().expireDue()).toBe(0);
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'PENDING_PAYMENT',
+      );
+      expect((await cabinOf(flight)).heldSeats).toBe(1);
+    });
+
+    it('expires such a hold anyway once Stripe has stopped retrying its webhook', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 4 * 86_400_000) } },
+      );
+      paymentService.cancelPendingPayment.mockResolvedValueOnce(
+        'not_cancellable',
+      );
+      await expiry().expireDue();
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'EXPIRED',
+      );
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
+    });
+
+    it('completes every landed booking even when more Confirmed bookings exist than one batch', async () => {
+      const confirm = (id: string) =>
+        bookings.updateOne(
+          { _id: new Types.ObjectId(id) },
+          { $set: { status: 'CONFIRMED' } },
+        );
+      // Two upcoming Confirmed bookings fill a batch of 2 on their own.
+      const upcoming = await makeFlight();
+      await confirm((await heldBooking(upcoming)).booking.id);
+      await confirm((await heldBooking(upcoming)).booking.id);
+      const landed = await makeFlight();
+      const { booking } = await heldBooking(landed);
+      await confirm(booking.id);
+      await flights.updateOne(
+        { _id: landed._id },
+        {
+          $set: {
+            departureUtc: new Date(Date.now() - 5 * 3_600_000),
+            arrivalUtc: new Date(Date.now() - 1 * 3_600_000),
+          },
+        },
+      );
+      await expiry().completeDue(new Date(), 2);
+      expect((await bookings.findById(booking.id).lean())!.status).toBe(
+        'COMPLETED',
+      );
     });
 
     it('leaves a live hold alone', async () => {
@@ -605,6 +692,39 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
+    it('confirms a payment that succeeded inside the hold even if its webhook arrives after the hold ended', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const expiredAt = new Date(Date.now() - 5_000);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: expiredAt } },
+      );
+      const result = await payments().confirmPaid(
+        booking.id,
+        paid(booking, { paidAt: new Date(expiredAt.getTime() - 2_000) }),
+      );
+      expect(result.outcome).toBe('confirmed');
+      const cabin = await cabinOf(flight);
+      expect(cabin.heldSeats).toBe(0);
+      expect(cabin.bookedSeats).toBe(1);
+    });
+
+    it('still rejects a payment that succeeded after the hold ended', async () => {
+      const flight = await makeFlight();
+      const { booking } = await heldBooking(flight);
+      const expiredAt = new Date(Date.now() - 5_000);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: expiredAt } },
+      );
+      const result = await payments().confirmPaid(
+        booking.id,
+        paid(booking, { paidAt: new Date(expiredAt.getTime() + 1_000) }),
+      );
+      expect(result).toEqual({ outcome: 'rejected', reason: 'HOLD_EXPIRED' });
+    });
+
     it('rejects a payment with the wrong amount', async () => {
       const flight = await makeFlight();
       const { booking } = await heldBooking(flight);
@@ -648,6 +768,21 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       await expect(
         payments().forPayment(booking.id, stranger.id),
       ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('answers 409 HOLD_EXPIRED (same code as hotels) for an expired hold', async () => {
+      const flight = await makeFlight();
+      const { user, booking } = await heldBooking(flight);
+      await bookings.updateOne(
+        { _id: new Types.ObjectId(booking.id) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 1_000) } },
+      );
+      await expect(
+        payments().forPayment(booking.id, user.id),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'HOLD_EXPIRED' },
+      });
     });
 
     it('records the PaymentIntent and a failed attempt without ending the hold', async () => {
@@ -833,14 +968,190 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
       );
     });
 
-    it('keeps the refund Pending when the refund service fails', async () => {
+    it('marks the refund Failed with a code-only reason when the refund service fails (PAY-03)', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        new Error('Invalid API Key provided: sk_test_planted_secret'),
+      );
+      const res = await cancel(user.client, booking.id, {
+        confirm: true,
+      }).expect(200);
+      const body = res.body as {
+        booking: BookingBody & {
+          refund: { status: string; failureReason: string | null };
+        };
+      };
+      expect(body.booking.status).toBe('CANCELLED');
+      expect(body.booking.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.status).toBe('CANCELLED');
+      expect(doc!.refund).toMatchObject({
+        percent: 100,
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
+
+      // FLT-25: the details show the failure; the basis carries it too.
+      const details = await user.client
+        .get(`/api/flight-bookings/${booking.id}`)
+        .expect(200);
+      expect(details.body).toMatchObject({
+        status: 'CANCELLED',
+        refund: { status: 'FAILED', failureReason: 'REFUND_ISSUE_FAILED' },
+      });
+      expect(JSON.stringify(details.body)).not.toContain('sk_test');
+      const basis = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .refundBasis(booking.id);
+      expect(basis).toMatchObject({
+        status: 'FAILED',
+        stripeRefundId: null,
+        idempotencyKey: `flight-booking-refund-${booking.id}`,
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+    });
+
+    it("stores Stripe's error code as the failure reason", async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('sk_test_planted_secret was refused'), {
+          code: 'charge_already_refunded',
+        }),
+      );
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'STRIPE_CHARGE_ALREADY_REFUNDED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+    });
+
+    it('never overwrites a refund result recorded while the call was failing', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const payments = ctx.moduleRef.get(FlightBookingPayments);
+      refundService.issue.mockImplementationOnce(async (_type, id) => {
+        // A refund webhook lands first, then the call itself errors.
+        await payments.recordRefundResult(id, {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+        throw new Error('timeout');
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'REFUNDED',
+        refundId: `re_${booking.id}`,
+      });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+    });
+
+    it('a later successful refund clears the failure reason', async () => {
       const flight = await makeFlight({ departInDays: 40 });
       const { user, booking } = await confirmedBooking(flight);
       refundService.issue.mockRejectedValueOnce(new Error('Stripe down'));
       await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund?.failureReason,
+      ).toBe('REFUND_ISSUE_FAILED');
+
+      const recorded = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .recordRefundResult(booking.id, {
+          refundId: `re_retry_${booking.id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+      expect(recorded).toBe(true);
+      const doc = await bookings.findById(booking.id).lean();
+      expect(doc!.refund).toMatchObject({
+        status: 'REFUNDED',
+        refundId: `re_retry_${booking.id}`,
+      });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+      const basis = await ctx.moduleRef
+        .get(FlightBookingPayments)
+        .refundBasis(booking.id);
+      expect(basis).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: `re_retry_${booking.id}`,
+        failureReason: null,
+      });
+    });
+
+    it('a late Pending result never overwrites a refund already Refunded by its webhook', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const payments = ctx.moduleRef.get(FlightBookingPayments);
+      refundService.issue.mockImplementationOnce(async (_type, id) => {
+        // The refund.updated webhook lands before issue() returns Pending.
+        await payments.recordRefundResult(id, {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'REFUNDED',
+          currency: 'USD',
+        });
+        return {
+          refundId: `re_${id}`,
+          amount: booking.price.total,
+          status: 'PENDING',
+          currency: 'USD',
+        } satisfies RefundResult;
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund,
+      ).toMatchObject({ status: 'REFUNDED', refundId: `re_${booking.id}` });
+    });
+
+    it('a Failed result keeps its failure reason', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      refundService.issue.mockResolvedValueOnce({
+        refundId: `re_${booking.id}`,
+        amount: booking.price.total,
+        status: 'FAILED',
+        currency: 'USD',
+        failureReason: 'expired_or_canceled_card',
+      });
+      await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      expect(
+        (await bookings.findById(booking.id).lean())!.refund,
+      ).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'expired_or_canceled_card',
+      });
+    });
+
+    it('keeps the refund Pending when no refund service is wired', async () => {
+      const flight = await makeFlight({ departInDays: 40 });
+      const { user, booking } = await confirmedBooking(flight);
+      const shared = ctx.moduleRef.get(SharedServices, { strict: false });
+      const spy = jest.spyOn(shared, 'refunds').mockReturnValueOnce(undefined);
+      try {
+        await cancel(user.client, booking.id, { confirm: true }).expect(200);
+      } finally {
+        spy.mockRestore();
+      }
       const doc = await bookings.findById(booking.id).lean();
       expect(doc!.status).toBe('CANCELLED');
       expect(doc!.refund).toMatchObject({ percent: 100, status: 'PENDING' });
+      expect(doc!.refund?.failureReason).toBeUndefined();
+      expect(refundService.issue).not.toHaveBeenCalled();
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
     });
 
     it('blocks cancellation after departure', async () => {
@@ -900,6 +1211,38 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         cancelled: 0,
         notifiedUserIds: [],
       });
+    });
+
+    it('marks the refund Failed when it fails during the airline cascade (FLT-06, PAY-03)', async () => {
+      const flight = await makeFlight();
+      const confirmed = await confirmedBooking(flight);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('Invalid API Key provided: sk_test_planted'), {
+          code: 'api_key_expired',
+        }),
+      );
+      const { client } = await moderator();
+      await client
+        .post(`/api/flights/${flight.id}/cancel`)
+        .send({ confirm: true })
+        .expect(201);
+
+      const doc = await bookings.findById(confirmed.booking.id).lean();
+      expect(doc!.status).toBe('CANCELLED');
+      expect(doc!.cancelledBy).toBe('airline');
+      expect(doc!.refund).toMatchObject({
+        percent: 100,
+        amount: confirmed.booking.price.total,
+        status: 'FAILED',
+        failureReason: 'STRIPE_API_KEY_EXPIRED',
+      });
+      expect(JSON.stringify(doc)).not.toContain('sk_test');
+      expect((await cabinOf(flight)).bookedSeats).toBe(0);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        confirmed.user.id,
+        'FLIGHT_CANCELLED',
+        expect.any(String),
+      );
     });
 
     it("lists the flight's bookings for its airline (FLT-29)", async () => {
@@ -1013,35 +1356,42 @@ describe('Flight bookings (FLT-12..26; real flights module, MongoDB replica set 
         .expect(409);
     });
 
-    it('allows deactivation with only an unpaid hold', async () => {
+    it('allows deactivation with only an unpaid hold, and ends that hold', async () => {
       const flight = await makeFlight();
-      const { user } = await heldBooking(flight);
+      const { user, booking } = await heldBooking(flight);
       const res = await user.client
         .delete('/api/users/me')
         .query({ confirm: 'true' });
       expect(res.status).toBeLessThan(300);
+      // A payment landing after this is refunded, not confirmed (ACC-12).
+      const ended = await bookings.findById(booking.id).lean();
+      expect(ended?.status).toBe(BookingStatus.EXPIRED);
+      expect((await cabinOf(flight)).heldSeats).toBe(0);
     });
 
     it('shows flight bookings in the admin bookings list', async () => {
       const flight = await makeFlight();
       const { booking } = await confirmed(flight);
       const admin = await loggedInAs(Role.ADMIN);
-      const res = await admin.client
-        .get('/api/admin/bookings')
-        .query({ type: 'flight', status: 'Confirmed', limit: 100 })
-        .expect(200);
-      const items = (
-        res.body as {
-          items: {
-            id: string;
-            type: string;
-            reference: string;
-            provider: { name: string };
-            amount: number;
-            status: string;
-          }[];
-        }
-      ).items;
+      type Row = {
+        id: string;
+        type: string;
+        reference: string;
+        provider: { name: string };
+        amount: number;
+        status: string;
+      };
+      // Page size is fixed at 10 (GEN-05): walk every page.
+      const items: Row[] = [];
+      for (let page = 1; ; page += 1) {
+        const res = await admin.client
+          .get('/api/admin/bookings')
+          .query({ type: 'flight', status: 'Confirmed', page })
+          .expect(200);
+        const body = res.body as { items: Row[]; total: number };
+        items.push(...body.items);
+        if (items.length >= body.total || body.items.length === 0) break;
+      }
       const row = items.find((i) => i.id === booking.id);
       expect(row).toMatchObject({
         type: 'flight',

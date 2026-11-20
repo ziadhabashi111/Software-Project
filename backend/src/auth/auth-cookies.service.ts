@@ -5,8 +5,10 @@ import { ACCESS_COOKIE, REFRESH_COOKIE } from './auth.constants';
 import { TokenService } from './token.service';
 
 /**
- * Sets and clears the httpOnly auth cookies (ACC-19). Secure, SameSite and
- * Domain come from the environment so deployment needs no code change.
+ * Sets and clears the httpOnly auth cookies (ACC-19). Cookies are Secure by
+ * default; `COOKIE_SECURE=false` is the opt-out for plain-http local
+ * development (browsers already treat http://localhost as secure). SameSite
+ * and Domain come from the environment so deployment needs no code change.
  */
 @Injectable()
 export class AuthCookiesService {
@@ -38,7 +40,8 @@ export class AuthCookiesService {
     const domain = this.config.get<string>('COOKIE_DOMAIN');
     return {
       httpOnly: true,
-      secure: this.config.get<string>('COOKIE_SECURE', 'false') === 'true',
+      // Secure unless explicitly turned off for plain-http local development.
+      secure: this.config.get<string>('COOKIE_SECURE') !== 'false',
       sameSite: this.config.get<string>('COOKIE_SAMESITE', 'lax') as
         'lax' | 'strict' | 'none',
       path: '/',

@@ -13,8 +13,12 @@ import {
 } from '../common/booking-status/booking-status';
 import { assertCanAccess } from '../common/security/ownership';
 import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
+import { FlightBookingChangesService } from './flight-booking-changes.service';
 import { FlightBookingExpiryService } from './flight-booking-expiry.service';
-import { FlightBookingPayments } from './flight-booking-payments';
+import {
+  FlightBookingPayments,
+  flightRefundIdempotencyKey,
+} from './flight-booking-payments';
 import { FlightBookingView, FlightBookingViews } from './flight-booking-view';
 import { FlightStatus } from '../flights/flight-status';
 import {
@@ -22,12 +26,15 @@ import {
   CancellationTerms,
   cancellationTerms,
 } from './rules/cancellation-rules';
+import { allocateRefund, ledgerOf } from './rules/payment-ledger';
 import { roundMoney } from './rules/pricing';
 import {
   BookingRefund,
   FlightBooking,
   FlightBookingDocument,
 } from './schemas/flight-booking.schema';
+import { refundFailureReason } from './refund-failure-reason';
+import { SeatAssignments } from './seat-assignments';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
 
@@ -44,7 +51,7 @@ export interface CancellationResult {
  * cancels a flight (FLT-06). The status change, the refund record and the
  * returned seats commit together; the refund is then issued through Ziad's
  * refund service (PAY-03). A refund failure never undoes the cancellation:
- * the refund stays Pending so it can be retried.
+ * the refund is marked Failed with a short reason code instead.
  */
 @Injectable()
 export class FlightBookingCancellationsService {
@@ -60,6 +67,8 @@ export class FlightBookingCancellationsService {
     private readonly payments: FlightBookingPayments,
     private readonly views: FlightBookingViews,
     private readonly shared: SharedServices,
+    private readonly changes: FlightBookingChangesService,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   /** FLT-26: the user's own Confirmed booking, before the outbound departs. */
@@ -82,6 +91,8 @@ export class FlightBookingCancellationsService {
       };
     }
 
+    // FLT-27: a change waiting for payment ends first (its seats released).
+    await this.changes.endPendingForBooking(doc._id, now);
     const cancelled = await this.cancelOne(
       doc._id,
       preview.byAirline ? 'airline' : 'user',
@@ -148,6 +159,8 @@ export class FlightBookingCancellationsService {
       return { cancelled: 0, notifiedUserIds: [] };
     }
     const id = new Types.ObjectId(flightId);
+    // FLT-27: changes holding seats on this flight end too.
+    await this.changes.endPendingForFlight(id, now);
     const pending = await this.bookings
       .find({ 'segments.flight': id, status: BookingStatus.PENDING_PAYMENT })
       .select('_id')
@@ -171,6 +184,7 @@ export class FlightBookingCancellationsService {
         doc.price.perSegment,
         outboundFlown,
       );
+      await this.changes.endPendingForBooking(doc._id, now);
       const cancelled = await this.cancelOne(
         doc._id,
         'airline',
@@ -209,6 +223,16 @@ export class FlightBookingCancellationsService {
       ...(amount > 0 ? { status: 'PENDING' as const } : {}),
     };
     return this.connection.transaction(async (session) => {
+      // FLT-27: a booking paid with several payments (changed to a dearer
+      // flight) is refunded from each, newest first; one payment keeps the
+      // single-refund path unchanged.
+      const current = await this.bookings
+        .findOne({ _id: bookingId, status: BookingStatus.CONFIRMED })
+        .session(session);
+      if (!current) return null;
+      const ledger = ledgerOf(current);
+      const split =
+        ledger.length > 1 && amount > 0 ? allocateRefund(ledger, amount) : null;
       const doc = await this.bookings.findOneAndUpdate(
         { _id: bookingId, status: BookingStatus.CONFIRMED },
         {
@@ -216,7 +240,16 @@ export class FlightBookingCancellationsService {
             status: BookingStatus.CANCELLED,
             cancelledAt: now,
             cancelledBy: by,
-            refund: record,
+            refund: split
+              ? {
+                  ...record,
+                  parts: split.parts.map((part) => ({
+                    ...part,
+                    status: 'PENDING' as const,
+                  })),
+                }
+              : record,
+            ...(split ? { payments: split.ledger } : {}),
           },
         },
         { returnDocument: 'after', session },
@@ -239,6 +272,8 @@ export class FlightBookingCancellationsService {
           session,
         );
       }
+      // FLT-28: the picked seats become free for others.
+      await this.seatAssignments.releaseBooking(doc._id, session);
       return doc;
     });
   }
@@ -253,6 +288,17 @@ export class FlightBookingCancellationsService {
     await this.shared.notify(doc.user.toString(), type, message);
   }
 
+  /**
+   * Asks the payments module to send the money back (PAY-03). The
+   * cancellation itself always stands and the seats stay released:
+   * - refund service not wired in this deployment: the refund stays PENDING
+   *   (a deploy state, not a failure) and can be issued later;
+   * - Stripe / the refund service throws: the refund becomes FAILED with a
+   *   short reason code (never a message, stack or secret), shown on the
+   *   booking details (FLT-25);
+   * - otherwise the result is stored (REFUNDED, or PENDING/FAILED as Stripe
+   *   reported it) and any earlier failure reason is cleared.
+   */
   private async issueRefund(bookingId: string): Promise<void> {
     const refunds = this.shared.refunds();
     if (!refunds) {
@@ -261,14 +307,76 @@ export class FlightBookingCancellationsService {
       );
       return;
     }
+    const doc = await this.bookings.findById(bookingId);
+    if (doc?.refund?.parts?.length) {
+      await this.issueRefundParts(doc);
+      return;
+    }
     try {
       const result = await refunds.issue('flight', bookingId);
       await this.payments.recordRefundResult(bookingId, result);
     } catch (error) {
+      const reason = refundFailureReason(error);
       this.logger.error(
-        `Refund of flight booking ${bookingId} failed; it stays Pending`,
-        error instanceof Error ? error.stack : String(error),
+        `Refund of flight booking ${bookingId} failed (${reason}); marked Failed`,
       );
+      // Only a still-pending refund becomes Failed: never overwrite an
+      // outcome a refund webhook may have recorded in the meantime.
+      await this.bookings.updateOne(
+        {
+          _id: new Types.ObjectId(bookingId),
+          status: BookingStatus.CANCELLED,
+          'refund.status': 'PENDING',
+        },
+        {
+          $set: {
+            'refund.status': 'FAILED',
+            'refund.failureReason': reason,
+          },
+        },
+      );
+    }
+  }
+
+  /**
+   * FLT-27: one Stripe refund per payment of a changed booking. A part that
+   * fails is marked Failed with a short reason; the booking's refund status
+   * sums the parts up (see `FlightBookingPayments.recordRefundPart`).
+   */
+  private async issueRefundParts(doc: FlightBookingDocument): Promise<void> {
+    const refunds = this.shared.refunds();
+    for (const part of doc.refund?.parts ?? []) {
+      if (part.status && part.status !== 'PENDING') continue;
+      try {
+        if (!refunds?.refundPart) {
+          throw new Error('The refund service cannot refund parts');
+        }
+        const result = await refunds.refundPart({
+          kind: 'cancellation_part',
+          bookingType: 'flight',
+          bookingId: doc.id,
+          userId: doc.user.toString(),
+          paymentIntentId: part.paymentIntentId,
+          amount: part.amount,
+          currency: doc.refund?.currency ?? doc.currency,
+          percentage: doc.refund?.percent,
+          idempotencyKey: `${flightRefundIdempotencyKey(doc.id)}-${part.paymentIntentId}`,
+        });
+        await this.payments.recordRefundPart(
+          doc.id,
+          part.paymentIntentId,
+          result,
+        );
+      } catch (error) {
+        const reason = refundFailureReason(error);
+        this.logger.error(
+          `Refund part of flight booking ${doc.id} failed (${reason}); marked Failed`,
+        );
+        await this.payments.recordRefundPart(doc.id, part.paymentIntentId, {
+          status: 'FAILED',
+          failureReason: reason,
+        });
+      }
     }
   }
 }

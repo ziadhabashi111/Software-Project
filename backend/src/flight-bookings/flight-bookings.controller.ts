@@ -1,9 +1,11 @@
+import { HOLD_MINUTES } from '../common/booking-status/hold';
 import {
   Body,
   Controller,
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -25,17 +27,24 @@ import type { Response } from 'express';
 import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireVerifiedEmail } from '../auth/decorators/require-verified-email.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { Paginated } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
 import { BookingRequestDto } from './dto/booking-request.dto';
 import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
+import { ChangeFlightDto } from './dto/change-flight.dto';
 import { ListFlightBookingsDto } from './dto/list-flight-bookings.dto';
 import {
   CancellationResult,
   FlightBookingCancellationsService,
 } from './flight-booking-cancellations.service';
+import {
+  FlightBookingChangesService,
+  FlightChangeView,
+} from './flight-booking-changes.service';
+import { PickSeatDto } from './dto/seat.dto';
 import { FlightBookingHoldsService } from './flight-booking-holds.service';
 import {
   BookingQuoteView,
@@ -43,6 +52,7 @@ import {
 } from './flight-booking-quotes.service';
 import type { FlightBookingView } from './flight-booking-view';
 import { MyFlightBookingsService } from './my-flight-bookings.service';
+import { SeatSelectionService } from './seat-selection.service';
 
 /** Routes of PDF section 8.4 (Flight Booking). HTTP only; logic lives in the services. */
 @ApiTags('flight-bookings')
@@ -54,6 +64,8 @@ export class FlightBookingsController {
     private readonly holds: FlightBookingHoldsService,
     private readonly mine: MyFlightBookingsService,
     private readonly cancellations: FlightBookingCancellationsService,
+    private readonly changes: FlightBookingChangesService,
+    private readonly seatSelection: SeatSelectionService,
   ) {}
 
   @Post()
@@ -76,10 +88,11 @@ export class FlightBookingsController {
 
   @Post('hold')
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiReq(
     ['FLT-22', 'FLT-12'],
-    'Proceed to payment: hold the seats for 10 minutes',
-    'Same body and checks as the booking summary. Atomically reserves the seats (adults + children; infants take none) on every chosen flight only if enough remain, and creates one booking in Pending Payment status, held for 10 minutes. A round trip is one booking: if either flight lacks seats, nothing is held (409 SEATS_UNAVAILABLE). Concurrent requests never hold more seats than exist. Pay within the hold (PAY-01); otherwise the booking becomes Expired and the seats are released. Prices are fixed at this moment.',
+    `Proceed to payment: hold the seats for ${HOLD_MINUTES} minutes`,
+    `Same body and checks as the booking summary. Atomically reserves the seats (adults + children; infants take none) on every chosen flight only if enough remain, and creates one booking in Pending Payment status, held for ${HOLD_MINUTES} minutes. A round trip is one booking: if either flight lacks seats, nothing is held (409 SEATS_UNAVAILABLE). Concurrent requests never hold more seats than exist. Pay within the hold (PAY-01); otherwise the booking becomes Expired and the seats are released. Prices are fixed at this moment.`,
   )
   @ApiCreatedResponse({
     description: 'The Pending Payment booking with its hold expiry',
@@ -148,6 +161,62 @@ export class FlightBookingsController {
     @Body() dto: CancelFlightBookingDto,
   ): Promise<CancellationResult> {
     return this.cancellations.cancel(id, user, dto.confirm === true);
+  }
+
+  @Patch(':id/change-flight')
+  @Roles(Role.USER)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    ['FLT-27', 'PAY-01', 'PAY-03'],
+    'Change my booking to another flight (see the fare difference first)',
+    `Bonus FLT-27. Move the outbound (segmentIndex 0) or the return (1) of your own Confirmed booking to another flight of the same airline, the same departure and arrival airports and the same cabin, that has not departed and has seats for all your passengers. Without \`?confirm=true\` nothing changes and you get the fare difference (\`action\`: pay, refund or none). With \`?confirm=true\`: a same-fare or cheaper change is applied at once and a lower fare is refunded to your card; a dearer change holds the new seats for ${HOLD_MINUTES} minutes and returns a \`changeId\` to pay with POST /api/payments { bookingType: "flight-change", bookingId: changeId } (the webhook then applies it). Passenger types are checked again on the new outbound date. You get an in-app notification when the change is applied.`,
+  )
+  @ApiOkResponse({
+    description:
+      '{ changed, action, segmentIndex, newFlight, currentSegmentTotal, newSegmentTotal, difference, newTotal, currency, changeId?, holdExpiresAt?, booking?, message }',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Not the same airline, route or cabin, already departed, out of order, no return flight, or a passenger type no longer matches',
+  })
+  @ApiConflictResponse({
+    description:
+      'NOT_CHANGEABLE, CHANGE_PENDING, SEATS_UNAVAILABLE or PRICE_CHANGED',
+  })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  changeFlight(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: ChangeFlightDto,
+    @Query('confirm') confirm?: string,
+  ): Promise<FlightChangeView> {
+    return this.changes.change(id, user, dto, confirm === 'true');
+  }
+
+  @Patch(':id/seat')
+  @Roles(Role.USER)
+  @ApiParam({ name: 'id', description: 'Flight booking id' })
+  @ApiReq(
+    'FLT-28',
+    'Pick a seat for a passenger',
+    'Choose a seat for one passenger of your own Confirmed booking on one of its flights (`segmentIndex` 0 = outbound, 1 = return; default 0). Picking again moves the passenger to the new seat. Infants have no seat of their own. See the seat map at GET /api/flights/:id/seats. 400 when the seat does not exist in that cabin; 409 SEAT_TAKEN when someone else has it, NOT_CONFIRMED before payment, SEAT_CHANGE_CLOSED once the flight is cancelled or has departed. Seats are freed when the booking is cancelled.',
+  )
+  @ApiOkResponse({
+    description: "The booking, with each passenger's seats",
+  })
+  @ApiBadRequestResponse({
+    description: 'No such seat, passenger or flight in the booking',
+  })
+  @ApiConflictResponse({
+    description: 'SEAT_TAKEN, NOT_CONFIRMED or SEAT_CHANGE_CLOSED',
+  })
+  @ApiNotFoundResponse({ description: 'No such booking, or not yours' })
+  pickSeat(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: PickSeatDto,
+  ): Promise<FlightBookingView> {
+    return this.seatSelection.pick(id, user, dto);
   }
 
   @Get(':id/e-ticket')

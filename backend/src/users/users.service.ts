@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, QueryFilter, Types } from 'mongoose';
+import { ClientSession, Model, QueryFilter, Types } from 'mongoose';
 import { Role } from '../auth/auth.types';
 import { LOCK_DURATION_MS, MAX_FAILED_LOGINS } from '../auth/login-policy';
 import { User, UserDocument } from './schemas/user.schema';
@@ -20,6 +20,8 @@ export interface NewUser {
   providerId?: string;
   mustChangePassword?: boolean;
   consentAcceptedAt?: Date;
+  /** `false` for a self-registered user until they verify the email (ACC-02). */
+  emailVerified?: boolean;
 }
 
 @Injectable()
@@ -28,12 +30,12 @@ export class UsersService {
     @InjectModel(User.name) private readonly model: Model<UserDocument>,
   ) {}
 
-  create(input: NewUser): Promise<UserDocument> {
+  create(input: NewUser, session?: ClientSession): Promise<UserDocument> {
     const { providerId, ...rest } = input;
-    return this.model.create({
+    return new this.model({
       ...rest,
       ...(providerId ? { providerId: new Types.ObjectId(providerId) } : {}),
-    });
+    }).save({ session });
   }
 
   findById(id: string): Promise<UserDocument | null> {
@@ -57,47 +59,86 @@ export class UsersService {
   }
 
   /**
-   * Counts a failed login (ACC-05). On the 5th consecutive failure the
-   * account is locked for 15 minutes and the counter starts again.
+   * ACC-05: claims one login attempt before the password is checked. Atomic,
+   * so parallel requests cannot all slip past the lock: at most
+   * MAX_FAILED_LOGINS attempts are claimed before the account locks. Returns
+   * the attempt number, or null when the account is locked (or its last
+   * allowed attempts are already in flight).
    */
-  async recordFailedLogin(
+  async claimLoginAttempt(
     userId: string,
-  ): Promise<{ locked: boolean; lockUntil?: Date }> {
+    now: Date = new Date(),
+  ): Promise<number | null> {
     const updated = await this.model
-      .findByIdAndUpdate(
-        userId,
+      .findOneAndUpdate(
+        {
+          _id: userId,
+          failedLoginAttempts: { $lt: MAX_FAILED_LOGINS },
+          $or: [{ lockUntil: null }, { lockUntil: { $lte: now } }],
+        },
         { $inc: { failedLoginAttempts: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
-    if (updated && updated.failedLoginAttempts >= MAX_FAILED_LOGINS) {
-      const lockUntil = new Date(Date.now() + LOCK_DURATION_MS);
-      await this.model
-        .updateOne({ _id: userId }, { lockUntil, failedLoginAttempts: 0 })
-        .exec();
-      return { locked: true, lockUntil };
-    }
-    return { locked: false };
+    return updated ? updated.failedLoginAttempts : null;
   }
 
-  /** A successful login resets the counter (ACC-05). */
-  async resetLoginFailures(userId: string): Promise<void> {
+  /**
+   * The claimed attempt had a wrong password. The one that used the last
+   * allowed attempt locks the account for 15 minutes and starts the counter
+   * again (ACC-05). True when the account is now locked.
+   */
+  async failLoginAttempt(userId: string, attempt: number): Promise<boolean> {
+    if (attempt < MAX_FAILED_LOGINS) return false;
     await this.model
       .updateOne(
         { _id: userId },
+        {
+          lockUntil: new Date(Date.now() + LOCK_DURATION_MS),
+          failedLoginAttempts: 0,
+        },
+      )
+      .exec();
+    return true;
+  }
+
+  /**
+   * A correct password resets the counter (ACC-05), unless parallel wrong
+   * attempts locked the account meanwhile: then false, and the login is
+   * refused as locked.
+   */
+  async resetLoginFailures(
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const result = await this.model
+      .updateOne(
+        {
+          _id: userId,
+          $or: [{ lockUntil: null }, { lockUntil: { $lte: now } }],
+        },
         { failedLoginAttempts: 0, $unset: { lockUntil: 1 } },
       )
       .exec();
+    return result.matchedCount === 1;
   }
 
   updateProfile(
     userId: string,
-    patch: { name?: string; phone?: string; preferredCurrency?: string },
+    patch: {
+      name?: string;
+      phone?: string | null;
+      preferredCurrency?: string;
+    },
   ): Promise<UserDocument | null> {
+    // A null phone clears it (the only clearable profile field, ACC-09).
+    const { phone, ...rest } = patch;
+    const set =
+      phone === null || phone === undefined ? rest : { ...rest, phone };
     return this.model
       .findByIdAndUpdate(
         userId,
-        { $set: patch },
+        phone === null ? { $set: set, $unset: { phone: 1 } } : { $set: set },
         { new: true, runValidators: true },
       )
       .exec();
@@ -117,12 +158,13 @@ export class UsersService {
     from: UserStatus,
     to: UserStatus,
     roles: Role[],
+    session?: ClientSession,
   ): Promise<UserDocument | null> {
     return this.model
       .findOneAndUpdate(
         { _id: userId, status: from, role: { $in: roles } },
         { status: to },
-        { new: true },
+        { new: true, session },
       )
       .exec();
   }
@@ -170,6 +212,7 @@ export class UsersService {
   async setTemporaryPassword(
     userId: string,
     passwordHash: string,
+    session?: ClientSession,
   ): Promise<void> {
     await this.model
       .updateOne(
@@ -180,6 +223,7 @@ export class UsersService {
           failedLoginAttempts: 0,
           $unset: { lockUntil: 1 },
         },
+        { session },
       )
       .exec();
   }
@@ -191,6 +235,35 @@ export class UsersService {
   ): Promise<void> {
     await this.model
       .updateOne({ _id: userId }, { passwordHash, mustChangePassword })
+      .exec();
+  }
+
+  /** ACC-02: the emailed link was used. Safe to repeat; only an unverified account changes. */
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.model
+      .updateOne(
+        { _id: userId, emailVerified: false },
+        { emailVerified: true, emailVerifiedAt: new Date() },
+      )
+      .exec();
+  }
+
+  /**
+   * ACC-07: the user chose a new password through the emailed link, so it is
+   * a normal password (no forced change) and the account is no longer locked
+   * from earlier failed logins.
+   */
+  async resetPassword(userId: string, passwordHash: string): Promise<void> {
+    await this.model
+      .updateOne(
+        { _id: userId },
+        {
+          passwordHash,
+          mustChangePassword: false,
+          failedLoginAttempts: 0,
+          $unset: { lockUntil: 1 },
+        },
+      )
       .exec();
   }
 }

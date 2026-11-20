@@ -2,15 +2,17 @@ import {
   ConflictException,
   HttpException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { AuditAction } from '../audit/audit-action';
 import { AuditLogService } from '../audit/audit-log.service';
 import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
 import { UsersService } from '../users/users.service';
 import { ContentModerators, ContentType } from './content-moderators';
-import type { ModeratedContent } from './content-moderators';
+import type { ContentModerator, ModeratedContent } from './content-moderators';
 import { ModerationMode } from './dto/moderate-content.dto';
 import { ListReportsQueryDto } from './dto/list-reports.dto';
 import { ReportAction, ReportDirectory } from './report-source';
@@ -51,6 +53,8 @@ const contentUnavailable = (type: ContentType) =>
 /** GEN-09 (admin side) and GEN-10: reports and direct content moderation. */
 @Injectable()
 export class AdminModerationService {
+  private readonly logger = new Logger(AdminModerationService.name);
+
   constructor(
     private readonly reportDirectory: ReportDirectory,
     private readonly moderators: ContentModerators,
@@ -89,7 +93,11 @@ export class AdminModerationService {
     );
   }
 
-  /** Hide or delete any content directly, without a report. */
+  /**
+   * Hide or delete any content directly, without a report. The audit record
+   * is written first (GEN-07): if it cannot be written nothing is changed,
+   * and if the action then fails or finds nothing the record is removed.
+   */
   async moderateContent(
     adminId: string,
     type: ContentType,
@@ -99,17 +107,28 @@ export class AdminModerationService {
     const handler = this.moderators.get(type);
     if (!handler) throw contentUnavailable(type);
 
-    const content =
-      mode === ModerationMode.DELETE
-        ? await handler.delete(id)
-        : await handler.hide(id);
-    if (!content) throw new NotFoundException(`${type} not found`);
-
-    await this.auditContent(adminId, type, id, mode, content);
+    const recordId = await this.auditContent(adminId, type, id, mode);
+    let content: ModeratedContent | null;
+    try {
+      content = await this.apply(handler, id, mode);
+    } catch (error) {
+      await this.audit.discard(recordId);
+      throw error;
+    }
+    if (!content) {
+      await this.audit.discard(recordId);
+      throw new NotFoundException(`${type} not found`);
+    }
+    await this.describe(recordId, content);
     return { type, id, mode };
   }
 
-  /** Dismiss a report, or hide or delete the reported content. */
+  /**
+   * Dismiss a report, or hide or delete the reported content. The report is
+   * claimed first, so when two admins act at once only one action runs. The
+   * audit records are written before the content changes (GEN-07); if
+   * anything fails, the records are removed and the report is open again.
+   */
   async resolveReport(
     adminId: string,
     reportId: string,
@@ -121,48 +140,61 @@ export class AdminModerationService {
     if (report.status !== 'open') {
       throw new ConflictException('This report is already resolved');
     }
-
-    let content: ModeratedContent | null = null;
-    if (action !== ReportAction.DISMISS) {
-      const handler = this.moderators.get(report.contentType);
-      if (!handler) throw contentUnavailable(report.contentType);
-      content =
-        action === ReportAction.DELETE
-          ? await handler.delete(report.contentId)
-          : await handler.hide(report.contentId);
+    const handler =
+      action === ReportAction.DISMISS
+        ? undefined
+        : this.moderators.get(report.contentType);
+    if (action !== ReportAction.DISMISS && !handler) {
+      throw contentUnavailable(report.contentType);
     }
 
-    const resolved = await source.resolve(reportId, { action, adminId });
-    if (!resolved) {
+    if (!(await source.resolve(reportId, { action, adminId }))) {
       throw new ConflictException('This report is already resolved');
     }
 
-    if (content) {
-      await this.auditContent(
-        adminId,
-        report.contentType,
-        report.contentId,
-        action === ReportAction.DELETE
-          ? ModerationMode.DELETE
-          : ModerationMode.HIDE,
-        content,
-        reportId,
-      );
+    const written: Types.ObjectId[] = [];
+    try {
+      const reportRecord = await this.audit.log({
+        actorId: adminId,
+        action: AuditAction.REPORT_RESOLVED,
+        targetType: 'report',
+        targetId: reportId,
+        details: {
+          action,
+          contentType: report.contentType,
+          contentId: report.contentId,
+        },
+      });
+      written.push(reportRecord);
+
+      if (handler) {
+        const mode =
+          action === ReportAction.DELETE
+            ? ModerationMode.DELETE
+            : ModerationMode.HIDE;
+        const contentRecord = await this.auditContent(
+          adminId,
+          report.contentType,
+          report.contentId,
+          mode,
+          reportId,
+        );
+        written.push(contentRecord);
+        const content = await this.apply(handler, report.contentId, mode);
+        if (content) {
+          await this.describe(contentRecord, content);
+        } else {
+          // Already gone: nothing was hidden or deleted by this action.
+          await this.audit.discard(contentRecord);
+          written.pop();
+          await this.audit.annotate(reportRecord, { contentMissing: true });
+        }
+      }
+    } catch (error) {
+      for (const id of written) await this.audit.discard(id);
+      await source.reopen(reportId);
+      throw error;
     }
-    await this.audit.log({
-      actorId: adminId,
-      action: AuditAction.REPORT_RESOLVED,
-      targetType: 'report',
-      targetId: reportId,
-      details: {
-        action,
-        contentType: report.contentType,
-        contentId: report.contentId,
-        ...(action !== ReportAction.DISMISS && !content
-          ? { contentMissing: true }
-          : {}),
-      },
-    });
 
     return {
       id: reportId,
@@ -183,14 +215,24 @@ export class AdminModerationService {
     return source;
   }
 
+  private apply(
+    handler: ContentModerator,
+    id: string,
+    mode: ModerationMode,
+  ): Promise<ModeratedContent | null> {
+    return mode === ModerationMode.DELETE
+      ? handler.delete(id)
+      : handler.hide(id);
+  }
+
+  /** Written before the content changes; `describe` adds title and author. */
   private auditContent(
     adminId: string,
     type: ContentType,
     id: string,
     mode: ModerationMode,
-    content: ModeratedContent,
     reportId?: string,
-  ): Promise<void> {
+  ): Promise<Types.ObjectId> {
     return this.audit.log({
       actorId: adminId,
       action:
@@ -199,11 +241,28 @@ export class AdminModerationService {
           : AuditAction.CONTENT_HIDDEN,
       targetType: type,
       targetId: id,
-      details: {
+      details: reportId ? { reportId } : {},
+    });
+  }
+
+  /**
+   * The action already happened and is recorded; the title and author only
+   * enrich the record, so a failure here is logged rather than undoing it.
+   */
+  private async describe(
+    recordId: Types.ObjectId,
+    content: ModeratedContent,
+  ): Promise<void> {
+    try {
+      await this.audit.annotate(recordId, {
         ...(content.title ? { title: content.title } : {}),
         ...(content.authorId ? { authorId: content.authorId } : {}),
-        ...(reportId ? { reportId } : {}),
-      },
-    });
+      });
+    } catch (error) {
+      this.logger.error(
+        `Could not add details to audit record ${recordId.toHexString()}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }

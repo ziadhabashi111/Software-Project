@@ -1,12 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import { Role } from '../../auth/auth.types';
 import type { AuthUser } from '../../auth/auth.types';
+import { fieldError } from '../../common/validation/validation-errors';
 import { PLATFORM_CURRENCY } from '../../payments/platform-currency';
+import { CURRENCY_CATALOG } from '../../users/currency-catalog';
+import type { CurrencyCatalog } from '../../users/currency-catalog';
 import { UsersService } from '../../users/users.service';
 import { addDays, formatDate } from '../itinerary-dates';
+import { ItineraryBookingsService } from '../itinerary-bookings.service';
 import { ItineraryRepository } from '../itinerary.repository';
 import type { ItineraryDocument } from '../schemas/itinerary.schema';
 import { foreignCurrencies, summarize } from './budget-summary';
@@ -39,6 +48,10 @@ export class BudgetSummaryService {
     private readonly itineraries: ItineraryRepository,
     private readonly fx: FxService,
     private readonly users: UsersService,
+    private readonly bookings: ItineraryBookingsService,
+    @Optional()
+    @Inject(CURRENCY_CATALOG)
+    private readonly currencies?: CurrencyCatalog,
   ) {}
 
   async summary(
@@ -47,9 +60,33 @@ export class BudgetSummaryService {
     currency?: string,
   ): Promise<BudgetSummaryView> {
     const itinerary = await this.itineraries.loadOwned(itineraryId, user);
-    if (currency) assertCurrencyCode(currency);
+    if (currency) await this.assertSupportedCurrency(currency);
     const target = currency ?? (await this.preferredCurrency(user.id));
-    return this.compute(itinerary, target);
+    return this.compute(itinerary, target, true);
+  }
+
+  /**
+   * ITN-21: the budget of a public itinerary, for any visitor, in `currency`
+   * (the platform currency when omitted). The caller has already checked that
+   * the itinerary is public, so there is no ownership check here.
+   */
+  async publicSummary(
+    itineraryId: string,
+    currency?: string,
+  ): Promise<BudgetSummaryView> {
+    const itinerary = await this.itineraries.findById(itineraryId);
+    if (!itinerary) throw new NotFoundException('Itinerary not found');
+    if (currency) await this.assertSupportedCurrency(currency);
+    // Linked bookings are private to the owner, so they are left out here.
+    return this.compute(itinerary, currency ?? PLATFORM_CURRENCY, false);
+  }
+
+  /** A well-formed but unsupported code is a bad request (400), not a missing rate (422). */
+  private async assertSupportedCurrency(currency: string): Promise<void> {
+    assertCurrencyCode(currency);
+    if (this.currencies && !(await this.currencies.isSupported(currency))) {
+      throw fieldError('currency', `${currency} is not a supported currency`);
+    }
   }
 
   /**
@@ -65,7 +102,7 @@ export class BudgetSummaryService {
       role: Role.USER,
     });
     const target = await this.preferredCurrency(ownerId);
-    const view = await this.compute(itinerary, target);
+    const view = await this.compute(itinerary, target, true);
     return {
       currency: target,
       byDay: Object.fromEntries(
@@ -74,14 +111,23 @@ export class BudgetSummaryService {
     };
   }
 
+  /**
+   * `includeLinked` adds the owner's linked bookings (ITN-27): a flight counts
+   * as intercity transport, a hotel stay as accommodation. It is false for a
+   * public itinerary, whose visitors must not see private bookings.
+   */
   private async compute(
     itinerary: ItineraryDocument,
     target: string,
+    includeLinked: boolean,
   ): Promise<BudgetSummaryView> {
     const filter = { itineraryId: itinerary._id };
-    const [entries, transportCosts] = await Promise.all([
+    const [entries, transportCosts, linked] = await Promise.all([
       this.entries.find(filter),
       this.transport.find(filter),
+      includeLinked
+        ? this.bookings.budgetLines(itinerary)
+        : Promise.resolve({ entries: [], transportCosts: [] }),
     ]);
     const input = {
       days: itinerary.days.map((day, index) => ({
@@ -103,6 +149,8 @@ export class BudgetSummaryService {
         currency: cost.currency,
       })),
     };
+    input.entries.push(...linked.entries);
+    input.transportCosts.push(...linked.transportCosts);
 
     // Rates are only needed (and only fetched) when something is in another currency.
     let table: RateTable | null = null;

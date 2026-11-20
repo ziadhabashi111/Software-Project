@@ -42,8 +42,11 @@ export function assertBookable(
 }
 
 /**
- * FLT-12a: the return flight flies the outbound route in reverse and leaves
- * after the outbound has landed.
+ * FLT-12a: the return flight flies the outbound route in reverse, city to
+ * city, and leaves after the outbound has landed. "City to city" because an
+ * itinerary searches any airport in the destination city (ITN-26): out to
+ * DXB and back from DWC is the same trip. `cityOf` gives an airport's city;
+ * an airport with no known city only matches itself.
  */
 export function assertReturnMatches(
   outbound: {
@@ -58,6 +61,7 @@ export function assertReturnMatches(
     arrivalAirport: string;
     departureUtc: Date;
   },
+  cityOf: (iataCode: string) => string | undefined = () => undefined,
 ): void {
   if (outbound.id === ret.id) {
     throw fieldError(
@@ -65,13 +69,14 @@ export function assertReturnMatches(
       'The return flight must be a different flight',
     );
   }
+  const place = (code: string) => cityOf(code) ?? `airport:${code}`;
   if (
-    ret.departureAirport !== outbound.arrivalAirport ||
-    ret.arrivalAirport !== outbound.departureAirport
+    place(ret.departureAirport) !== place(outbound.arrivalAirport) ||
+    place(ret.arrivalAirport) !== place(outbound.departureAirport)
   ) {
     throw fieldError(
       'return.flightId',
-      `The return flight must fly ${outbound.arrivalAirport} to ${outbound.departureAirport}`,
+      `The return flight must fly ${outbound.arrivalAirport} to ${outbound.departureAirport} (or between other airports of those two cities)`,
     );
   }
   if (ret.departureUtc.getTime() <= outbound.arrivalUtc.getTime()) {

@@ -7,17 +7,23 @@ import { Role } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { AdminModule } from '../src/admin/admin.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { BlogModule } from '../src/blog/blog.module';
 import { HotelBookingsModule } from '../src/hotel-bookings/hotel-bookings.module';
 import {
   HotelInventoryRegistry,
   InventoryHotel,
   InventoryRoom,
 } from '../src/hotel-bookings/hotel-inventory';
-import { HotelReservationPayments } from '../src/hotel-bookings/hotel-reservation-payments';
+import {
+  HotelReservationPayments,
+  hotelRefundIdempotencyKey,
+} from '../src/hotel-bookings/hotel-reservation-payments';
+import { SharedServices } from '../src/hotel-bookings/shared-services';
 import { HotelReservationQueries } from '../src/hotel-bookings/hotel-reservation-queries';
 import { ReviewModerator } from '../src/hotel-bookings/review-moderator';
 import { HotelReservationsService } from '../src/hotel-bookings/hotel-reservations.service';
 import { ReservationStatus } from '../src/hotel-bookings/reservation-status';
+import { STRIPE_WEBHOOK_RETRY_MS } from '../src/common/booking-status/hold';
 import type { HotelReservationView } from '../src/hotel-bookings/reservation-view';
 import type { HotelReviewView } from '../src/hotel-bookings/review-view';
 import { UserStatus } from '../src/users/user-status';
@@ -130,6 +136,7 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       extraModules: [
         AuditModule,
         AdminModule,
+        BlogModule,
         HotelBookingsModule,
         FakeSharedServicesModule,
       ],
@@ -522,6 +529,35 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(await nights.countDocuments({ reservation: firstId })).toBe(0);
     });
 
+    it('a run-out hold the user already paid keeps its room; the late webhook confirms it (HTL-18, PAY-01)', async () => {
+      const a = await loggedInAs();
+      const b = await loggedInAs();
+      const r = addRoom();
+      const first = await hold(
+        a.client,
+        body([r], '2027-08-10', '2027-08-12'),
+      ).expect(201);
+      const view = first.body as HotelReservationView;
+      const paidAt = new Date();
+      await expire(view.id);
+
+      paymentService.cancelPendingPayment.mockResolvedValue('not_cancellable');
+      try {
+        await hold(b.client, body([r], '2027-08-11', '2027-08-13')).expect(409);
+      } finally {
+        paymentService.cancelPendingPayment.mockResolvedValue(undefined);
+      }
+      expect((await reservations.findById(view.id).lean())?.status).toBe(
+        ReservationStatus.PENDING_PAYMENT,
+      );
+
+      const outcome = await payments.confirmPaid(view.id, {
+        ...paid(view),
+        paidAt: new Date(paidAt.getTime() - 60_000),
+      });
+      expect(outcome.outcome).toBe('confirmed');
+    });
+
     it('the expiry job expires unpaid holds and releases their rooms', async () => {
       const a = await loggedInAs();
       const r1 = addRoom();
@@ -663,6 +699,21 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(notifications.notify).not.toHaveBeenCalled();
     });
 
+    it('confirms a payment made inside the hold even when its webhook arrives after the hold ended', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-12', '2027-10-13');
+      const later = new Date(Date.now() + 11 * 60_000);
+      const result = await payments.confirmPaid(
+        held.id,
+        { ...paid(held), paidAt: new Date() },
+        later,
+      );
+      expect(result.outcome).toBe('confirmed');
+      expect((await reservations.findById(held.id).lean())?.status).toBe(
+        ReservationStatus.CONFIRMED,
+      );
+    });
+
     it('refuses a payment that arrives after the hold expired', async () => {
       const { client } = await loggedInAs();
       const held = await holdOne(client, '2027-10-09', '2027-10-10');
@@ -744,6 +795,26 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         'hotel',
         held.id,
       );
+    });
+
+    it('leaves a hold the user already paid to the webhook, until Stripe stops retrying (HTL-18, PAY-01)', async () => {
+      const { client } = await loggedInAs();
+      const held = await holdOne(client, '2027-10-20', '2027-10-21');
+      paymentService.cancelPendingPayment.mockResolvedValue('not_cancellable');
+      try {
+        await service.expireDueHolds(new Date(Date.now() + 11 * 60_000));
+        const kept = await reservations.findById(held.id).lean();
+        expect(kept?.status).toBe(ReservationStatus.PENDING_PAYMENT);
+        expect(await nights.countDocuments({ reservation: kept?._id })).toBe(1);
+
+        await service.expireDueHolds(
+          new Date(Date.now() + 11 * 60_000 + STRIPE_WEBHOOK_RETRY_MS),
+        );
+        const expired = await reservations.findById(held.id).lean();
+        expect(expired?.status).toBe(ReservationStatus.EXPIRED);
+      } finally {
+        paymentService.cancelPendingPayment.mockResolvedValue(undefined);
+      }
     });
   });
 
@@ -1018,22 +1089,52 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       expect(refundService.issue).not.toHaveBeenCalled();
     });
 
-    it('keeps the refund PENDING when Stripe fails; the cancellation stands', async () => {
+    it('marks the refund FAILED when Stripe fails; cancelled, rooms released', async () => {
       const { client } = await loggedInAs();
-      const { reservation } = await confirmedStay(client, 45);
-      refundService.issue.mockRejectedValueOnce(new Error('Stripe is down'));
+      const { room, reservation } = await confirmedStay(client, 45);
+      refundService.issue.mockRejectedValueOnce(
+        Object.assign(new Error('Stripe is down: sk_test_secret'), {
+          code: 'api_connection_error',
+        }),
+      );
       const res = await client.post(cancelUrl(reservation.id)).expect(200);
-      const body = res.body as { reservation: HotelReservationView };
-      expect(body.reservation.status).toBe(ReservationStatus.CANCELLED);
-      expect(body.reservation.refund?.status).toBe('PENDING');
+      const cancelled = res.body as { reservation: HotelReservationView };
+      expect(cancelled.reservation.status).toBe(ReservationStatus.CANCELLED);
+      expect(cancelled.reservation.refund?.status).toBe('FAILED');
 
-      // The refund service can read what to refund and record the outcome.
+      // Stored as Failed with a short code only (no message, stack, secret).
+      const stored = await reservations.findById(reservation.id).lean();
+      expect(stored?.status).toBe(ReservationStatus.CANCELLED);
+      expect(stored?.refund?.status).toBe('FAILED');
+      expect(stored?.refund?.failureReason).toBe('STRIPE_API_CONNECTION_ERROR');
+      expect(JSON.stringify(stored?.refund)).not.toContain('sk_test');
+      // Visible on the details page (PAY-03).
+      const details = (
+        await client.get(`/api/hotel-bookings/${reservation.id}`).expect(200)
+      ).body as HotelReservationView;
+      expect(details.refund?.status).toBe('FAILED');
+
+      // The room is free again for those dates.
+      expect(await nights.countDocuments({ reservation: reservation.id })).toBe(
+        0,
+      );
+      const next = await loggedInAs();
+      await hold(
+        next.client,
+        body([room], reservation.checkIn, reservation.checkOut),
+      ).expect(201);
+
+      // The refund service can read what to refund, retry safely, and record
+      // the outcome.
       const basis = await payments.refundBasis(reservation.id);
       expect(basis).toMatchObject({
         paymentIntentId: `pi_${reservation.id}`,
         amount: 200,
         percentage: 100,
-        status: 'PENDING',
+        status: 'FAILED',
+        stripeRefundId: null,
+        failureReason: 'STRIPE_API_CONNECTION_ERROR',
+        idempotencyKey: hotelRefundIdempotencyKey(reservation.id),
       });
       expect(
         await payments.recordRefundResult(reservation.id, {
@@ -1043,9 +1144,109 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           currency: 'USD',
         }),
       ).toBe(true);
-      expect((await payments.refundBasis(reservation.id))?.status).toBe(
-        'REFUNDED',
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: 're_retry',
+        failureReason: null,
+        idempotencyKey: hotelRefundIdempotencyKey(reservation.id),
+      });
+    });
+
+    it('a generic refund error is FAILED with a generic reason', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 46);
+      refundService.issue.mockRejectedValueOnce(new Error('boom'));
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      const stored = await reservations.findById(reservation.id).lean();
+      expect(stored?.refund).toMatchObject({
+        status: 'FAILED',
+        failureReason: 'REFUND_ISSUE_FAILED',
+      });
+    });
+
+    it('marks the refund REFUNDED on success and exposes the Stripe refund id', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 47);
+      refundService.issue.mockImplementationOnce((_type, id) =>
+        Promise.resolve({
+          refundId: `re_${id}`,
+          amount: 200,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
       );
+      const res = await client.post(cancelUrl(reservation.id)).expect(200);
+      const body = res.body as { reservation: HotelReservationView };
+      expect(body.reservation.refund?.status).toBe('REFUNDED');
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'REFUNDED',
+        stripeRefundId: `re_${reservation.id}`,
+        failureReason: null,
+      });
+    });
+
+    it('keeps the refund PENDING when no refund service is wired (deploy state)', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 48);
+      const shared = ctx.moduleRef.get(SharedServices);
+      const spy = jest.spyOn(shared, 'refunds').mockReturnValue(undefined);
+      try {
+        const res = await client.post(cancelUrl(reservation.id)).expect(200);
+        const body = res.body as { reservation: HotelReservationView };
+        expect(body.reservation.status).toBe(ReservationStatus.CANCELLED);
+        expect(body.reservation.refund?.status).toBe('PENDING');
+      } finally {
+        spy.mockRestore();
+      }
+      expect(refundService.issue).not.toHaveBeenCalled();
+      expect(await payments.refundBasis(reservation.id)).toMatchObject({
+        status: 'PENDING',
+        stripeRefundId: null,
+      });
+    });
+
+    it('a webhook replay of the same payment after cancellation is not refunded again (PAY-01)', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 10);
+      refundService.issue.mockImplementationOnce((_type, id) =>
+        Promise.resolve({
+          refundId: `re_${id}`,
+          amount: 100,
+          status: 'REFUNDED',
+          currency: 'USD',
+        }),
+      );
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      const before = await reservations.findById(reservation.id).lean();
+      expect(before?.refund).toMatchObject({ percentage: 50, amount: 100 });
+
+      // Stripe re-delivers payment_intent.succeeded for the original payment.
+      const replay = await payments.confirmPaid(
+        reservation.id,
+        paid(reservation),
+      );
+      expect(replay.outcome).toBe('already_processed');
+      if (replay.outcome !== 'already_processed') return;
+      expect(replay.reservation.status).toBe(ReservationStatus.CANCELLED);
+
+      const after = await reservations.findById(reservation.id).lean();
+      expect(after?.status).toBe(ReservationStatus.CANCELLED);
+      expect(after?.refund).toEqual(before?.refund);
+      expect(after?.payment).toEqual(before?.payment);
+      expect(after?.updatedAt).toEqual(before?.updatedAt);
+      expect(refundService.issue).toHaveBeenCalledTimes(1);
+    });
+
+    it('a different payment on a cancelled reservation must be refunded in full', async () => {
+      const { client } = await loggedInAs();
+      const { reservation } = await confirmedStay(client, 11);
+      await client.post(cancelUrl(reservation.id)).expect(200);
+      expect(
+        await payments.confirmPaid(
+          reservation.id,
+          paid(reservation, 'pi_someone_else'),
+        ),
+      ).toEqual({ outcome: 'rejected', reason: 'NOT_PENDING' });
     });
 
     it('uses the tiers in force when the reservation was made', async () => {
@@ -1190,6 +1391,31 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       );
       expect((again.body as ErrorBody).code).toBe('REVIEW_EXISTS');
       expect((await reviewsOf(hotel.id)).ratingCount).toBe(1);
+    });
+
+    it('reports on reviews need a visible review by someone else (GEN-09)', async () => {
+      const guest = await loggedInAs();
+      const reporter = await loggedInAs();
+      const stay = await completedStay(guest.client, newHotel());
+      const created = (
+        await review(guest.client, stay.id, { rating: 2 }).expect(201)
+      ).body as HotelReviewView;
+      const report = (client: Client, contentId: string) =>
+        client.post('/api/reports').send({
+          contentType: 'review',
+          contentId,
+          reason: 'Fake review',
+        });
+
+      await report(reporter.client, new Types.ObjectId().toHexString()).expect(
+        404,
+      );
+      await report(guest.client, created.id).expect(400);
+      await report(reporter.client, created.id).expect(201);
+
+      await ctx.moduleRef.get(ReviewModerator).hide(created.id);
+      const other = await loggedInAs();
+      await report(other.client, created.id).expect(404);
     });
 
     it('two reviews of one stay at once: exactly one is stored', async () => {
@@ -1378,6 +1604,143 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
       // It still counts towards the average.
       expect(page.ratingCount).toBe(1);
     });
+
+    describe('hotel moderator replies (HTL-26)', () => {
+      type Reply = { text: string; repliedAt: string; editedAt?: string };
+      type ReviewWithReply = HotelReviewView & { reply: Reply | null };
+      const replyTo = (client: Client, reviewId: string, payload: object) =>
+        client.post(`/api/reviews/${reviewId}/reply`).send(payload);
+
+      async function reviewedStay() {
+        const guest = await loggedInAs();
+        const hotel = newHotel();
+        const stay = await completedStay(guest.client, hotel);
+        const written = (
+          await review(guest.client, stay.id, { rating: 3 }).expect(201)
+        ).body as HotelReviewView;
+        const moderator = await loggedInAs(Role.HOTEL_MODERATOR, hotel.id);
+        return { guest, hotel, written, moderator };
+      }
+
+      it('the hotel moderator replies once, can edit it, and guests see it as the hotel response', async () => {
+        const { guest, hotel, written, moderator } = await reviewedStay();
+        notifications.notify.mockClear();
+
+        const first = (
+          await replyTo(moderator.client, written.id, {
+            text: '  Thank you, we will fix the breakfast.  ',
+          }).expect(200)
+        ).body as ReviewWithReply;
+        expect(first.reply).toMatchObject({
+          text: 'Thank you, we will fix the breakfast.',
+        });
+        expect(first.reply?.editedAt).toBeUndefined();
+        expect(JSON.stringify(first.reply)).not.toContain(moderator.id);
+        expect(notifications.notify).toHaveBeenCalledWith(
+          guest.id,
+          'REVIEW_REPLIED',
+          expect.any(String),
+        );
+
+        notifications.notify.mockClear();
+        const edited = (
+          await replyTo(moderator.client, written.id, {
+            text: 'Breakfast is now fixed.',
+          }).expect(200)
+        ).body as ReviewWithReply;
+        expect(edited.reply).toMatchObject({ text: 'Breakfast is now fixed.' });
+        expect(edited.reply?.editedAt).toBeDefined();
+        expect(notifications.notify).not.toHaveBeenCalled();
+
+        const page = (await reviewsOf(hotel.id)) as unknown as {
+          items: ReviewWithReply[];
+        };
+        expect(page.items[0].reply).toMatchObject({
+          text: 'Breakfast is now fixed.',
+        });
+        expect(Object.keys(page.items[0].reply ?? {})).not.toContain(
+          'moderator',
+        );
+      });
+
+      it('removes a reply; a review without one shows reply: null', async () => {
+        const { hotel, written, moderator } = await reviewedStay();
+        expect(
+          (
+            (await reviewsOf(hotel.id)) as unknown as {
+              items: ReviewWithReply[];
+            }
+          ).items[0].reply,
+        ).toBeNull();
+        await replyTo(moderator.client, written.id, { text: 'Thanks!' }).expect(
+          200,
+        );
+        await moderator.client
+          .delete(`/api/reviews/${written.id}/reply`)
+          .expect(204);
+        await moderator.client
+          .delete(`/api/reviews/${written.id}/reply`)
+          .expect(404);
+        expect(
+          (
+            (await reviewsOf(hotel.id)) as unknown as {
+              items: ReviewWithReply[];
+            }
+          ).items[0].reply,
+        ).toBeNull();
+      });
+
+      it('only the moderator of that hotel, never the guest or another hotel', async () => {
+        const { guest, written } = await reviewedStay();
+        const otherHotel = newHotel();
+        const otherModerator = await loggedInAs(
+          Role.HOTEL_MODERATOR,
+          otherHotel.id,
+        );
+        await replyTo(otherModerator.client, written.id, {
+          text: 'Not mine',
+        }).expect(403);
+        await otherModerator.client
+          .delete(`/api/reviews/${written.id}/reply`)
+          .expect(403);
+        await replyTo(guest.client, written.id, { text: 'Me' }).expect(403);
+        await request(ctx.server)
+          .post(`/api/reviews/${written.id}/reply`)
+          .send({ text: 'Anon' })
+          .expect(401);
+      });
+
+      it('validates the text, and 404s an unknown or hidden review', async () => {
+        const { written, moderator } = await reviewedStay();
+        await replyTo(moderator.client, written.id, { text: '   ' }).expect(
+          400,
+        );
+        await replyTo(moderator.client, written.id, {
+          text: 'x'.repeat(1001),
+        }).expect(400);
+        await replyTo(moderator.client, written.id, {}).expect(400);
+        await replyTo(moderator.client, new Types.ObjectId().toHexString(), {
+          text: 'Hi',
+        }).expect(404);
+        await replyTo(moderator.client, 'not-an-id', { text: 'Hi' }).expect(
+          404,
+        );
+
+        const admin = await loggedInAs(Role.ADMIN);
+        await admin.client
+          .delete(`/api/admin/content/review/${written.id}?mode=hide`)
+          .expect(200);
+        await replyTo(moderator.client, written.id, { text: 'Hi' }).expect(404);
+      });
+
+      it('a notification failure never fails the reply', async () => {
+        const { written, moderator } = await reviewedStay();
+        notifications.notify.mockRejectedValueOnce(new Error('down'));
+        await replyTo(moderator.client, written.id, { text: 'Thanks' }).expect(
+          200,
+        );
+      });
+    });
   });
   describe('hooks for other modules (ACC-12, ACC-17, HTL-06, 08, 11, 22)', () => {
     let queries: HotelReservationQueries;
@@ -1440,6 +1803,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         ).expect(201);
         await guest.client.delete('/api/users/me?confirm=true').expect(204);
       });
+
+      it('ends an unpaid hold when the account is deactivated, freeing its rooms', async () => {
+        const guest = await loggedInAs();
+        const res = await hold(
+          guest.client,
+          body([addRoom()], '2028-03-12', '2028-03-13'),
+        ).expect(201);
+        const held = res.body as HotelReservationView;
+        await guest.client.delete('/api/users/me?confirm=true').expect(204);
+
+        const ended = await reservations.findById(held.id).lean();
+        expect(ended?.status).toBe(ReservationStatus.EXPIRED);
+        expect(await nights.countDocuments({ reservation: ended?._id })).toBe(
+          0,
+        );
+      });
     });
 
     describe('ACC-17: hotel reservations in the admin booking list', () => {
@@ -1468,12 +1847,22 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           ).expect(201)
         ).body as HotelReservationView;
         const admin = await loggedInAs(Role.ADMIN);
-        const list = async (query: string) =>
-          (
-            await admin.client
-              .get(`/api/admin/bookings?type=hotel&limit=100${query}`)
-              .expect(200)
-          ).body as { items: Row[]; total: number };
+        // Page size is fixed at 10 (GEN-05): walk every page.
+        const list = async (query: string) => {
+          const items: Row[] = [];
+          let total = 0;
+          for (let page = 1; ; page += 1) {
+            const body = (
+              await admin.client
+                .get(`/api/admin/bookings?type=hotel&page=${page}${query}`)
+                .expect(200)
+            ).body as { items: Row[]; total: number };
+            total = body.total;
+            items.push(...body.items);
+            if (items.length >= total || body.items.length === 0) break;
+          }
+          return { items, total };
+        };
 
         const all = await list('&from=2029-05-01&to=2029-05-31');
         const row = all.items.find((r) => r.id === confirmed.id);
@@ -1498,7 +1887,9 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
           await list('&status=Pending%20Payment&from=2029-05-01&to=2029-05-31')
         ).items.map((r) => r.id);
         expect(pendingIds).toEqual([pending.id]);
-        expect((await list('&status=Booked')).total).toBe(0);
+        await admin.client
+          .get('/api/admin/bookings?type=hotel&status=Booked')
+          .expect(400);
         expect(
           (await list('&from=2029-05-02&to=2029-05-31')).items.map((r) => r.id),
         ).toEqual([pending.id]);
@@ -1677,6 +2068,8 @@ describe('Hotel reservation holds (HTL-16, HTL-18; real MongoDB replica set in m
         ['/api/reviews/{id}', 'patch', 'HTL-23'],
         ['/api/reviews/{id}', 'delete', 'HTL-23'],
         ['/api/hotels/{id}/reviews', 'get', 'HTL-24'],
+        ['/api/reviews/{id}/reply', 'post', 'HTL-26'],
+        ['/api/reviews/{id}/reply', 'delete', 'HTL-26'],
       ];
       for (const [path, method, id] of expected) {
         const operation = (

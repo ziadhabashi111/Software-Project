@@ -54,7 +54,8 @@ cd backend
 cp ../.env.example .env           # then fill in the values below (never commit .env)
 npm install
 npm run start:dev                 # http://localhost:3000, Swagger at /api/docs
-npm run seed                      # once the seed script is merged: countries, cities, airports, attractions, currencies
+npm run seed                      # reference data: countries, cities, airports, attractions, currencies (see Seeding)
+npm run seed:admin                # the administrator from ADMIN_EMAIL / ADMIN_PASSWORD
 
 # Frontend (second terminal)
 cd frontend
@@ -78,11 +79,31 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `STRIPE_SECRET_KEY` | `backend/.env` | Shared Stripe **test** key (`sk_test_...`) from the team leader |
 | `STRIPE_WEBHOOK_SECRET` | `backend/.env` | Per developer, generated on your own machine (it cannot be shared). Install the Stripe CLI (`winget install Stripe.StripeCli`), run `stripe login`, then `stripe listen --forward-to localhost:3000/api/payments/webhook` and copy the `whsec_...` it prints. Only needed for payment work. |
 | `FXRATES_API_KEY` | `backend/.env` | Shared FXRatesAPI key from the team leader (backend only, never in the frontend) |
+| `UPLOAD_DIR`, `UPLOAD_PUBLIC_URL` | `backend/.env` | Optional (GEN-08). Defaults `uploads` and `http://localhost:3000/uploads`. At deployment, point `UPLOAD_DIR` at a persistent disk and set the public URL. See [docs/api/uploads.md](docs/api/uploads.md) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `MAIL_FROM` | `backend/.env` | Optional (GEN-01-B, ACC-07). With no `SMTP_HOST` nothing is sent and the email is written to the server log (outside production), so a reset link can be copied from there. In development use a test inbox such as Ethereal or Mailtrap. Port defaults to 587; `SMTP_SECURE=true` for TLS from the start |
+| `EMAIL_VERIFICATION_REQUIRED` | `backend/.env` | Optional (ACC-02). Off by default. Set to exactly `true` to refuse booking (`POST /api/flight-bookings/hold`, `POST /api/hotel-bookings`) with `403 EMAIL_NOT_VERIFIED` until the user has opened the emailed verification link. Everyone who registered while it was off is unverified, so turn it on only when users can receive email |
 | `FLIGHT_HOLD_MINUTES` | `backend/.env` | `10` (flight and hotel holds both last 10 minutes: FLT-22, HTL-18) |
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |
 
 The backend refuses to start if `MONGODB_URI` or `JWT_SECRET` is missing or still a placeholder. When you add a new variable, add its name (no value) to `.env.example` and a row here. Planned addition: a hotel hold duration, if the team wants a separate value. The platform currency (PAY-04) is not a variable: it is the constant PLATFORM_CURRENCY = 'USD' in backend/src/payments/platform-currency.ts, so it is identical on every machine.
+
+## Seeding (GEN-12)
+
+`npm run seed` (in `backend/`) loads the **official reference datasets** (PDF section 5.1, "Mock Data" sheet) from `docs/requirements/reference-data/` into the database in `MONGODB_URI`:
+
+| File | Collection | Id kept unchanged | Read endpoint |
+|---|---|---|---|
+| `countries.csv` | `countries` | `code` (e.g. `EG`) | `GET /api/countries?search=` |
+| `cities.csv` | `cities` | `city_id` (e.g. `new_york`) | `GET /api/cities?countryCode=&search=` |
+| `airports.csv` | `airports` | `iata_code` (e.g. `CAI`), with its IANA `time_zone` | `GET /api/airports` (FLT-02) |
+| `attractions.csv` | `attractions` | `attraction_id` (e.g. `att-1`) | none yet |
+| (derived) | `currencies` | distinct `currency` codes of `countries.csv` | `GET /api/currencies` |
+
+- **Idempotent:** every record is upserted by its dataset id, so running the seed again never creates duplicates and resets any edited reference record to the dataset values. Nothing is deleted.
+- **Checked before writing:** every row needs all its columns. Ids must be unique, and every city, airport and attraction must point to a listed country or city. Each airport's country must match its city's country, and every time zone must be a valid IANA zone. Any error stops the seed and names the file and line.
+- **Using the lists in your module:** import `ReferenceDataModule` and inject `ReferenceDataService` (`isCountry`, `isCity`, `isCurrency`). Itinerary countries and day cities (ITN-01, ITN-05) are already checked against them through `PlaceCatalog`.
+- If the course publishes new datasets, replace the four CSVs and run `npm run seed` again.
 
 ## MongoDB Atlas Access
 

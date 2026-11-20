@@ -469,3 +469,449 @@ I'm Yahia Tarek, member 3. Analyze the project description and do my part (fligh
 How the output was used:
 Reviewed the merged flights, payments-interface, hotel-bookings and admin code first (review findings sent to Youssef and Ahmed). Wrote a design doc and plan (docs/design/), then built backend/src/flight-bookings/ test-first: booking summary, concurrency-safe 10-minute hold on the flight's cabin counters inside a transaction, expiry/completion job, payment/refund hooks for Ziad mirroring the hotel API, grouped list and details, tier-based cancellation and the airline flight-cancel cascade, PDF e-ticket in local times, and the ACC-12/ACC-17 registrations. 41 e2e tests (incl. 5 parallel holds for the last seat) and 48 unit tests. Reviewed every diff; ran lint, unit, build and e2e.
 ================================================
+
+================================================
+Date: 2026-11-18
+Student: Ziad Mohannad
+Tool: Claude Code
+Related Requirement: PAY-01, PAY-02
+Prompt:
+Do Issue 25 and Issue 26 (Stripe payments and webhook, policy view and acceptance): 
+POST /api/payments, retry, GET, and the verified webhook; only the webhook confirms a booking; handle failed and expired payments; use the flight and hotel payment hooks already in the repo.
+How the output was used:
+Claude wrote backend/src/payments/: Payment and PolicyAcceptance schemas, the Stripe provider, a gateway that hides the flight/hotel difference,
+PaymentsService (PaymentIntent create/reuse/retry, signature-verified webhook, refund of payments a booking cannot accept, cancelPendingPayment on hold expiry), the controller with Swagger, 
+the policies view and accept-policies endpoints, 19 unit tests, rawBody in main.ts and the stripe dependency. Ran lint and the full backend test suite.
+================================================
+
+================================================
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-05, FLT-06, FLT-03, FLT-29, FLT-30, GEN-06, ACC-15
+Prompt:
+Apply the review fixes to my flights module only: list an airline's flights for its moderator; require the local time when an airport changes; make flight cancel rely on the booking module to notify (contract change agreed with Yahia); return the affected travellers when an airline is deactivated; block edits after departure; and add real-database e2e tests for the queries that were only mocked.
+
+How the output was used:
+Added GET /api/airlines/:id/flights, the airport-time rule, the notifiedUserIds contract and the optional getConfirmedUserIdsForAirline hook, and the departureUtc guard on the edit filters. Wrote test/flights.e2e-spec.ts against the in-memory MongoDB (24 tests). I checked the new tests can fail by temporarily breaking the seat-floor and airport-lock guards: exactly the expected three tests went red, then I restored the code. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Youssef Wahby
+Tool: Claude Code
+Related Requirement: FLT-06, PAY-03
+Prompt:
+Add one e2e test that loads the real FlightBookingsModule (no fake hook) and checks that cancelling a flight refunds its Confirmed bookings at 100%, expires pending holds, frees bookedSeats and heldSeats, and notifies the affected passengers.
+
+How the output was used:
+New test/flights-cancel-cascade.e2e-spec.ts (3 tests, MongoDB replica set in memory). The first run showed a traveller with two bookings gets two notices; I checked Yahia's code, saw each notice names its own booking, so I changed my expectation to one notice per cancelled booking and each traveller listed once in notifiedUserIds. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-12 (reference lists for FLT-02, HTL-01, ITN-01, ITN-05)
+Prompt:
+I am Ahmed Ismail. Read the README; the workflow is: create a branch for the issue, then open a PR and ask Habashi to review it. Start issue 44 (seed script and reference data, GEN-12).
+
+How the output was used:
+Claude checked the official "Mock Data" sheet linked in PDF 5.1 against docs/requirements/reference-data/ (identical, so the CSVs were kept). It then built backend/src/reference-data/: schemas for countries, cities, attractions and currencies, plus a CSV parser that validates the rows (ids unique, cities, countries and airports referentially consistent, IANA time zones valid). It added an idempotent upsert seeder (`npm run seed`, airports into Youssef's Airport schema) and public paginated GET /api/countries, /api/cities and /api/currencies, and registered the lists with the itinerary PlaceCatalog. It also wrote unit and e2e tests and updated the README. I reviewed the diff and ran lint, unit, build and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-09 (report submission), GEN-10 hooks for posts and comments
+Prompt:
+Yes, start 49 (Report schema, POST /api/reports, isHidden and hide/unhide/delete on posts and comments for Habashi).
+
+How the output was used:
+Claude first read Habashi's admin contracts (ReportSource/ReportDirectory, ContentModerators) and built against them unchanged. It added the Report schema, with a unique index for one report per user per item, and POST /api/reports: field-validated, 409 on duplicates (including parallel requests), 404 for missing or invisible items, 400 for own content. ReportsService implements an atomic resolve as the admin ReportSource. It also added Post and Comment schemas with isHidden and BlogModerationService (hide/unhide/delete, registered with ContentModerators), plus a ReportTargets registry that the review and itinerary modules can join. It wrote 11 e2e tests and docs/api/reports.md. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-08 (used by FLT-01, HTL-01, ITN-12, BLG-10)
+Prompt:
+Start issue 45 (shared upload helper, GEN-08): create a branch from develop, build it, then open a PR and ask Habashi to review.
+
+How the output was used:
+Claude built backend/src/uploads/. The limits are in one file (JPG/PNG detected from the file bytes, 5 MB each, 5 per post/activity/hotel, 1 airline logo). UploadsService validates every file before writing anything, stores files under random names in UPLOAD_DIR, returns URLs from UPLOAD_PUBLIC_URL, and has a path-safe remove and isUploadedUrl. It added an @ImageUpload() decorator that keeps files in memory and turns Multer errors into clear field errors, an authenticated POST /api/uploads/images for the airline-logo flow, and read-only static serving at /uploads. It also wrote unit and e2e tests, a usage note in docs/api/uploads.md, and the .env.example and README variables. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-03, BLG-04, BLG-08, BLG-10 (GEN-08)
+Prompt:
+Yes, start 46 (blog posts, drafts, tags, images).
+
+How the output was used:
+Claude built the author side of the blog on the Post schema from #118 and the upload helper from #114. It added POST /api/posts (title and body required, draft by default, up to 5 normalised tags of 30 chars, image URLs only from the upload helper), GET /api/posts/mine (drafts included, counts, status filter), GET /api/posts/mine/:id, and author-only PATCH and DELETE (403 for others' published posts, 404 for drafts; delete removes comments and image files). It also added POST/DELETE /api/posts/:id/images with an atomic 5-image limit and the public GET /api/tags/:tag/posts. It wrote 11 e2e tests, including parallel uploads. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-05, BLG-06, BLG-07 (GEN-10, ACC-12)
+Prompt:
+Yes, start 47 (comments and likes).
+
+How the output was used:
+Claude added a Like schema with a unique { post, user } index and POST/DELETE /api/posts/:id/like (409 ALREADY_LIKED; likeCount changes only when a like is really added or removed). It added POST /api/posts/:id/comments (1-500 chars, published and visible posts only), a public GET /api/posts/:id/comments (oldest first; hidden comments only for their author and admins; "Deleted user" for deactivated accounts), and author-only PATCH/DELETE /api/comments/:id (403/404, editedAt). commentCount now counts visible comments only: admin hide/unhide adjust it once, and deleting a post also deletes its likes. It wrote 11 e2e tests, including parallel likes. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-08, GEN-12, PAY-01, PAY-03, HTL-17, HTL-21, ITN-10, ITN-14, ITN-18, FLT-05, FLT-06, ACC-15
+Prompt:
+Review all recent open PRs and merges, then fix all the findings and put the fixes on develop.
+
+How the output was used:
+Claude reviewed open PRs #111, #112, #114, #115 and the merges since 17/11 (flights, hotel bookings, itineraries, reference data, CI). It checked the reference CSVs against the official "Mock Data" sheet linked in the PDF (identical, so the GEN-12 seed is correct; only the outdated note in PROJECT_BREAKDOWN.md was fixed here). Following the branch rules, it opened fix PRs instead of committing to develop: #119 hotel bookings (no second refund on webhook replay after cancellation, failed refunds marked Failed, refund idempotency key), #122 itineraries (exchange-rate outage backoff, activity costs keep their currency, 400 for unsupported summary currency), and, against the owners' open branches, #120 for #112 (notifications provided to flights and admin) and #123 for #114 (uploads record their owner). Each fix has tests; lint, build, unit and e2e tests were run, and I read every diff before pushing.
+Follow-up ("finish all what's open"): closed my duplicate sync PR #117 in favour of #116; brought #112 up to date and added a stable notification sort (createdAt then _id) on it; updated #120 for the moved GEN-01 log entry; opened #127 (flight-bookings failed refunds marked Failed, like hotels), #128 (HTL-22 moderator reservations list for their own hotel; HTL-06/08 left out because they need the Room schema), #129 into #125 (Stripe payments: duplicate events processed once, no double refund, statuses can't go backwards, parallel create race), and ported the upload ownership fix onto develop for the blog module after #114 merged without it.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: tooling (branch hygiene)
+Prompt:
+main was ahead of develop. Find out who merged what to main and bring develop up to date so develop is the one ahead.
+
+How the output was used:
+Found 4 commits only on main: the #88 release merge (merged by Yahia in the GitHub UI), a direct README edit by Ziad (no PR), and the merges of docs PRs #66 and #68 which targeted main. Merged main into develop on a branch (no conflicts), so develop now contains everything main has. Reviewed the diff.
+================================================
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+Guide me step by step through issue 28 (in-app notifications): the Notification schema, the module,
+the service (notify, list, unread count, mark read, mark all read), and the controller with its query
+DTO, plus unit tests. Explain new NestJS and TypeScript terms (decorators, modules, dependency
+injection, ObjectId, index, DTO) as we go.
+
+How the output was used:
+Wrote the Notification schema and registered it in the module myself following the guidance (ObjectId
+userId with ref and index, read defaulting to false). The service, controller, query DTO and unit
+tests were provided by Claude when I asked for the code, and I reviewed them as well. markRead matches on both the notification id
+and the owner so a user cannot mark someone else's notification (404). Ran lint, tsc and the unit tests.
+================================================
+
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01, GEN-05
+Prompt:
+Review Ziad's PR #112 (in-app notifications) and fix the gaps before merging.
+
+How the output was used:
+Reviewed the module (user-scoped queries, ownership inside the update filter, 404 for others) and found it correct. Fixed two gaps on his branch: the list used its own DTO with page size 20 instead of the shared GEN-05 pagination (10 by default), and the API returned raw Mongo documents. Added a NotificationView, switched to PaginationQueryDto/toPage, removed the now-unused DTO, and added an e2e spec (401 without login, per-user isolation, page size 10, no database internals, cross-user mark-read returns 404). Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: GEN-12, ACC-09
+Prompt:
+What was the problem in GEN-12? Yes, fix it.
+
+How the output was used:
+Claude explained that ProfileService (ACC-09) asks for an optional CURRENCY_CATALOG hook that my GEN-12 module never provided. Without it, any three-letter code was accepted as a preferred currency. ReferenceDataModule now provides CURRENCY_CATALOG, backed by ReferenceDataService.isCurrency, and is @Global, which avoids a circular import with UsersModule. Claude added an e2e test (XYZ rejected, EUR accepted). I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+Date: 2026-11-18
+
+================================================
+Date: 2026-11-18
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-08, BLG-01, BLG-10
+Prompt:
+CI for Yahia's upload-ownership PR #123 failed on lint after develop was merged in. Find out why and fix it.
+
+How the output was used:
+The lint error (no-misused-promises) exposed a real integration bug: #123 made the upload ownership check async and added an owner argument, but Ahmed's already-merged blog code still called the old synchronous isUploadedUrl(url), so the blog's image-URL check would have been silently bypassed (and saveImages/remove got the wrong arguments). Updated every blog call site to the new contract (assertOwnedUpload, remove(url, authorId), saveImages(files, 'post', authorId, existing)) and added an e2e case that another author cannot attach someone else's upload. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-18
+Student: Ahmed Ismail
+Tool: Claude Code
+Related Requirement: BLG-02, BLG-09, BLG-12 (ACC-12, GEN-10)
+Prompt:
+Yes, start 48 (browse, search, author page).
+
+How the output was used:
+Claude added a PublicPostsService built on one aggregation that joins only each author's name and status. It handles public GET /api/posts (newest first, tag filter) and GET /api/posts/search (title, tag or author name; sorted by likes + comments, newest first on ties). Posts of deactivated authors are excluded everywhere (ACC-12), and the tag page now uses the same query. GET /api/posts/:id shows drafts only to the author and hidden posts to the author and admins, with the first page of comments and likedByMe. GET /api/authors/:id gives name, join date, published posts and public itineraries through an AuthorItineraries hook for the itinerary module. It wrote 12 e2e tests. I reviewed the diff and ran build, lint, unit and e2e.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-21, ITN-25, BLG-12 (issue 8)
+Prompt:
+Finish my issue 8: public itineraries (search and read-only view), clone, hotels from an itinerary, and the author-page source for Ahmed.
+
+How the output was used:
+Built test-first: pure, unit-tested pieces (cloneDays deep copy with a day-id map, the public-search filter, hotelCriteriaFor, remapToClone for budgets) and services around them. Public search/view are open to visitors and only show public, not-hidden itineraries of non-deactivated owners (checked in the database query so paging stays right; everything else answers 404). Clone makes a private copy that credits the author, copies days, activities and budget entries (no images), and removes the half-made copy if the budget copy fails. GET /api/itineraries/:id/hotels reuses the hotel search through a HotelSearchHook for Noureldin to register (503 until then). The itinerary module registers as the blog's AuthorItineraries source. Added optional cloneBudgets/publicSummary to the budget hook, matchKeyword to PlaceCatalog (implemented by ReferenceDataService), an e2e spec, and README rows. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-19
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-12, GEN-08
+Prompt:
+Finish issue 7: the activity images (POST /api/activities/:id/images, DELETE .../images/:imageId) now that Ahmed's upload helper exists.
+
+How the output was used:
+Wrote the specs first, then ActivityImagesService on top of the upload helper and the repository's optimistic-concurrency change(): ownership is checked before anything is stored (non-owners get 404 and no file is written), the 5-image cap is re-checked on the latest state so parallel uploads cannot exceed it and the stored files are removed if the attach fails, and removing an image deletes its file. Deleting an activity, a day, an itinerary (also an admin delete) now deletes the image files so nothing is orphaned. Added an e2e spec (limits, fake files, ownership, cleanup in every delete path, parallel uploads) and README rows. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-03 (issue 27)
+Prompt:
+Write the refunds for Issue 27: RefundService preview and issue through the Stripe Refunds API, refund status updated by webhook, GET /api/refunds/:id and the refund notification.
+
+How the output was used:
+RefundsService (preview, issue, refund webhook), a Refund schema, gateway methods, GET /api/refunds/:id and 20 unit tests. The tier rule is reused from refundPercentFor. Applied as a patch and checked with lint and npm test.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-01, HTL-02, HTL-03, HTL-04, HTL-05, HTL-06, HTL-08, HTL-09, HTL-10 (issues 31, 32, 33)
+Prompt:
+Implement the hotel catalogue for Milestone 1 (hotel profile, rooms, availability, blocked dates, check-in/out times, cancellation tiers) so hotel booking and the admin provider directory work.
+
+How the output was used:
+Built test-first as small pure pieces plus services: date-range rules (real calendar dates, overlap, covers, nights removed), room night status (Available/Booked/Blocked), HotelsService (admin creates, own moderator edits, policies reuse the flight tier rules), RoomsService (unique room name, availability/blocks with optimistic-concurrency retries, refusals that protect existing reservations) and HotelCatalog, which registers with the booking inventory and the admin provider directory. Reservations are read through the booking module's queries, never its collections. Added an e2e spec (profile, policies, admin link, rooms, availability, parallel ranges, booking through the catalogue, reservation protection, room status view) and README rows. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-01, GEN-08 (issue 31, hotel photos)
+Prompt:
+Add the hotel photos on top of the hotel catalogue: POST /api/hotels/:id/images and DELETE /api/hotels/:id/images/:imageId with the shared upload helper.
+
+How the output was used:
+Wrote the service spec first (ownership before any file is written, files stored as the moderator, the 5-photo limit inside the database write so parallel uploads cannot exceed it, files deleted when the write fails or the photo is removed, best-effort file deletion). HotelPhotosService and HotelPhotosController follow the same upload pattern as the activity images. Added e2e tests (add/remove with files on disk, other moderators/admins/travellers/guests refused with nothing stored, fake files, the limit, parallel uploads) and README rows. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: BLG-01..10, GEN-09 (issues 46-49, test coverage)
+Prompt:
+The blog module (Ahmed) had no unit tests, the only module without them. Add unit tests for the blog covering happy paths, edge cases, error paths and state changes.
+
+How the output was used:
+Added 7 co-located unit specs for the blog (post-view mappers, post-access visibility, likes, posts, comments, reports, moderation): 53 tests. They follow the project's existing pattern (Jest built-in mocking: jest.fn/jest.spyOn, no extra mocking library), assert real behaviour (one like per user, hidden content hidden from strangers, comment counts only move on a real state change, duplicate-key races become 409, ownership 403-vs-404), and each non-obvious test has a short comment. Ran the blog suite, lint and tsc.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: GEN-01 (issue 28)
+Prompt:
+While verifying that every module's notification events fire (Issue 28), I found that suspending a user account sends no in-app notification. Habashi approved fixing it: add the account suspension and reactivation notifications using the same ADMIN_NOTIFIER pattern as provider deactivation.
+
+How the output was used:
+Claude wrote the change and I applied it as a patch on a new branch from the latest develop. AdminAccountsService now injects the optional ADMIN_NOTIFIER and sends ACCOUNT_SUSPENDED after suspend() 
+and ACCOUNT_REACTIVATED after reactivate(),
+only to the affected account. A notification failure is logged and never undoes the status change. 
+Added 6 unit tests in admin-accounts.service.spec.ts (notified on suspend and reactivate, nothing sent when the change is rejected, works without a notifier, suspension still succeeds if the notifier throws). 
+I ran lint and the full test suite myself; the only failing test is the existing uploads read-only-folder test, which is unrelated and fails on develop too.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Ziad Mohannad
+Tool: Claude
+Related Requirement: PAY-02, HTL-09 (issue 26)
+Prompt:
+GET /api/bookings/hotel/:id/policies shows the hotel's cancellation tiers and the stay dates but not the hotel's check-in and check-out times, which PAY-02 requires. Habashi explained that the times are set by the hotel moderator in the hotel policies (PUT /api/hotels/:id/policies, HTL-09) and the dates belong to the booking. Add the times to the hotel policies response, and return an error when the hotel cannot be found.
+
+How the output was used:
+The hotel policies response now includes the hotel's checkInTime and checkOutTime (HH:mm) next to the booking's stay dates. BookingPaymentGateway reads the times through the existing hotel inventory hook, and two optional fields were added to InventoryHotel (hotel-bookings) 
+and to the hotel catalog mapping (hotels). After Habashi's feedback, a hotel that cannot be found now returns a 404 instead of answering without times. 
+Added 4 unit tests in booking-payment-gateway.spec.ts (times shown, hotel not found, hotels module not registered, another user's reservation) and updated the Swagger description. I ran lint and the tests myself.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: HTL-11, HTL-12, HTL-15, HTL-22 (issues 34, 35)
+Prompt:
+Finish the hotel search and filters (HTL-11, 12) and the free rooms of a hotel (HTL-15), and check the moderator reservation list (HTL-22).
+
+How the output was used:
+Built test-first. Pure, unit-tested rules (a room is free only if active, inside its availability, not blocked and not taken; enough free rooms whose largest occupancies cover the guests; cheapest free room as the hotel price; inclusive price range and minimum rating with unrated hotels left out only when a rating filter is set; stable sort with unrated last) and HotelSearchService around them. Reservations are read through HotelReservationQueries and ratings through HotelRatings, never their collections. Stay validation is reused from the booking module, so search and booking agree. The service registers with HotelSearchHook, so GET /api/itineraries/:id/hotels now works instead of answering 503. HotelSearchController is listed before HotelsController so GET /api/hotels/search is not read as a hotel id. HTL-22 already existed with its own e2e spec, so only a stale comment was corrected. Added an e2e spec and README rows. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: PAY-01, PAY-03, FLT-22, HTL-18, FLT-25, GEN-01, GEN-11, ITN-26, FLT-12
+Prompt:
+Audit everything we built for M1 against the project description and fix every bug found, important first then minor. For payments and bookings: the Stripe webhook marks an event handled before processing it, a payment that succeeded inside the hold is refunded if its webhook arrives late, refunds of rejected payments skip the refund records and notifications, a pending refund result can overwrite a final one, flights return NOT_PAYABLE instead of HOLD_EXPIRED, the hold length is duplicated, completing landed bookings stops at 500, and itinerary round-trip search lists returns the booking rule rejects.
+
+How the output was used:
+Claude wrote each fix test-first on fix/PAY-01-payment-and-booking-review-fixes; I reviewed the full diff. Webhook events are recorded only after handling (handlers are idempotent). "Paid on time" uses Stripe's event time, and the flight expiry sweep leaves a hold alone when Stripe says it was already paid. Rejected-payment refunds are Refund records (kind rejected_payment) with a notification; the old unique refund index is replaced by a partial one. Refund results never go from final back to pending and keep the failure reason. Flights answer 409 HOLD_EXPIRED; one shared HOLD_MINUTES constant; completeDue pages through every Confirmed booking; a return may use other airports of the same two cities. Cancellation refunds keep the tiers accepted at booking (team decision). Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: BLG-01, BLG-05, BLG-06, BLG-07, BLG-10, BLG-12, GEN-05, GEN-08, GEN-09, HTL-01, HTL-03, HTL-05, HTL-06, HTL-08, HTL-18, PAY-01
+Prompt:
+Fix every M1 audit finding in blog, uploads, hotels and hotel bookings, important first then minor: moderators and admins can post, comment, like and report; a moderator's room block can interleave with a guest hold; reports on reviews are never checked; a hotel's city is not checked against its country; one uploaded image can be attached to two posts; a hotel photo removed by another moderator leaves its file behind; stand-alone uploads are never cleaned up; the author page and the rooms lists are not paginated by 10; and the hotel expiry sweep expires a hold whose payment Stripe already took.
+
+How the output was used:
+Claude wrote each fix test-first on fix/BLG-01-blog-hotels-review-fixes; I reviewed the full diff. Blog writing, reporting and post uploads are registered users only (the sheet's actor); upload kinds are tied to their role. Holds bump each room's version inside their transaction and moderator changes save with optimistic concurrency, so a block and a hold can no longer both commit. Review reports check the review exists, is visible and is not the reporter's own. City must be in country. An upload belongs to one item; unattached stand-alone uploads are removed after 24 hours. Author itineraries and room lists are paginated by 10. The hotel sweep now cancels the PaymentIntent first and leaves an already-paid hold to the webhook, like flights. Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-13, GEN-02, ACC-19, GEN-05, ITN-14, ITN-16, GEN-07, ACC-06, ACC-12, ACC-17, GEN-09, FLT-22
+Prompt:
+Fix every M1 audit finding in accounts, admin, itineraries and shared code, important first then minor: null passes validation on update bodies (saved or a 500), auth cookies are not Secure by default, any list accepts limit=100, the budget lists are not paginated, an admin action can succeed without its audit record, two tabs refreshing at once log the user out, deactivation can race a booking confirmation, the admin booking status filter is not validated, CORS and MAX_DAYS are hardcoded, reported itineraries are never checked, and .env.example lists an unused FLIGHT_HOLD_MINUTES.
+
+How the output was used:
+Claude wrote each fix test-first on fix/GEN-13-accounts-itineraries-review-fixes; I reviewed the full diff. A shared IsOptionalNonNull decorator (and PartialType with skipNullProperties: false) rejects null on every update body in all modules. Cookies are Secure unless COOKIE_SECURE=false. Page size is capped at 10 and the budget lists are paginated. Admin account actions and their audit records share a transaction. A just-rotated refresh token has a 30-second grace window. Deactivation marks the account, ends its unpaid holds, then checks Confirmed bookings, so a late payment is refunded. The booking status filter is validated, CORS comes from validated config and MAX_DAYS is shared. Reports on itineraries must target a public, visible itinerary that is not the reporter's own. Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-07, GEN-10, HTL-18, PAY-01, ACC-05, ACC-06, ACC-08, ACC-19, GEN-08, GEN-13
+Prompt:
+Fix the two remaining known issues (a new hotel hold could take the rooms of a hold the user paid for in its last seconds; resolving a report wrote its audit record after the content change), then run a quick security audit and check that every hook, API and module is wired correctly end to end.
+
+How the output was used:
+Claude wrote each fix test-first on fix/GEN-07-moderation-audit-and-paid-holds; I reviewed the full diff. Content moderation and report resolution now write the audit record before acting, claim the report first so two admins cannot both act, and undo the records and reopen the report if the action fails. A new hotel hold only takes over run-out holds whose payment Stripe has stopped. Security: each login attempt is claimed atomically before the password check (parallel guesses can no longer bypass the 5-attempt lock), wrong current passwords on change-password count toward the lock, a token's session must belong to its user, security headers and a same-origin check for state-changing requests were added, auth and upload routes are rate limited per IP (built in, no new package), and unused stand-alone uploads are capped at 20 per user with a cleanup that removes every abandoned file. A new e2e test boots the real AppModule and checks every hook, registry and token plus the main flows end to end. Not changed: the minimum JWT secret length (raising it could stop teammates' servers from starting) and Swagger stays public for the M1 evaluation. Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-05, ACC-01
+Prompt:
+Raise the per-IP register rate limit: five sign-ups a minute is too few for someone testing every role in Swagger or a class sharing one address.
+
+How the output was used:
+Wrote the e2e test first (20 registrations per minute from one address succeed, the 21st answers 429 RATE_LIMITED); it failed at the sixth sign-up with the old limit of 5. Then raised the register limit from 5 to 20 per minute in app.setup.ts, with a short comment saying why. Login (10), refresh, change-password and upload limits are unchanged. Ran the security e2e suite, lint and checked the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: HTL-05, HTL-06, GEN-13 (Milestone 1 completeness)
+Prompt:
+Make sure all of Milestone 1 is done: compare every mandatory requirement and every endpoint in the project description (sections 8.1-8.10) with develop, and check Swagger, the seed and the docs.
+
+How the output was used:
+All mandatory backend requirements are implemented; the only ones without backend code are frontend requirements for Milestone 2 (ACC-10, GEN-04, GEN-14..17). The one documented endpoint that did not exist, PATCH /api/hotels/:id/rooms/:roomId/availability, was added test-first: it replaces a room's bookable ranges, rejects overlaps and refuses to drop nights a reservation holds (409). The full-app wiring test now builds the Swagger document for the whole AppModule and fails if any operation lacks a requirement ID. docs/erd.md was rewritten from the real Mongoose schemas (collections, references, embedded documents, booking lifecycle). Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: GEN-01-B, ACC-07 (issues 53, 55; bonus)
+Prompt:
+Start the bonuses: build the email sender (needed by ACC-02 and ACC-07) and the forgot and reset password by email (ACC-07).
+
+How the output was used:
+Built test-first. MailService sends through nodemailer from SMTP_* variables, and with no SMTP_HOST logs the email (never its body in production) so local runs work without a mail server. An email token store keeps only the SHA-256 hash of a 32-byte random token, one live link per user and purpose (a newer one overwrites the older), and deletes it as it is read so it works once even under parallel requests. PasswordResetService answers forgot-password identically for known, unknown and suspended addresses and sends the email in the background so timing does not reveal the account; reset-password sets the password, signs the account out everywhere and clears a login lock and a forced password change. Added per-IP rate limits for both routes, e2e tests (17 for the reset flow, 2 for the limits), README rows and the SMTP names in .env.example. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: FLT-28 (bonus), FLT-04, FLT-05, FLT-23
+Prompt:
+Implement the FLT-28 bonus: seat selection for flight bookings.
+
+How the output was used:
+Claude wrote it test-first on feature/FLT-28-seat-selection; I reviewed the full diff and added one fix. Each cabin has a seat layout (seatsPerRow, default 6 in Economy/Premium Economy and 4 in Business/First; labels 1A, 1B, ...). GET /api/flights/:id/seats shows free and taken seats with no personal data. PATCH /api/flight-bookings/:id/seat lets the owner of a Confirmed booking pick a seat per passenger per flight (not infants); a unique index makes parallel picks safe (409 SEAT_TAKEN), and the pick re-checks the booking inside its transaction so a booking cancelled at the same moment never gets a seat (my fix, with a test). Seats are freed on cancellation (user or airline) and expiry, shown on bookings and the e-ticket, and an airline cannot shrink or reshape a cabin in a way that drops a picked seat (409 SEATS_ASSIGNED). Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: FLT-27 (bonus), PAY-01, PAY-03, FLT-28
+Prompt:
+Implement the FLT-27 bonus: change a Confirmed flight booking's date or flight (same route and cabin), paying the fare difference via Stripe or refunding a lower fare, subject to seat availability.
+
+How the output was used:
+Claude wrote it test-first on feature/FLT-27-change-flight (design in docs/design/2026-11-20-flight-change-design.md); I reviewed the full diff, merged FLT-28 in and wired the two together. PATCH /api/flight-bookings/:id/change-flight previews the difference, and with confirm=true applies a same-fare or cheaper change at once in one transaction (new seats booked, old ones returned, lower fare refunded) or holds the new seats for HOLD_MINUTES while the difference is paid as a 'flight-change' payment through the normal payments flow; the webhook applies it. Same airline, route and cabin only; round trips stay in order; passenger types are re-checked; one pending change per booking. The booking keeps a ledger of every payment, so a later cancellation refunds across payments newest first, never more than each received. Seats picked on the old flight are freed when the change applies (my integration, with a test). Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: HTL-26 (bonus)
+Prompt:
+Implement the HTL-26 bonus: a hotel moderator can reply to reviews of their own hotel.
+
+How the output was used:
+Claude wrote it test-first on feature/HTL-26-review-replies; I reviewed the full diff. POST /api/reviews/:id/reply creates or edits the hotel's single reply and DELETE removes it; only a moderator of the review's hotel may do it, hidden or unknown reviews are 404, and the reply is written atomically so parallel replies leave one. Review views show the reply as the hotel's response without the moderator's identity, and the author gets an in-app notification for a new reply. Lint, unit, build and e2e pass.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ACC-02 (issue 54; bonus)
+Prompt:
+Build email verification (ACC-02): a verification link at registration, GET /api/auth/verify-email, a resend option, and booking blocked until the email is verified, behind an environment switch that is off by default so graders can still book locally.
+
+How the output was used:
+Built test-first on the token store and MailService from ACC-07. Registration now creates the user as unverified (older, seeded and admin-made accounts count as verified) and emails a 24-hour single-use link in the background, so a mail failure never fails registration. verify-email and resend-verification are rate limited. A VerifiedEmailGuard acts on routes marked @RequireVerifiedEmail() (flight booking hold, hotel reservation) only when EMAIL_VERIFICATION_REQUIRED is exactly "true", and answers 401 instead of passing if it ever runs without a logged-in user. A unit test pins the marks on the real booking routes. My first version registered the guard in the global AuthModule, which broke the no-database foundations e2e suite; I moved it to AuthApiModule. Added e2e tests (16 for the flow and the switch), README rows and the new variable name in .env.example. Reviewed the diff.
+================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-27, ITN-28, BLG-13 (bonuses), ITN-14, ITN-21, BLG-02, BLG-12
+Prompt:
+Finish my remaining bonuses: link bookings to itinerary days (ITN-27), export an itinerary as a PDF (ITN-28) and link an itinerary to a blog post (BLG-13).
+
+How the output was used:
+Built test-first on feature/ITN-27-28-BLG-13-itinerary-bonuses. ITN-27: a link stores only the booking reference; its reference, status and price are read from the booking modules as the owner each time, so a cancelled booking stops counting and someone else's booking can never be linked; linked bookings feed the owner's budget (flight as intercity transport, hotel as accommodation) and never the public summary or a clone. ITN-28: a pure model mapper plus a pdfkit renderer; the owner gets bookings and budget, everyone else only the public copy, otherwise 404; the file name is sanitised for the header. BLG-13: the blog's AuthorItineraries port gained ownedBy and publicSummary, implemented by the itinerary module, so readers see the link only while the itinerary stays public. I reviewed the full diff and the unit and e2e tests.
+================================================

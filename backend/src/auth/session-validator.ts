@@ -6,5 +6,5 @@ export interface SessionValidator {
    * True when the session is alive. Also counts the call as activity, so a
    * session expires after 30 minutes without an authenticated request.
    */
-  validateAndTouch(sessionId: string): Promise<boolean>;
+  validateAndTouch(sessionId: string, userId?: string): Promise<boolean>;
 }

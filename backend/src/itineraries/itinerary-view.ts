@@ -38,6 +38,8 @@ export interface ItineraryView {
   isHidden: boolean;
   days: DayView[];
   groups: GroupView[];
+  /** Only on a clone: the original author is credited (ITN-21). */
+  clonedFrom?: { itineraryId: string; authorId: string; authorName: string };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -115,6 +117,15 @@ export function toItineraryView(
     isHidden: itinerary.isHidden,
     days,
     groups,
+    ...(itinerary.clonedFrom
+      ? {
+          clonedFrom: {
+            itineraryId: itinerary.clonedFrom.itinerary.toString(),
+            authorId: itinerary.clonedFrom.author.toString(),
+            authorName: itinerary.clonedFrom.authorName,
+          },
+        }
+      : {}),
     createdAt: itinerary.createdAt,
     updatedAt: itinerary.updatedAt,
   };

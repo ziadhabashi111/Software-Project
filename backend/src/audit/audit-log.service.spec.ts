@@ -1,4 +1,4 @@
-import type { Model } from 'mongoose';
+import type { ClientSession, Model } from 'mongoose';
 import { AuditAction } from './audit-action';
 import { AuditLogService } from './audit-log.service';
 import type { AuditLogDocument } from './audit-log.schema';
@@ -8,13 +8,15 @@ const USER_ID = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 
 function serviceWithRecorder() {
   const saved: Record<string, unknown>[] = [];
+  const options: unknown[] = [];
   const model = {
-    create: (doc: Record<string, unknown>) => {
-      saved.push(doc);
-      return Promise.resolve(doc);
+    create: (docs: Record<string, unknown>[], opts: unknown) => {
+      saved.push(...docs);
+      options.push(opts);
+      return Promise.resolve(docs);
     },
   } as unknown as Model<AuditLogDocument>;
-  return { service: new AuditLogService(model), saved };
+  return { service: new AuditLogService(model), saved, options };
 }
 
 describe('AuditLogService (GEN-07)', () => {
@@ -48,6 +50,20 @@ describe('AuditLogService (GEN-07)', () => {
     expect(saved[0]).not.toHaveProperty('targetId');
     expect(saved[0]).not.toHaveProperty('details');
     expect(saved[0].action).toBe('PASSWORD_RESET');
+  });
+
+  it("writes inside the caller's transaction when given its session", async () => {
+    const { service, options } = serviceWithRecorder();
+    const session = { id: 'tx' } as unknown as ClientSession;
+    await service.log(
+      {
+        actorId: ADMIN_ID,
+        action: AuditAction.PASSWORD_RESET,
+        targetType: 'user',
+      },
+      session,
+    );
+    expect(options).toEqual([{ session }]);
   });
 
   it('covers every admin action the requirements name', () => {

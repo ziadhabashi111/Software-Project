@@ -10,7 +10,9 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import type { Model, QueryFilter } from 'mongoose';
+import { Role } from '../auth/auth.types';
 import type { AuthUser } from '../auth/auth.types';
+import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
 import { fieldError } from '../common/validation/validation-errors';
 import { NOTIFICATION_SERVICE } from '../notifications/notification.service.interface';
 import type { NotificationService } from '../notifications/notification.service.interface';
@@ -19,6 +21,7 @@ import { AirlinesService } from './airlines.service';
 import { AirportsService } from './airports.service';
 import { CreateCabinDto } from './dto/create-cabin.dto';
 import { CreateFlightDto } from './dto/create-flight.dto';
+import { ListAirlineFlightsQueryDto } from './dto/list-airline-flights.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { UpdateFlightDto } from './dto/update-flight.dto';
 import { FlightBookingHooks } from './flight-booking-hooks';
@@ -29,6 +32,7 @@ import type { FlightView } from './flight-view';
 import type { AirportDocument } from './schemas/airport.schema';
 import { Flight } from './schemas/flight.schema';
 import type { FlightDocument } from './schemas/flight.schema';
+import { isSeatInLayout, seatsPerRowOf } from './seat-layout';
 import { localToUtc, utcToLocal } from './time-zones';
 
 function isDuplicateKey(error: unknown): boolean {
@@ -69,6 +73,51 @@ export class FlightsService {
     @Inject(NOTIFICATION_SERVICE)
     private readonly notifications?: NotificationService,
   ) {}
+
+  /**
+   * FLT-05, FLT-06, FLT-29: the airline's flights for its own moderator (or an
+   * admin), newest departure first. The Departed filter is computed from the
+   * departure time too, so it is right between runs of the scheduled job.
+   */
+  async listForAirline(
+    user: AuthUser,
+    airlineId: string,
+    query: ListAirlineFlightsQueryDto,
+  ): Promise<Paginated<FlightView>> {
+    if (user.role !== Role.ADMIN) assertOwnAirline(user, airlineId);
+    const airline = await this.airlines.findForFlights(airlineId, {
+      includeInactive: true,
+    });
+    if (!airline) throw new NotFoundException('Airline not found');
+
+    const filter: QueryFilter<Flight> = {
+      airlineId: new Types.ObjectId(airlineId),
+      ...statusFilter(query.status, new Date()),
+    };
+    const [flights, total] = await Promise.all([
+      this.flights
+        .find(filter)
+        .sort({ departureUtc: -1, _id: -1 })
+        .skip(skipFor(query))
+        .limit(query.limit),
+      this.flights.countDocuments(filter),
+    ]);
+
+    const airports = await this.airports.findByCodes([
+      ...new Set(
+        flights.flatMap((f) => [f.departureAirport, f.arrivalAirport]),
+      ),
+    ]);
+    const byCode = new Map(airports.map((a) => [a.iataCode, a]));
+    const items = flights.flatMap((flight) => {
+      const departure = byCode.get(flight.departureAirport);
+      const arrival = byCode.get(flight.arrivalAirport);
+      return departure && arrival
+        ? [toFlightView(flight, airline, departure, arrival)]
+        : [];
+    });
+    return toPage(items, total, query);
+  }
 
   /** FLT-03 */
   async create(user: AuthUser, dto: CreateFlightDto): Promise<FlightView> {
@@ -130,6 +179,22 @@ export class FlightsService {
       );
     }
 
+    // The stored times are UTC. A new airport has another time zone, so keeping
+    // the old UTC would silently change the local time people see (GEN-06).
+    // The moderator must say what the local time is at the new airport.
+    if (departureCode !== flight.departureAirport && !dto.departureTime) {
+      throw fieldError(
+        'departureTime',
+        `Send the departure time at ${departureCode} when you change the departure airport`,
+      );
+    }
+    if (arrivalCode !== flight.arrivalAirport && !dto.arrivalTime) {
+      throw fieldError(
+        'arrivalTime',
+        `Send the arrival time at ${arrivalCode} when you change the arrival airport`,
+      );
+    }
+
     assertDifferentAirports(departureCode, arrivalCode);
     const airports = await this.loadAirports(departureCode, arrivalCode);
     const departure = airports.get(departureCode) as AirportDocument;
@@ -145,6 +210,8 @@ export class FlightsService {
     const filter: QueryFilter<Flight> = {
       _id: flight._id,
       status: FlightStatus.SCHEDULED,
+      // Not after departure, even if the minute job has not marked it Departed yet (FLT-30).
+      departureUtc: { $gt: new Date() },
     };
     if (airportsChanged) {
       // A hold or booking may have arrived since we loaded the flight.
@@ -181,7 +248,7 @@ export class FlightsService {
     if (!updated) {
       throw conflict(
         'FLIGHT_CHANGED',
-        'The flight changed while you were editing it (a booking was made or its status changed). Reload it and try again.',
+        'The flight changed while you were editing it (a booking was made, it was cancelled or it has departed). Reload it and try again.',
       );
     }
 
@@ -205,6 +272,7 @@ export class FlightsService {
       {
         _id: flight._id,
         status: FlightStatus.SCHEDULED,
+        departureUtc: { $gt: new Date() },
         'cabins.cabinClass': { $ne: dto.cabinClass },
       },
       {
@@ -217,6 +285,10 @@ export class FlightsService {
             price: dto.price,
             freeBags: dto.freeBags,
             maxBagWeightKg: dto.maxBagWeightKg,
+            ...(dto.seatsPerRow !== undefined
+              ? { seatsPerRow: dto.seatsPerRow }
+              : {}),
+            seatMapVersion: 0,
           },
         },
       },
@@ -256,44 +328,52 @@ export class FlightsService {
     if (dto.maxBagWeightKg !== undefined) {
       set['cabins.$[c].maxBagWeightKg'] = dto.maxBagWeightKg;
     }
+    if (dto.seatsPerRow !== undefined) {
+      set['cabins.$[c].seatsPerRow'] = dto.seatsPerRow;
+    }
     if (Object.keys(set).length === 0) {
       throw fieldError('body', 'Send at least one field to change');
     }
 
+    // FLT-28: a layout change must not remove a seat a passenger picked.
+    const seatMapVersion = await this.assertSeatsKept(flight, cabin, dto);
+
     const cabinObjectId = new Types.ObjectId(cabinId);
+    const conditions: Record<string, unknown>[] = [
+      { $eq: ['$$c._id', cabinObjectId] },
+    ];
+    if (dto.seats !== undefined) {
+      // Atomic with booking holds: the new total must cover booked + held.
+      conditions.push({
+        $lte: [{ $add: ['$$c.bookedSeats', '$$c.heldSeats'] }, dto.seats],
+      });
+    }
+    if (seatMapVersion !== undefined) {
+      // Atomic with seat picks: no seat was assigned since the check above.
+      conditions.push({
+        $eq: [{ $ifNull: ['$$c.seatMapVersion', 0] }, seatMapVersion],
+      });
+    }
     const filter: QueryFilter<Flight> = {
       _id: flight._id,
       status: FlightStatus.SCHEDULED,
-    };
-    if (dto.seats !== undefined) {
-      // Atomic with booking holds: the new total must cover booked + held.
-      filter.$expr = {
+      // Not after departure, even if the minute job has not marked it Departed yet (FLT-30).
+      departureUtc: { $gt: new Date() },
+      $expr: {
         $gt: [
           {
             $size: {
               $filter: {
                 input: '$cabins',
                 as: 'c',
-                cond: {
-                  $and: [
-                    { $eq: ['$$c._id', cabinObjectId] },
-                    {
-                      $lte: [
-                        { $add: ['$$c.bookedSeats', '$$c.heldSeats'] },
-                        dto.seats,
-                      ],
-                    },
-                  ],
-                },
+                cond: { $and: conditions },
               },
             },
           },
           0,
         ],
-      };
-    } else {
-      filter['cabins._id'] = cabinObjectId;
-    }
+      },
+    };
 
     const updated = await this.flights.findOneAndUpdate(
       filter,
@@ -318,6 +398,46 @@ export class FlightsService {
       );
     }
     return this.view(updated);
+  }
+
+  /**
+   * FLT-28: fewer seats or another seats-per-row would change which seats
+   * exist; refused (409 SEATS_ASSIGNED) while that drops a seat a passenger
+   * picked. Returns the cabin's seat-map version for a layout change, so the
+   * update only applies if no seat was assigned in between.
+   */
+  private async assertSeatsKept(
+    flight: FlightDocument,
+    cabin: FlightDocument['cabins'][number],
+    dto: UpdateCabinDto,
+  ): Promise<number | undefined> {
+    const perRow = seatsPerRowOf(cabin);
+    const reshaped =
+      dto.seatsPerRow !== undefined && dto.seatsPerRow !== perRow;
+    const shrunk = dto.seats !== undefined && dto.seats < cabin.totalSeats;
+    if (!reshaped && !shrunk) return undefined;
+
+    const assigned =
+      (await this.bookings
+        .get()
+        ?.assignedSeats?.(flight.id, cabin.cabinClass)) ?? [];
+    if (assigned.length > 0) {
+      if (reshaped) {
+        throw conflict(
+          'SEATS_ASSIGNED',
+          'Passengers have picked seats in this cabin, so its seats per row cannot change',
+        );
+      }
+      const total = dto.seats ?? cabin.totalSeats;
+      const lost = assigned.filter((s) => !isSeatInLayout(s, total, perRow));
+      if (lost.length > 0) {
+        throw conflict(
+          'SEATS_ASSIGNED',
+          `Passengers have picked seats that would no longer exist: ${lost.sort().join(', ')}`,
+        );
+      }
+    }
+    return cabin.seatMapVersion ?? 0;
   }
 
   /** FLT-30: persist Departed once the departure time has passed (also computed on read). */
@@ -435,4 +555,29 @@ function hasAnyBooking(flight: FlightDocument): boolean {
     flight.everBooked ||
     flight.cabins.some((c) => c.bookedSeats > 0 || c.heldSeats > 0)
   );
+}
+
+/**
+ * Database filter for a status as users see it: a Scheduled flight whose
+ * departure time has passed already counts as Departed (FLT-30).
+ */
+export function statusFilter(
+  status: FlightStatus | undefined,
+  now: Date,
+): QueryFilter<Flight> {
+  switch (status) {
+    case FlightStatus.SCHEDULED:
+      return { status: FlightStatus.SCHEDULED, departureUtc: { $gt: now } };
+    case FlightStatus.DEPARTED:
+      return {
+        $or: [
+          { status: FlightStatus.DEPARTED },
+          { status: FlightStatus.SCHEDULED, departureUtc: { $lte: now } },
+        ],
+      };
+    case FlightStatus.CANCELLED:
+      return { status: FlightStatus.CANCELLED };
+    default:
+      return {};
+  }
 }

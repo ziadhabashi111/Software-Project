@@ -6,7 +6,11 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
-import type { RefundResult } from '../payments/refund.service.interface';
+import {
+  FINAL_REFUND_STATUSES,
+  type RefundResult,
+} from '../payments/refund.service.interface';
+import { holdExpiredMessage } from '../common/booking-status/hold';
 import { newBookingReference } from './booking-reference';
 import { RefundQuote, quoteRefund } from './cancellation-rules';
 import { ReservationStatus, assertCanTransition } from './reservation-status';
@@ -41,6 +45,24 @@ export interface RefundBasis {
   currency: string;
   /** NONE, PENDING, REFUNDED or FAILED. */
   status: string;
+  /**
+   * The Stripe refund already created for this cancellation, or `null` if
+   * none went out yet. A retrying caller must not create another one when
+   * this is set.
+   */
+  stripeRefundId: string | null;
+  /**
+   * Stable per reservation: pass it as Stripe's `Idempotency-Key` when
+   * creating the refund so a retry after a timeout cannot refund twice.
+   */
+  idempotencyKey: string;
+  /** Why the last attempt failed (no secrets), when `status` is FAILED. */
+  failureReason: string | null;
+}
+
+/** The Stripe idempotency key for the refund of one hotel reservation. */
+export function hotelRefundIdempotencyKey(reservationId: string): string {
+  return `hotel-reservation-refund-${reservationId}`;
 }
 
 /** The Stripe facts the webhook verified (PAY-01). */
@@ -48,15 +70,34 @@ export interface VerifiedPayment {
   paymentIntentId: string;
   amount: number;
   currency: string;
+  /**
+   * When the payment succeeded (Stripe's event time). A payment made inside
+   * the hold is on time even if its webhook arrives after the hold ended
+   * (HTL-18). Defaults to the time the webhook is processed.
+   */
+  paidAt?: Date;
 }
 
+/**
+ * The answer to a verified Stripe payment (PAY-01). Same contract as flight
+ * bookings' `FlightConfirmResult`:
+ * - `confirmed`: this payment just confirmed the reservation.
+ * - `already_confirmed`: a webhook retry for the payment that confirmed it
+ *   (the reservation is Confirmed or Completed). Do NOT refund.
+ * - `already_processed`: this same payment was already applied and the
+ *   reservation has since been Cancelled (its tier refund is handled by the
+ *   cancellation, PAY-03). Do NOT refund again.
+ * - `rejected`: nothing was confirmed by this payment (unknown reservation,
+ *   a different payment on a reservation that is no longer pending, expired
+ *   hold, wrong amount). The caller must refund that payment in full.
+ */
 export type ConfirmResult =
   | {
-      outcome: 'confirmed' | 'already_confirmed';
+      outcome: 'confirmed' | 'already_confirmed' | 'already_processed';
       reservation: HotelReservationView;
     }
   | {
-      /** The payment must be refunded by the caller: nothing was confirmed. */
+      /** The payment must be refunded in full by the caller. */
       outcome: 'rejected';
       reason: 'NOT_FOUND' | 'NOT_PENDING' | 'HOLD_EXPIRED' | 'AMOUNT_MISMATCH';
     };
@@ -64,7 +105,10 @@ export type ConfirmResult =
 /** One transaction's answer; `userId` is for the notification after commit. */
 type ConfirmAttempt =
   | { outcome: 'confirmed'; reservation: HotelReservationView; userId: string }
-  | { outcome: 'already_confirmed'; reservation: HotelReservationView }
+  | {
+      outcome: 'already_confirmed' | 'already_processed';
+      reservation: HotelReservationView;
+    }
   | Extract<ConfirmResult, { outcome: 'rejected' }>;
 
 /** Reference collisions are astronomically rare; retry a few times anyway. */
@@ -116,7 +160,7 @@ export class HotelReservationPayments {
     }
     if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
       throw new ConflictException({
-        message: 'The 10-minute hold has expired; please book again',
+        message: holdExpiredMessage(),
         code: 'HOLD_EXPIRED',
       });
     }
@@ -171,8 +215,10 @@ export class HotelReservationPayments {
    * HTL-17: called only after the webhook verified that the PaymentIntent
    * succeeded. Confirms all rooms at once, assigns the unique reference and
    * sends the in-app notification. Safe to call twice for the same payment
-   * (Stripe retries webhooks). A `rejected` result means nothing changed and
-   * the payment has to be refunded.
+   * (Stripe retries webhooks), even after the guest cancelled: a replay of the
+   * payment already applied answers `already_confirmed` / `already_processed`
+   * and must not be refunded. Only `rejected` means the payment has to be
+   * refunded in full; nothing changed.
    */
   async confirmPaid(
     reservationId: string,
@@ -218,18 +264,31 @@ export class HotelReservationPayments {
         .session(session);
       if (!doc) return { outcome: 'rejected', reason: 'NOT_FOUND' } as const;
 
-      if (doc.status === ReservationStatus.CONFIRMED) {
-        return doc.payment?.stripePaymentIntentId === payment.paymentIntentId
-          ? ({
-              outcome: 'already_confirmed',
-              reservation: toReservationView(doc, now),
-            } as const)
-          : ({ outcome: 'rejected', reason: 'NOT_PENDING' } as const);
-      }
       if (doc.status !== ReservationStatus.PENDING_PAYMENT) {
-        return { outcome: 'rejected', reason: 'NOT_PENDING' } as const;
+        // A replayed webhook for the payment already applied must never be
+        // refunded again, whatever happened to the reservation since (a
+        // cancelled one already has its tier refund). `succeeded` is only
+        // stored on confirmation, so an expired hold's intent never matches.
+        const samePayment =
+          doc.payment?.stripePaymentIntentId === payment.paymentIntentId &&
+          doc.payment?.status === 'succeeded';
+        if (!samePayment) {
+          return { outcome: 'rejected', reason: 'NOT_PENDING' } as const;
+        }
+        return {
+          outcome:
+            doc.status === ReservationStatus.CONFIRMED ||
+            doc.status === ReservationStatus.COMPLETED
+              ? 'already_confirmed'
+              : 'already_processed',
+          reservation: toReservationView(doc, now),
+        } as const;
       }
-      if (!doc.holdExpiresAt || doc.holdExpiresAt.getTime() <= now.getTime()) {
+      const paidAt = payment.paidAt ?? now;
+      if (
+        !doc.holdExpiresAt ||
+        doc.holdExpiresAt.getTime() <= paidAt.getTime()
+      ) {
         return { outcome: 'rejected', reason: 'HOLD_EXPIRED' } as const;
       }
       if (
@@ -288,7 +347,9 @@ export class HotelReservationPayments {
   /**
    * PAY-03, for `RefundService.issue('hotel', id)`: the amount fixed when the
    * guest cancelled and the PaymentIntent to refund. `null` unless the
-   * reservation was cancelled with a refund to pay.
+   * reservation was cancelled with a refund to pay. Check `stripeRefundId`
+   * before retrying and use `idempotencyKey` with Stripe so a retry can
+   * never refund twice.
    */
   async refundBasis(reservationId: string): Promise<RefundBasis | null> {
     const doc = Types.ObjectId.isValid(reservationId)
@@ -310,6 +371,9 @@ export class HotelReservationPayments {
       percentage: doc.refund.percentage ?? 0,
       currency: doc.refund.currency ?? doc.currency,
       status: doc.refund.status,
+      stripeRefundId: doc.refund.stripeRefundId ?? null,
+      idempotencyKey: hotelRefundIdempotencyKey(doc.id),
+      failureReason: doc.refund.failureReason ?? null,
     };
   }
 
@@ -318,21 +382,32 @@ export class HotelReservationPayments {
     reservationId: string,
     result: RefundResult,
   ): Promise<boolean> {
+    // A Pending result never overwrites a final one (a webhook may land
+    // before `issue()` returns); Failed keeps its reason, Refunded clears it.
+    const filter = {
+      _id: new Types.ObjectId(reservationId),
+      status: ReservationStatus.CANCELLED,
+    };
+    const pending = result.status === 'PENDING';
+    const set: Record<string, unknown> = {
+      'refund.stripeRefundId': result.refundId,
+      'refund.amount': result.amount,
+      'refund.currency': result.currency,
+      'refund.status': result.status,
+    };
+    if (result.status === 'FAILED' && result.failureReason) {
+      set['refund.failureReason'] = result.failureReason;
+    }
     const updated = await this.reservations.updateOne(
-      {
-        _id: new Types.ObjectId(reservationId),
-        status: ReservationStatus.CANCELLED,
-      },
-      {
-        $set: {
-          'refund.stripeRefundId': result.refundId,
-          'refund.amount': result.amount,
-          'refund.currency': result.currency,
-          'refund.status': result.status,
-        },
-      },
+      pending
+        ? { ...filter, 'refund.status': { $nin: FINAL_REFUND_STATUSES } }
+        : filter,
+      result.status === 'REFUNDED'
+        ? { $set: set, $unset: { 'refund.failureReason': 1 } }
+        : { $set: set },
     );
-    return updated.matchedCount === 1;
+    if (updated.matchedCount === 1) return true;
+    return pending && (await this.reservations.exists(filter)) !== null;
   }
 
   private async findOwned(

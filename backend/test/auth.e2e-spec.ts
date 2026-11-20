@@ -267,6 +267,26 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       expect((correct.body as ErrorBody).message).toMatch(/locked/i);
     });
 
+    it('checks the password at most 5 times when 20 wrong logins arrive at once', async () => {
+      const email = await registerUser();
+      const compare = jest.spyOn(passwords, 'compare');
+      try {
+        compare.mockClear();
+        const results = await Promise.all(
+          Array.from({ length: 20 }, () => wrong(email)),
+        );
+        expect(compare.mock.calls.length).toBeLessThanOrEqual(5);
+        expect(results.filter((r) => r.status === 401)).toHaveLength(4);
+        expect(results.filter((r) => r.status === 429)).toHaveLength(16);
+      } finally {
+        compare.mockRestore();
+      }
+      await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD })
+        .expect(429);
+    });
+
     it('lets the user back in once the lock has passed', async () => {
       const email = await registerUser();
       for (let attempt = 1; attempt <= 5; attempt += 1) {
@@ -384,11 +404,40 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       const oldRefresh = cookiePair(login, 'refresh_token') as string;
 
       await client.post('/api/auth/refresh').expect(204);
+      // The thief replays it later than the two-tab grace window.
+      await sessionModel.updateMany(
+        {},
+        { rotatedAt: new Date(Date.now() - 60_000) },
+      );
       await api()
         .post('/api/auth/refresh')
         .set('Cookie', oldRefresh)
         .expect(401);
       await client.get('/api/auth/me').expect(401);
+    });
+
+    it('keeps the session when two tabs refresh with the same token at once', async () => {
+      const email = await registerUser();
+      const login = await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD });
+      const shared = cookiePair(login, 'refresh_token') as string;
+
+      const [first, second] = await Promise.all([
+        api().post('/api/auth/refresh').set('Cookie', shared),
+        api().post('/api/auth/refresh').set('Cookie', shared),
+      ]);
+      expect([first.status, second.status]).toEqual([204, 204]);
+
+      // Whichever answer the browser keeps, it can refresh again.
+      for (const res of [first, second]) {
+        const access = cookiePair(res, 'access_token') as string;
+        await api().get('/api/auth/me').set('Cookie', access).expect(200);
+      }
+      await api()
+        .post('/api/auth/refresh')
+        .set('Cookie', cookiePair(second, 'refresh_token') as string)
+        .expect(204);
     });
 
     it('refuses to refresh a suspended account', async () => {
@@ -474,6 +523,26 @@ describe('Auth API (ACC-01, 04, 05, 06, 08, 19; real MongoDB in memory)', () => 
       await client.post('/api/auth/login').send({ email, password: PASSWORD });
       return { email, client };
     }
+
+    it('counts wrong current passwords like failed logins and locks the account (ACC-05)', async () => {
+      const { client, email } = await loggedIn();
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        await client
+          .patch('/api/auth/change-password')
+          .send({ currentPassword: 'Wrong1234', newPassword: 'Another123' })
+          .expect(400);
+      }
+      await client
+        .patch('/api/auth/change-password')
+        .send({ currentPassword: 'Wrong1234', newPassword: 'Another123' })
+        .expect(429);
+      // Locked: the session is gone and the right password is refused too.
+      await client.get('/api/auth/me').expect(401);
+      await api()
+        .post('/api/auth/login')
+        .send({ email, password: PASSWORD })
+        .expect(429);
+    });
 
     it('needs a login', async () => {
       await api()

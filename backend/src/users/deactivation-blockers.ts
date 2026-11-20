@@ -4,6 +4,13 @@ import { Injectable } from '@nestjs/common';
 export interface DeactivationBlocker {
   /** True when the user has a Confirmed booking that has not happened yet. */
   hasUpcomingConfirmedBookings(userId: string): Promise<boolean>;
+  /**
+   * Ends the user's unpaid holds (Expired, inventory released, payment
+   * cancelled). Called once the account is marked deactivated and before the
+   * booking check, so a payment that lands afterwards is refunded instead of
+   * confirming a booking on a deactivated account (ACC-12, GEN-11).
+   */
+  endPendingHolds?(userId: string): Promise<void>;
 }
 
 /**
@@ -20,6 +27,17 @@ export class DeactivationBlockers {
 
   register(blocker: DeactivationBlocker): void {
     this.blockers.push(blocker);
+  }
+
+  /** Ends every module's unpaid holds of the user (see `endPendingHolds`). */
+  async endPendingHolds(userId: string): Promise<void> {
+    await Promise.all(
+      this.blockers.map((blocker) =>
+        blocker.endPendingHolds
+          ? blocker.endPendingHolds(userId)
+          : Promise.resolve(),
+      ),
+    );
   }
 
   async hasUpcomingBookings(userId: string): Promise<boolean> {

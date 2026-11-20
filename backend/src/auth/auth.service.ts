@@ -15,6 +15,7 @@ import { UsersService } from '../users/users.service';
 import type { AuthUser } from './auth.types';
 import { Role } from './auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { EmailVerificationService } from './email-verification.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { LOCK_DURATION_MINUTES } from './login-policy';
@@ -53,13 +54,19 @@ export class AuthService implements OnModuleInit {
     private readonly sessions: SessionService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    private readonly verification: EmailVerificationService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     this.dummyHash = await this.passwords.hash(randomUUID());
   }
 
-  /** ACC-01: a guest registers as a regular user. Admins are seeded, never registered. */
+  /**
+   * ACC-01: a guest registers as a regular user. Admins are seeded, never
+   * registered. ACC-02: the new user starts unverified and is emailed a link;
+   * the email is sent in the background and its failure never fails the
+   * registration (the user can ask for a new link).
+   */
   async register(dto: RegisterDto): Promise<UserProfile> {
     if (await this.users.findByEmail(dto.email)) throw this.emailTaken();
     try {
@@ -69,7 +76,9 @@ export class AuthService implements OnModuleInit {
         passwordHash: await this.passwords.hash(dto.password),
         role: Role.USER,
         consentAcceptedAt: new Date(),
+        emailVerified: false,
       });
+      void this.verification.send(user);
       return toProfile(user);
     } catch (error) {
       if (isDuplicateKey(error)) throw this.emailTaken();
@@ -84,20 +93,22 @@ export class AuthService implements OnModuleInit {
       await this.passwords.compare(dto.password, this.dummyHash);
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
-    if (user.lockUntil && user.lockUntil.getTime() > Date.now()) {
-      throw this.locked();
-    }
+    // ACC-05: the attempt is claimed atomically before the slow password
+    // check, so parallel requests cannot all get past the lock.
+    const attempt = await this.users.claimLoginAttempt(user.id);
+    if (attempt === null) throw this.locked();
 
     const passwordOk = await this.passwords.compare(
       dto.password,
       user.passwordHash,
     );
     if (!passwordOk) {
-      const { locked } = await this.users.recordFailedLogin(user.id);
+      const locked = await this.users.failLoginAttempt(user.id, attempt);
       throw locked
         ? this.locked()
         : new UnauthorizedException(INVALID_CREDENTIALS);
     }
+    if (!(await this.users.resetLoginFailures(user.id))) throw this.locked();
 
     if (user.status === UserStatus.SUSPENDED) {
       throw new ForbiddenException('Your account is suspended');
@@ -106,7 +117,6 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
-    await this.users.resetLoginFailures(user.id);
     return this.startSession(user);
   }
 
@@ -123,11 +133,9 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Session expired');
     }
 
-    const newJti = randomUUID();
-    if (!(await this.sessions.rotate(sessionId, jti, newJti))) {
-      throw new UnauthorizedException('Session expired');
-    }
-    return this.issueTokens(user, sessionId, newJti);
+    const nextJti = await this.sessions.rotate(sessionId, jti, randomUUID());
+    if (!nextJti) throw new UnauthorizedException('Session expired');
+    return this.issueTokens(user, sessionId, nextJti);
   }
 
   /** ACC-06: revokes the session on the server. Never fails: logging out twice is fine. */
@@ -162,12 +170,22 @@ export class AuthService implements OnModuleInit {
     const stored = await this.users.findByIdWithPassword(current.id);
     if (!stored) throw new UnauthorizedException('Not logged in');
 
+    // ACC-05: a wrong current password counts like a failed login, so a
+    // stolen session cannot be used to guess the password without limit.
+    const attempt = await this.users.claimLoginAttempt(current.id);
+    if (attempt === null) throw await this.lockOut(current.id);
     const currentOk = await this.passwords.compare(
       dto.currentPassword,
       stored.passwordHash,
     );
     if (!currentOk) {
+      if (await this.users.failLoginAttempt(current.id, attempt)) {
+        throw await this.lockOut(current.id);
+      }
       throw fieldError('currentPassword', 'Current password is incorrect');
+    }
+    if (!(await this.users.resetLoginFailures(current.id))) {
+      throw await this.lockOut(current.id);
     }
     if (dto.newPassword === dto.currentPassword) {
       throw fieldError(
@@ -218,6 +236,12 @@ export class AuthService implements OnModuleInit {
 
   private emailTaken(): HttpException {
     return fieldError('email', 'Email is already registered', 409);
+  }
+
+  /** The account is locked: every session ends, like after a failed login. */
+  private async lockOut(userId: string): Promise<HttpException> {
+    await this.sessions.revokeAllForUser(userId);
+    return this.locked();
   }
 
   private locked(): HttpException {

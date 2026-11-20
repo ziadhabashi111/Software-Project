@@ -10,6 +10,7 @@ import { Flight, FlightDocument } from '../flights/schemas/flight.schema';
 import { durationMinutes, utcToLocal } from '../flights/time-zones';
 import type { UserRefundQuote } from './rules/cancellation-rules';
 import { statusLabel } from './rules/status-labels';
+import { SeatAssignments, seatKey } from './seat-assignments';
 import type {
   FlightBookingDocument,
   TripType,
@@ -62,6 +63,8 @@ export interface FlightBookingView {
     extraBagWeightKg: number | null;
     fare: number;
     baggageFee: number;
+    /** FLT-28: the passenger's seat on each flight, in segment order; null when not selected (always null for infants). */
+    seats: (string | null)[];
   }[];
   seats: number;
   price: {
@@ -90,7 +93,10 @@ export interface FlightBookingView {
     percent: number;
     amount: number;
     currency: string;
+    /** PENDING, REFUNDED or FAILED (PAY-03); null when nothing is refunded. */
     status: string | null;
+    /** Why the refund failed (a short code such as `STRIPE_<CODE>`), when FAILED. */
+    failureReason: string | null;
   } | null;
   /** What cancelling now would refund; only while the booking can be cancelled (FLT-26). */
   cancellation?: UserRefundQuote | null;
@@ -110,6 +116,7 @@ export class FlightBookingViews {
     @InjectModel(Flight.name) private readonly flights: Model<FlightDocument>,
     @InjectModel(Airline.name)
     private readonly airlines: Model<AirlineDocument>,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   /** Airports of the given codes, by IATA code. */
@@ -166,6 +173,9 @@ export class FlightBookingViews {
     const airports = await this.airportsFor(
       flights.flatMap((f) => [f.departureAirport, f.arrivalAirport]),
     );
+    const seatsByBooking = await this.seatAssignments.forBookings(
+      docs.map((d) => d._id),
+    );
 
     return docs.map((doc) => ({
       id: doc.id,
@@ -192,7 +202,7 @@ export class FlightBookingViews {
           },
         ];
       }),
-      passengers: doc.passengers.map((p) => ({
+      passengers: doc.passengers.map((p, passengerIndex) => ({
         fullName: p.fullName,
         dateOfBirth: p.dateOfBirth.toISOString().slice(0, 10),
         documentNumber: p.documentNumber,
@@ -201,6 +211,12 @@ export class FlightBookingViews {
         extraBagWeightKg: p.extraBagWeightKg ?? null,
         fare: p.fare,
         baggageFee: p.baggageFee,
+        seats: doc.segments.map(
+          (_, segmentIndex) =>
+            seatsByBooking
+              .get(doc.id)
+              ?.get(seatKey(segmentIndex, passengerIndex)) ?? null,
+        ),
       })),
       seats: doc.seats,
       price: {
@@ -241,6 +257,7 @@ export class FlightBookingViews {
             amount: doc.refund.amount,
             currency: doc.refund.currency,
             status: doc.refund.status ?? null,
+            failureReason: doc.refund.failureReason ?? null,
           }
         : null,
       createdAt: doc.createdAt.toISOString(),

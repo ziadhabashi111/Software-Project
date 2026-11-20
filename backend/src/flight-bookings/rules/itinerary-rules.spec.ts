@@ -116,6 +116,49 @@ describe('assertReturnMatches (FLT-12a)', () => {
     ).toBe('return.flightId');
   });
 
+  const cities: Record<string, string> = {
+    CAI: 'cairo',
+    SPX: 'cairo',
+    DXB: 'dubai',
+    DWC: 'dubai',
+    AUH: 'abu-dhabi',
+  };
+  const cityOf = (code: string) => cities[code];
+
+  it('accepts a return from another airport of the same cities (ITN-26 searches any airport in the city)', () => {
+    expect(() =>
+      assertReturnMatches(
+        outbound,
+        ret({ departureAirport: 'DWC', arrivalAirport: 'SPX' }),
+        cityOf,
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects a return from another city', () => {
+    expect(
+      errorField(() =>
+        assertReturnMatches(
+          outbound,
+          ret({ departureAirport: 'AUH', arrivalAirport: 'CAI' }),
+          cityOf,
+        ),
+      ),
+    ).toBe('return.flightId');
+  });
+
+  it('rejects a return from another airport when the cities are unknown', () => {
+    expect(
+      errorField(() =>
+        assertReturnMatches(
+          outbound,
+          ret({ departureAirport: 'DWC' }),
+          () => undefined,
+        ),
+      ),
+    ).toBe('return.flightId');
+  });
+
   it('rejects a return that leaves before the outbound lands', () => {
     expect(
       errorField(() =>

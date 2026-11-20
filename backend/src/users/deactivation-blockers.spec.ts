@@ -31,4 +31,21 @@ describe('DeactivationBlockers (ACC-12)', () => {
     await blockers.hasUpcomingBookings('user-9');
     expect(asked).toEqual(['user-9']);
   });
+
+  it('ends the unpaid holds in every module that can, skipping the others (ACC-12)', async () => {
+    const blockers = new DeactivationBlockers();
+    const ended: string[] = [];
+    blockers.register({
+      hasUpcomingConfirmedBookings: () => Promise.resolve(false),
+      endPendingHolds: (userId) => {
+        ended.push(`flights:${userId}`);
+        return Promise.resolve();
+      },
+    });
+    blockers.register({
+      hasUpcomingConfirmedBookings: () => Promise.resolve(false),
+    });
+    await blockers.endPendingHolds('user-3');
+    expect(ended).toEqual(['flights:user-3']);
+  });
 });

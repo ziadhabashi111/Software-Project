@@ -1,3 +1,4 @@
+import type { Paginated } from '../../common/pagination/pagination';
 import type { BudgetCategory, TransportMode } from './budget-categories';
 import type { BudgetEntryDocument } from './schemas/budget-entry.schema';
 import type { TransportCostDocument } from './schemas/transport-cost.schema';
@@ -23,9 +24,10 @@ export interface TransportCostView {
   currency: string;
 }
 
+/** One page of each list (GEN-05); totals come from the budget summary. */
 export interface BudgetListView {
-  entries: BudgetEntryView[];
-  transportCosts: TransportCostView[];
+  entries: Paginated<BudgetEntryView>;
+  transportCosts: Paginated<TransportCostView>;
 }
 
 export function toBudgetEntryView(entry: BudgetEntryDocument): BudgetEntryView {

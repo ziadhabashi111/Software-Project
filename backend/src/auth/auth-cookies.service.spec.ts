@@ -30,24 +30,50 @@ function fakeResponse() {
 }
 
 describe('AuthCookiesService (ACC-19)', () => {
-  it('sets httpOnly access and refresh cookies with safe local defaults', () => {
+  it('sets httpOnly, Secure access and refresh cookies by default', () => {
     const { res, cookie } = fakeResponse();
     build({}).set(res, { accessToken: 'AAA', refreshToken: 'RRR' });
 
     expect(cookie).toHaveBeenCalledWith('access_token', 'AAA', {
       httpOnly: true,
-      secure: false,
+      secure: true,
       sameSite: 'lax',
       path: '/',
       maxAge: 15 * 60 * 1000,
     });
     expect(cookie).toHaveBeenCalledWith('refresh_token', 'RRR', {
       httpOnly: true,
-      secure: false,
+      secure: true,
       sameSite: 'lax',
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
+  });
+
+  it('drops Secure only when COOKIE_SECURE is explicitly false (plain-http local dev)', () => {
+    const { res, cookie } = fakeResponse();
+    build({ COOKIE_SECURE: 'false' }).set(res, {
+      accessToken: 'AAA',
+      refreshToken: 'RRR',
+    });
+    expect(cookie).toHaveBeenCalledWith(
+      'access_token',
+      'AAA',
+      expect.objectContaining({ secure: false }),
+    );
+  });
+
+  it('keeps Secure for any other COOKIE_SECURE value', () => {
+    const { res, cookie } = fakeResponse();
+    build({ COOKIE_SECURE: 'yes' }).set(res, {
+      accessToken: 'AAA',
+      refreshToken: 'RRR',
+    });
+    expect(cookie).toHaveBeenCalledWith(
+      'access_token',
+      'AAA',
+      expect.objectContaining({ secure: true }),
+    );
   });
 
   it('reads Secure, SameSite and Domain from the environment', () => {

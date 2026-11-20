@@ -13,6 +13,8 @@ export interface UserProfile {
   preferredCurrency?: string;
   providerId?: string;
   mustChangePassword: boolean;
+  /** False until a self-registered user opens the emailed link (ACC-02). */
+  emailVerified: boolean;
   createdAt: Date;
 }
 
@@ -29,6 +31,7 @@ export function toProfile(user: UserDocument): UserProfile {
       : {}),
     ...(user.providerId ? { providerId: user.providerId.toString() } : {}),
     mustChangePassword: user.mustChangePassword,
+    emailVerified: user.emailVerified,
     createdAt: user.createdAt,
   };
 }
