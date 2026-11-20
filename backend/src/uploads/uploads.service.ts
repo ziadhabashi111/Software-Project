@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
+import { Interval } from '@nestjs/schedule';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
@@ -29,6 +30,19 @@ export interface ImageFile {
 /** URL path the files are served under (see UploadsModule). */
 export const UPLOADS_ROUTE = '/uploads';
 
+/** Stand-alone uploads nobody attached within this time are deleted. */
+export const UNATTACHED_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Kinds the cleanup may delete. Airline logos stay until the airlines module
+ * claims its `logoUrl` with `attach` (FLT-01), so a logo is never deleted
+ * from under an airline.
+ */
+const CLEANED_KINDS: ImageOwnerKind[] = ['post', 'activity', 'hotel'];
+
+/** How many abandoned uploads one cleanup run deletes. */
+const CLEANUP_BATCH = 100;
+
 const STORED_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/;
 
@@ -45,6 +59,7 @@ const STORED_NAME =
  */
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
   readonly directory: string;
   private readonly publicBase: string;
 
@@ -262,6 +277,46 @@ export class UploadsService {
     if (!record) return false;
     await this.unlinkQuietly(name);
     return true;
+  }
+
+  /**
+   * GEN-08: deletes stand-alone uploads that no item claimed within a day,
+   * so the stand-alone endpoint cannot fill the disk with unused files. Each
+   * delete re-checks that the file is still unattached, so an `attach`
+   * running at the same moment either wins or gets a 400. Runs every hour.
+   */
+  @Interval('unattached-upload-cleanup', 60 * 60 * 1000)
+  async removeUnattached(now: Date = new Date()): Promise<number> {
+    const stale = await this.records
+      .find(
+        {
+          standalone: true,
+          attachedAt: { $exists: false },
+          kind: { $in: CLEANED_KINDS },
+          createdAt: { $lt: new Date(now.getTime() - UNATTACHED_TTL_MS) },
+        },
+        { _id: 1, filename: 1 },
+      )
+      .limit(CLEANUP_BATCH)
+      .lean();
+    let removed = 0;
+    for (const record of stale) {
+      const gone = await this.records.findOneAndDelete({
+        _id: record._id,
+        attachedAt: { $exists: false },
+      });
+      if (!gone) continue;
+      try {
+        await this.unlinkQuietly(record.filename);
+        removed += 1;
+      } catch (error) {
+        this.logger.error(
+          `Could not delete abandoned upload ${record.filename}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+    return removed;
   }
 
   private urlFor(name: string): string {

@@ -50,3 +50,9 @@ export class Upload {
 }
 
 export const UploadSchema = SchemaFactory.createForClass(Upload);
+
+// GEN-08: the hourly cleanup finds unattached stand-alone uploads by age.
+UploadSchema.index(
+  { createdAt: 1 },
+  { partialFilterExpression: { standalone: true } },
+);

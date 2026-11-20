@@ -200,6 +200,43 @@ describe('Image upload helper (GEN-08, real HTTP)', () => {
     await request(ctx.server).get('/uploads/.env').expect(404);
   });
 
+  it('deletes stand-alone uploads nobody attached within a day, and keeps the rest (GEN-08)', async () => {
+    const uploads = ctx.moduleRef.get(UploadsService);
+    const records = ctx.moduleRef.get<Model<Upload>>(
+      getModelToken(Upload.name),
+    );
+    const send = async (kind: string, as: string[]) =>
+      (
+        (
+          await request(ctx.server)
+            .post(`/api/uploads/images?kind=${kind}`)
+            .set('Cookie', as)
+            .attach('images', PNG, 'x.png')
+            .expect(201)
+        ).body as { images: StoredImage[] }
+      ).images[0];
+    const abandoned = await send('post', cookie);
+    const used = await send('post', cookie);
+    const recent = await send('post', cookie);
+    const logo = await send('airlineLogo', modCookie);
+    await uploads.attach([used.url], aliceId);
+
+    const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await records.collection.updateMany(
+      { filename: { $in: [abandoned.id, used.id, logo.id] } },
+      { $set: { createdAt: dayAgo } },
+    );
+
+    await expect(uploads.removeUnattached()).resolves.toBe(1);
+    const left = await readdir(dir);
+    expect(left).not.toContain(abandoned.id);
+    expect(left).toEqual(expect.arrayContaining([used.id, recent.id, logo.id]));
+    expect(await records.exists({ filename: abandoned.id })).toBeNull();
+    await expect(
+      uploads.attach([abandoned.url], aliceId),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   describe('ownership (GEN-08: only the uploader may reuse or delete a file)', () => {
     let logo: StoredImage;
 
