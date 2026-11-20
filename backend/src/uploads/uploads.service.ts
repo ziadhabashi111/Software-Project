@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Interval } from '@nestjs/schedule';
@@ -40,8 +40,14 @@ export const UNATTACHED_TTL_MS = 24 * 60 * 60 * 1000;
  */
 const CLEANED_KINDS: ImageOwnerKind[] = ['post', 'activity', 'hotel'];
 
-/** How many abandoned uploads one cleanup run deletes. */
+/** How many abandoned uploads the cleanup reads at a time. */
 const CLEANUP_BATCH = 100;
+
+/**
+ * Stand-alone uploads one user may have waiting to be attached (GEN-08), so
+ * a single account cannot fill the disk before the daily cleanup runs.
+ */
+export const MAX_UNATTACHED_PER_USER = 20;
 
 const STORED_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/;
@@ -108,6 +114,9 @@ export class UploadsService {
       throw fieldError('images', 'Choose at least one JPG or PNG image');
     }
     this.assertCanAdd(kind, existing, files.length);
+    if (options.standalone === true) {
+      await this.assertUnattachedQuota(ownerId, files.length);
+    }
 
     const checked = files.map((file, index) => {
       const label = files.length > 1 ? `Image ${index + 1}` : 'The image';
@@ -287,36 +296,60 @@ export class UploadsService {
    */
   @Interval('unattached-upload-cleanup', 60 * 60 * 1000)
   async removeUnattached(now: Date = new Date()): Promise<number> {
-    const stale = await this.records
-      .find(
-        {
-          standalone: true,
-          attachedAt: { $exists: false },
-          kind: { $in: CLEANED_KINDS },
-          createdAt: { $lt: new Date(now.getTime() - UNATTACHED_TTL_MS) },
-        },
-        { _id: 1, filename: 1 },
-      )
-      .limit(CLEANUP_BATCH)
-      .lean();
     let removed = 0;
-    for (const record of stale) {
-      const gone = await this.records.findOneAndDelete({
-        _id: record._id,
-        attachedAt: { $exists: false },
-      });
-      if (!gone) continue;
-      try {
-        await this.unlinkQuietly(record.filename);
-        removed += 1;
-      } catch (error) {
-        this.logger.error(
-          `Could not delete abandoned upload ${record.filename}`,
-          error instanceof Error ? error.stack : String(error),
-        );
+    // Batch after batch until nothing stale is left: each batch's records
+    // are deleted (or were claimed meanwhile), so the loop always ends.
+    for (;;) {
+      const stale = await this.records
+        .find(
+          {
+            standalone: true,
+            attachedAt: { $exists: false },
+            kind: { $in: CLEANED_KINDS },
+            createdAt: { $lt: new Date(now.getTime() - UNATTACHED_TTL_MS) },
+          },
+          { _id: 1, filename: 1 },
+        )
+        .limit(CLEANUP_BATCH)
+        .lean();
+      for (const record of stale) {
+        const gone = await this.records.findOneAndDelete({
+          _id: record._id,
+          attachedAt: { $exists: false },
+        });
+        if (!gone) continue;
+        try {
+          await this.unlinkQuietly(record.filename);
+          removed += 1;
+        } catch (error) {
+          this.logger.error(
+            `Could not delete abandoned upload ${record.filename}`,
+            error instanceof Error ? error.stack : String(error),
+          );
+        }
       }
+      if (stale.length < CLEANUP_BATCH) return removed;
     }
-    return removed;
+  }
+
+  /** 409 when `adding` more stand-alone files would pass the per-user cap. */
+  private async assertUnattachedQuota(
+    ownerId: string,
+    adding: number,
+  ): Promise<void> {
+    const waiting = await this.records.countDocuments({
+      ownerId: new Types.ObjectId(ownerId),
+      standalone: true,
+      attachedAt: { $exists: false },
+    });
+    if (waiting + adding > MAX_UNATTACHED_PER_USER) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: `You have ${waiting} uploaded images that are not used yet. Attach them to a post, activity or hotel, or wait a day for them to be removed (at most ${MAX_UNATTACHED_PER_USER}).`,
+        code: 'TOO_MANY_UNUSED_UPLOADS',
+      });
+    }
   }
 
   private urlFor(name: string): string {
