@@ -15,6 +15,7 @@ import { UsersService } from '../users/users.service';
 import type { AuthUser } from './auth.types';
 import { Role } from './auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { EmailVerificationService } from './email-verification.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { LOCK_DURATION_MINUTES } from './login-policy';
@@ -53,13 +54,19 @@ export class AuthService implements OnModuleInit {
     private readonly sessions: SessionService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    private readonly verification: EmailVerificationService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     this.dummyHash = await this.passwords.hash(randomUUID());
   }
 
-  /** ACC-01: a guest registers as a regular user. Admins are seeded, never registered. */
+  /**
+   * ACC-01: a guest registers as a regular user. Admins are seeded, never
+   * registered. ACC-02: the new user starts unverified and is emailed a link;
+   * the email is sent in the background and its failure never fails the
+   * registration (the user can ask for a new link).
+   */
   async register(dto: RegisterDto): Promise<UserProfile> {
     if (await this.users.findByEmail(dto.email)) throw this.emailTaken();
     try {
@@ -69,7 +76,9 @@ export class AuthService implements OnModuleInit {
         passwordHash: await this.passwords.hash(dto.password),
         role: Role.USER,
         consentAcceptedAt: new Date(),
+        emailVerified: false,
       });
+      void this.verification.send(user);
       return toProfile(user);
     } catch (error) {
       if (isDuplicateKey(error)) throw this.emailTaken();

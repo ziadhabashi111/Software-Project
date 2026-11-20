@@ -81,6 +81,7 @@ Copy `.env.example` to `backend/.env` and fill in every value. Never commit `.en
 | `FXRATES_API_KEY` | `backend/.env` | Shared FXRatesAPI key from the team leader (backend only, never in the frontend) |
 | `UPLOAD_DIR`, `UPLOAD_PUBLIC_URL` | `backend/.env` | Optional (GEN-08). Defaults `uploads` and `http://localhost:3000/uploads`. At deployment, point `UPLOAD_DIR` at a persistent disk and set the public URL. See [docs/api/uploads.md](docs/api/uploads.md) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `MAIL_FROM` | `backend/.env` | Optional (GEN-01-B, ACC-07). With no `SMTP_HOST` nothing is sent and the email is written to the server log (outside production), so a reset link can be copied from there. In development use a test inbox such as Ethereal or Mailtrap. Port defaults to 587; `SMTP_SECURE=true` for TLS from the start |
+| `EMAIL_VERIFICATION_REQUIRED` | `backend/.env` | Optional (ACC-02). Off by default. Set to exactly `true` to refuse booking (`POST /api/flight-bookings/hold`, `POST /api/hotel-bookings`) with `403 EMAIL_NOT_VERIFIED` until the user has opened the emailed verification link. Everyone who registered while it was off is unverified, so turn it on only when users can receive email |
 | `FLIGHT_HOLD_MINUTES` | `backend/.env` | `10` (flight and hotel holds both last 10 minutes: FLT-22, HTL-18) |
 | `NEXT_PUBLIC_API_URL` | `frontend/.env.local` | `http://localhost:3000/api` |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | `frontend/.env.local` | Shared Stripe **test** publishable key (`pk_test_...`) |

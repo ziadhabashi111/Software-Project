@@ -891,3 +891,15 @@ Implement the HTL-26 bonus: a hotel moderator can reply to reviews of their own 
 How the output was used:
 Claude wrote it test-first on feature/HTL-26-review-replies; I reviewed the full diff. POST /api/reviews/:id/reply creates or edits the hotel's single reply and DELETE removes it; only a moderator of the review's hotel may do it, hidden or unknown reviews are 404, and the reply is written atomically so parallel replies leave one. Review views show the reply as the hotel's response without the moderator's identity, and the author gets an in-app notification for a new reply. Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ACC-02 (issue 54; bonus)
+Prompt:
+Build email verification (ACC-02): a verification link at registration, GET /api/auth/verify-email, a resend option, and booking blocked until the email is verified, behind an environment switch that is off by default so graders can still book locally.
+
+How the output was used:
+Built test-first on the token store and MailService from ACC-07. Registration now creates the user as unverified (older, seeded and admin-made accounts count as verified) and emails a 24-hour single-use link in the background, so a mail failure never fails registration. verify-email and resend-verification are rate limited. A VerifiedEmailGuard acts on routes marked @RequireVerifiedEmail() (flight booking hold, hotel reservation) only when EMAIL_VERIFICATION_REQUIRED is exactly "true", and answers 401 instead of passing if it ever runs without a logged-in user. A unit test pins the marks on the real booking routes. My first version registered the guard in the global AuthModule, which broke the no-database foundations e2e suite; I moved it to AuthApiModule. Added e2e tests (16 for the flow and the switch), README rows and the new variable name in .env.example. Reviewed the diff.
+================================================
