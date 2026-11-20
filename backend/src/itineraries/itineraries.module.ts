@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { BlogModule } from '../blog/blog.module';
+import { FlightBookingsModule } from '../flight-bookings/flight-bookings.module';
 import { FlightsModule } from '../flights/flights.module';
+import { HotelBookingsModule } from '../hotel-bookings/hotel-bookings.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
@@ -33,21 +35,31 @@ import { ItineraryFlightsController } from './itinerary-flights.controller';
 import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
+import { ItineraryBookingsController } from './itinerary-bookings.controller';
+import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ItineraryBudgets } from './itinerary-budgets';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
 import { ItineraryModerator } from './itinerary-moderator';
 import { ItineraryRepository } from './itinerary.repository';
 import { PlaceCatalog } from './places';
 import { PublicItinerariesController } from './public-itineraries.controller';
 import { PublicItinerariesService } from './public-itineraries.service';
+import {
+  ItineraryBooking,
+  ItineraryBookingSchema,
+} from './schemas/itinerary-booking.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 
 /**
  * Owner: Habashi (structure), Youssef Wahby (budgets / exchange rates)
- * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25
+ * Requirements: ITN-01, 03, 05, 07, 08, 09, 10, 12, 20, 21, 25, 27, 28
  *
  * Itineraries with their days and activities, activity images (ITN-12, through
  * the shared upload helper), public itineraries and cloning (ITN-21), and
- * hotels for a city group (ITN-25). Other modules plug in
+ * hotels for a city group (ITN-25) and the traveller's own bookings linked to
+ * its days (ITN-27, read through the booking modules), and the PDF export
+ * (ITN-28). Other modules plug in
  * through hooks (import this module and inject them): `PlaceCatalog` (the
  * predefined country and city lists, from the reference-data module),
  * `ItineraryBudgets` (day budget totals, cloning and cleanup, from the budget
@@ -62,10 +74,13 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
       { name: BudgetEntry.name, schema: BudgetEntrySchema },
       { name: TransportCost.name, schema: TransportCostSchema },
       { name: ExchangeRates.name, schema: ExchangeRatesSchema },
+      { name: ItineraryBooking.name, schema: ItineraryBookingSchema },
     ]),
     AdminModule,
     BlogModule,
+    FlightBookingsModule,
     FlightsModule,
+    HotelBookingsModule,
     UploadsModule,
     UsersModule,
   ],
@@ -77,6 +92,8 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     BudgetController,
     ItineraryFlightsController,
     ItineraryHotelsController,
+    ItineraryBookingsController,
+    ItineraryPdfController,
   ],
   providers: [
     ItinerariesService,
@@ -90,6 +107,8 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     FxService,
     ItineraryFlightsService,
     ItineraryHotelsService,
+    ItineraryBookingsService,
+    ItineraryPdfService,
     ItineraryRepository,
     ItineraryModerator,
     PlaceCatalog,

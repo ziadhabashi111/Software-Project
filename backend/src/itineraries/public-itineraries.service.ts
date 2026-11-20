@@ -8,6 +8,7 @@ import {
 import { AuthorItineraries } from '../blog/author-itineraries';
 import type {
   AuthorItinerarySource,
+  LinkedItinerary,
   PublicItinerarySummary,
 } from '../blog/author-itineraries';
 import { skipFor, toPage } from '../common/pagination/pagination';
@@ -36,6 +37,14 @@ import { Visibility } from './schemas/itinerary.schema';
 import type { ItineraryDocument } from './schemas/itinerary.schema';
 
 const COUNTRY_LIKE = /^[a-z]{2}$/i;
+
+const summaryOf = (itinerary: ItineraryDocument): PublicItinerarySummary => ({
+  id: itinerary.id,
+  title: itinerary.title,
+  countries: itinerary.countries,
+  startDate: formatDate(itinerary.startDate),
+  dayCount: itinerary.days.length,
+});
 const CITY_LIKE = /^[a-z0-9][a-z0-9_-]{0,59}$/;
 
 /**
@@ -137,16 +146,37 @@ export class PublicItinerariesService
       authorId,
       page,
     );
+    return { items: items.map(summaryOf), total };
+  }
+
+  /**
+   * BLG-13: the author's own itinerary, public or not. Someone else's
+   * itinerary answers null, exactly like one that does not exist.
+   */
+  async ownedBy(
+    authorId: string,
+    itineraryId: string,
+  ): Promise<LinkedItinerary | null> {
+    const itinerary = await this.repository.findById(itineraryId);
+    if (!itinerary || itinerary.owner.toString() !== authorId) return null;
     return {
-      items: items.map((itinerary) => ({
-        id: itinerary.id,
-        title: itinerary.title,
-        countries: itinerary.countries,
-        startDate: formatDate(itinerary.startDate),
-        dayCount: itinerary.days.length,
-      })),
-      total,
+      ...summaryOf(itinerary),
+      isPublic:
+        itinerary.visibility === Visibility.PUBLIC && !itinerary.isHidden,
     };
+  }
+
+  /**
+   * BLG-13: what a reader of a post sees of the itinerary it links to, only
+   * while the itinerary is public, not hidden and its owner active (the same
+   * rule as the public itinerary page). Null otherwise.
+   */
+  async publicSummary(
+    itineraryId: string,
+  ): Promise<PublicItinerarySummary | null> {
+    const itinerary = await this.repository.findById(itineraryId);
+    if (!itinerary || !(await this.publicAuthor(itinerary))) return null;
+    return summaryOf(itinerary);
   }
 
   /** Countries and cities the keyword names, plus the keyword read as a code or id. */

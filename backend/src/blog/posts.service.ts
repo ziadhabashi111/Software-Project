@@ -8,13 +8,16 @@ import { isValidObjectId, Model, Types } from 'mongoose';
 import type { QueryFilter } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
 import { Paginated, skipFor, toPage } from '../common/pagination/pagination';
+import { fieldError } from '../common/validation/validation-errors';
 import type { ImageFile } from '../uploads/uploads.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { AuthorItineraries } from './author-itineraries';
 import { BlogModerationService } from './blog-moderation.service';
 import {
   IMAGES_MAX,
   type CreatePostDto,
   type ListMyPostsQueryDto,
+  type SetPostItineraryDto,
   type UpdatePostDto,
 } from './dto/post.dto';
 import {
@@ -36,6 +39,7 @@ export class PostsService {
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     private readonly uploads: UploadsService,
     private readonly moderation: BlogModerationService,
+    private readonly authorItineraries: AuthorItineraries,
   ) {}
 
   /** BLG-01: title and body required; tags and images optional; draft by default. */
@@ -60,7 +64,7 @@ export class PostsService {
       await this.uploads.detach(imageUrls);
       throw error;
     }
-    return toPostView(post);
+    return this.viewOf(post);
   }
 
   /** BLG-03: the author's posts including drafts, newest first. */
@@ -85,7 +89,7 @@ export class PostsService {
 
   /** The author's own post with everything (body, images) for the editor. */
   async getOwn(author: AuthUser, id: string): Promise<PostView> {
-    return toPostView(await this.loadOwn(author, id));
+    return this.viewOf(await this.loadOwn(author, id));
   }
 
   /**
@@ -108,7 +112,40 @@ export class PostsService {
       }
     }
     await post.save();
-    return toPostView(post);
+    return this.viewOf(post);
+  }
+
+  /**
+   * BLG-13 (optional bonus): links one of the author's own public itineraries
+   * to the post, or removes the link with null. An itinerary that is not the
+   * author's (or does not exist) is a 404; one that is private or hidden is a
+   * 400, since readers could not open it. Readers see the link only while the
+   * itinerary stays public.
+   */
+  async setItinerary(
+    author: AuthUser,
+    id: string,
+    dto: SetPostItineraryDto,
+  ): Promise<PostView> {
+    const post = await this.loadOwn(author, id);
+    if (dto.itineraryId === null) {
+      post.itinerary = undefined;
+    } else {
+      const itinerary = await this.authorItineraries.ownedBy(
+        author.id,
+        dto.itineraryId,
+      );
+      if (!itinerary) throw new NotFoundException('Itinerary not found');
+      if (!itinerary.isPublic) {
+        throw fieldError(
+          'itineraryId',
+          'Only a public itinerary can be linked to a post',
+        );
+      }
+      post.itinerary = new Types.ObjectId(dto.itineraryId);
+    }
+    await post.save();
+    return this.viewOf(post);
   }
 
   /**
@@ -157,7 +194,7 @@ export class PostsService {
       this.uploads.assertCanAdd('post', current.images.length, stored.length);
       throw new NotFoundException('Post not found'); // not reached
     }
-    return toPostView(updated);
+    return this.viewOf(updated);
   }
 
   /** BLG-10: removes one image from the post and deletes its file. */
@@ -180,7 +217,18 @@ export class PostsService {
     // The post's author uploaded its images (GEN-08 ownership).
     await this.uploads.remove(image.url, post.author.toString());
     if (!updated) throw new NotFoundException('Post not found');
-    return toPostView(updated);
+    return this.viewOf(updated);
+  }
+
+  /** The author's view of a post, with the itinerary it links to (BLG-13). */
+  private async viewOf(post: PostDocument): Promise<PostView> {
+    const itinerary = post.itinerary
+      ? await this.authorItineraries.ownedBy(
+          post.author.toString(),
+          post.itinerary.toString(),
+        )
+      : null;
+    return toPostView(post, itinerary);
   }
 
   /**

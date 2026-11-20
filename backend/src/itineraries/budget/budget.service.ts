@@ -15,6 +15,7 @@ import { CURRENCY_CATALOG } from '../../users/currency-catalog';
 import type { CurrencyCatalog } from '../../users/currency-catalog';
 import { ItineraryRepository } from '../itinerary.repository';
 import { PlaceCatalog } from '../places';
+import { ItineraryBooking } from '../schemas/itinerary-booking.schema';
 import type { ItineraryDocument } from '../schemas/itinerary.schema';
 import { remapToClone } from './budget-clone';
 import { toBudgetEntryView, toTransportCostView } from './budget-view';
@@ -44,6 +45,8 @@ export class BudgetService {
     private readonly entries: Model<BudgetEntry>,
     @InjectModel(TransportCost.name)
     private readonly transport: Model<TransportCost>,
+    @InjectModel(ItineraryBooking.name)
+    private readonly links: Model<ItineraryBooking>,
     private readonly itineraries: ItineraryRepository,
     private readonly places: PlaceCatalog,
     @Optional()
@@ -194,7 +197,7 @@ export class BudgetService {
     await cost.deleteOne();
   }
 
-  /** ITN-07: a deleted day takes its budget entries and transport costs with it. */
+  /** ITN-07: a deleted day takes its budget entries, transport costs and linked bookings (ITN-27) with it. */
   async removeDay(itineraryId: string, dayId: string): Promise<void> {
     const filter = {
       itineraryId: new Types.ObjectId(itineraryId),
@@ -203,6 +206,7 @@ export class BudgetService {
     await Promise.all([
       this.entries.deleteMany(filter),
       this.transport.deleteMany(filter),
+      this.links.deleteMany(filter),
     ]);
   }
 
@@ -212,6 +216,7 @@ export class BudgetService {
     await Promise.all([
       this.entries.deleteMany(filter),
       this.transport.deleteMany(filter),
+      this.links.deleteMany(filter),
     ]);
   }
 

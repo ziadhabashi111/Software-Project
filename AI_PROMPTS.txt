@@ -903,3 +903,15 @@ Build email verification (ACC-02): a verification link at registration, GET /api
 How the output was used:
 Built test-first on the token store and MailService from ACC-07. Registration now creates the user as unverified (older, seeded and admin-made accounts count as verified) and emails a 24-hour single-use link in the background, so a mail failure never fails registration. verify-email and resend-verification are rate limited. A VerifiedEmailGuard acts on routes marked @RequireVerifiedEmail() (flight booking hold, hotel reservation) only when EMAIL_VERIFICATION_REQUIRED is exactly "true", and answers 401 instead of passing if it ever runs without a logged-in user. A unit test pins the marks on the real booking routes. My first version registered the guard in the global AuthModule, which broke the no-database foundations e2e suite; I moved it to AuthApiModule. Added e2e tests (16 for the flow and the switch), README rows and the new variable name in .env.example. Reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-27, ITN-28, BLG-13 (bonuses), ITN-14, ITN-21, BLG-02, BLG-12
+Prompt:
+Finish my remaining bonuses: link bookings to itinerary days (ITN-27), export an itinerary as a PDF (ITN-28) and link an itinerary to a blog post (BLG-13).
+
+How the output was used:
+Built test-first on feature/ITN-27-28-BLG-13-itinerary-bonuses. ITN-27: a link stores only the booking reference; its reference, status and price are read from the booking modules as the owner each time, so a cancelled booking stops counting and someone else's booking can never be linked; linked bookings feed the owner's budget (flight as intercity transport, hotel as accommodation) and never the public summary or a clone. ITN-28: a pure model mapper plus a pdfkit renderer; the owner gets bookings and budget, everyone else only the public copy, otherwise 404; the file name is sanitised for the header. BLG-13: the blog's AuthorItineraries port gained ownedBy and publicSummary, implemented by the itinerary module, so readers see the link only while the itinerary stays public. I reviewed the full diff and the unit and e2e tests.
+================================================
