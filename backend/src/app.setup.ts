@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { originCheck } from './common/security/origin-check';
@@ -94,7 +94,8 @@ function AUTH_AND_UPLOAD_LIMITS(): RouteRateLimit[] {
   ];
 }
 
-export function setupSwagger(app: INestApplication): void {
+/** The OpenAPI document of every controller (Milestone 1 is evaluated through it). */
+export function buildSwaggerDocument(app: INestApplication): OpenAPIObject {
   const config = new DocumentBuilder()
     .setTitle('Travel Planning and Booking Platform API')
     .setDescription(
@@ -103,6 +104,9 @@ export function setupSwagger(app: INestApplication): void {
     .setVersion('1.0')
     .addCookieAuth('access_token')
     .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  return SwaggerModule.createDocument(app, config);
+}
+
+export function setupSwagger(app: INestApplication): void {
+  SwaggerModule.setup('api/docs', app, buildSwaggerDocument(app));
 }

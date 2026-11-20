@@ -624,6 +624,52 @@ describe('Hotel catalogue: profile, rooms, availability and booking (HTL-01..10;
       await hold(30, 33).expect(404);
     });
 
+    it('replaces all availability ranges at PATCH .../availability, keeping reserved nights (HTL-05, HTL-06)', async () => {
+      const { moderator, base, hold } = await ready();
+      await hold(20, 23).expect(201); // nights day(20), day(21), day(22)
+
+      const replaced = (
+        await moderator.client
+          .patch(`${base}/availability`)
+          .send({
+            ranges: [
+              { from: day(15), to: day(25) },
+              { from: day(30), to: day(40) },
+            ],
+          })
+          .expect(200)
+      ).body as RoomBody;
+      expect(
+        replaced.availability.map(({ from, to }) => ({ from, to })),
+      ).toEqual([
+        { from: day(15), to: day(25) },
+        { from: day(30), to: day(40) },
+      ]);
+
+      const overlap = await moderator.client
+        .patch(`${base}/availability`)
+        .send({
+          ranges: [
+            { from: day(15), to: day(25) },
+            { from: day(25), to: day(30) },
+          ],
+        })
+        .expect(400);
+      expect(fieldsOf(overlap).length).toBeGreaterThan(0);
+
+      const dropsHeld = await moderator.client
+        .patch(`${base}/availability`)
+        .send({ ranges: [{ from: day(22), to: day(40) }] })
+        .expect(409);
+      expect(codeOf(dropsHeld)).toBe('AVAILABILITY_IN_USE');
+
+      const other = await hotelWithModerator();
+      await other.moderator.client
+        .patch(`${base}/availability`)
+        .send({ ranges: [] })
+        .expect(403);
+    });
+
     it('refuses to block, shorten, remove, deactivate or delete over a reservation, and allows the harmless ones', async () => {
       const { moderator, base, rangeId, hold } = await ready();
       await hold(20, 23).expect(201); // nights day(20), day(21), day(22)

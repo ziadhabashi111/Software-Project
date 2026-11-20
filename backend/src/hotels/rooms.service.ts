@@ -16,7 +16,10 @@ import { fieldError } from '../common/validation/validation-errors';
 import { HotelReservationQueries } from '../hotel-bookings/hotel-reservation-queries';
 import { formatDate } from '../hotel-bookings/stay-rules';
 import type { CreateRoomDto, UpdateRoomDto } from './dto/create-room.dto';
-import type { DateRangeDto } from './dto/date-range.dto';
+import type {
+  DateRangeDto,
+  ReplaceAvailabilityDto,
+} from './dto/date-range.dto';
 import {
   assertNoOverlap,
   nightsOfRanges,
@@ -213,6 +216,35 @@ export class RoomsService {
       );
       doc.availability[index].from = range.from;
       doc.availability[index].to = range.to;
+    });
+    return toRoomView(room);
+  }
+
+  /**
+   * HTL-05: replaces every bookable range at once. The new ranges must not
+   * overlap, and no night a Confirmed reservation or a live hold holds may be
+   * left out (409 AVAILABILITY_IN_USE).
+   */
+  async replaceAvailability(
+    user: Caller,
+    hotelId: string,
+    roomId: string,
+    dto: ReplaceAvailabilityDto,
+  ): Promise<RoomView> {
+    assertOwnHotel(user, hotelId);
+    const accepted: DayRange[] = [];
+    for (const input of dto.ranges) {
+      const range = parseRange(input.from, input.to);
+      assertNoOverlap(accepted, range);
+      accepted.push(range);
+    }
+    accepted.sort((a, b) => a.from.getTime() - b.from.getTime());
+    const { room } = await this.change(hotelId, roomId, async (doc) => {
+      await this.assertNightsFree(
+        doc.id,
+        removedNights(doc.availability, accepted),
+      );
+      doc.set('availability', accepted);
     });
     return toRoomView(room);
   }
