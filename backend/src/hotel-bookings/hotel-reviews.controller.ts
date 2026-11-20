@@ -12,6 +12,7 @@ import {
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
+  ApiForbiddenResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiNoContentResponse,
@@ -28,7 +29,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/pagination/pagination';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { ApiReq } from '../common/swagger/api-req.decorator';
-import { CreateReviewDto, UpdateReviewDto } from './dto/review.dto';
+import {
+  CreateReviewDto,
+  ReviewReplyDto,
+  UpdateReviewDto,
+} from './dto/review.dto';
 import { HotelReviewsPage, HotelReviewsService } from './hotel-reviews.service';
 import type { HotelReviewView } from './review-view';
 
@@ -40,6 +45,10 @@ const REVIEW_EXAMPLE = {
   text: 'Lovely view of the Nile and very helpful staff.',
   author: { id: '665e0a1b2c3d4e5f60123456', name: 'Mona Adel' },
   isHidden: false,
+  reply: {
+    text: 'Thank you for staying with us; we hope to see you again.',
+    repliedAt: '2027-03-06T09:00:00.000Z',
+  },
   createdAt: '2027-03-05T10:00:00.000Z',
   updatedAt: '2027-03-05T10:00:00.000Z',
 };
@@ -111,6 +120,47 @@ export class HotelReviewsController {
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<void> {
     return this.reviews.remove(user, id);
+  }
+
+  @Post('reviews/:id/reply')
+  @HttpCode(200)
+  @ApiCookieAuth()
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiReq(
+    'HTL-26',
+    'Reply to a review of my hotel',
+    "The hotel's own moderator answers a review (1-1000 characters). One reply per review: calling again changes its text. Guests see it as the hotel's response, without the moderator's name; the reviewer gets an in-app notification for a new reply.",
+  )
+  @ApiParam({ name: 'id', description: 'Review id' })
+  @ApiOkResponse({ schema: { example: REVIEW_EXAMPLE } })
+  @ApiBadRequestResponse({ description: 'Empty or too long reply' })
+  @ApiForbiddenResponse({ description: 'Not a review of your hotel' })
+  @ApiNotFoundResponse({ description: 'Review not found or hidden' })
+  reply(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: ReviewReplyDto,
+  ): Promise<HotelReviewView> {
+    return this.reviews.reply(user, id, dto);
+  }
+
+  @Delete('reviews/:id/reply')
+  @HttpCode(204)
+  @ApiCookieAuth()
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiReq('HTL-26', "Remove my hotel's reply to a review")
+  @ApiParam({ name: 'id', description: 'Review id' })
+  @ApiNoContentResponse({ description: 'Removed' })
+  @ApiBadRequestResponse({ description: 'Invalid request' })
+  @ApiForbiddenResponse({ description: 'Not a review of your hotel' })
+  @ApiNotFoundResponse({
+    description: 'Review not found, hidden, or without a reply',
+  })
+  removeReply(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ): Promise<void> {
+    return this.reviews.removeReply(user, id);
   }
 
   @Get('hotels/:id/reviews')

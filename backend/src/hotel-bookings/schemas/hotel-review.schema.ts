@@ -3,6 +3,24 @@ import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type HotelReviewDocument = HydratedDocument<HotelReview>;
 
+/** The hotel's answer to a review (HTL-26); one per review. */
+@Schema({ _id: false })
+export class ReviewReply {
+  @Prop({ type: String, required: true, maxlength: 1000 })
+  text!: string;
+
+  /** Who answered; kept for accountability, never shown to guests. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
+  moderator!: Types.ObjectId;
+
+  @Prop({ type: Date, required: true })
+  repliedAt!: Date;
+
+  @Prop({ type: Date })
+  editedAt?: Date;
+}
+const ReviewReplySchema = SchemaFactory.createForClass(ReviewReply);
+
 /**
  * One rating (1-5) and an optional text per Completed reservation, however
  * many rooms it had (HTL-23). Hidden reviews are visible only to their author
@@ -40,6 +58,9 @@ export class HotelReview {
 
   @Prop({ type: Boolean, default: false })
   isHidden!: boolean;
+
+  @Prop({ type: ReviewReplySchema })
+  reply?: ReviewReply;
 
   createdAt!: Date;
   updatedAt!: Date;
