@@ -10,12 +10,14 @@ import {
   ArrayUnique,
   IsArray,
   IsEnum,
+  IsMongoId,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUrl,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination';
 import { PostStatus } from '../schemas/post.schema';
@@ -125,3 +127,17 @@ export class ListMyPostsQueryDto extends PaginationQueryDto {
 
 /** Query for `GET /api/tags/:tag/posts` (BLG-08). */
 export class ListTagPostsQueryDto extends PaginationQueryDto {}
+
+/** Body of `PATCH /api/posts/:id/itinerary` (BLG-13). */
+export class SetPostItineraryDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '6660a1b2c3d4e5f601234567',
+    description:
+      'Id of one of your own public itineraries, or null to remove the link',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsMongoId({ message: 'Use an itinerary id, or null to remove the link' })
+  itineraryId!: string | null;
+}

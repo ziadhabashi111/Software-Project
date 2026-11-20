@@ -88,6 +88,25 @@ describe('toPostView', () => {
   });
 });
 
+describe('toPostView linked itinerary (BLG-13)', () => {
+  const linked = {
+    id: 'i1',
+    title: 'A week in Egypt',
+    countries: ['EG'],
+    startDate: '2027-03-01',
+    dayCount: 7,
+    isPublic: true,
+  };
+
+  it('has no itinerary unless one is passed', () => {
+    expect(toPostView(postDoc()).itinerary).toBeNull();
+  });
+
+  it('carries the itinerary it is given', () => {
+    expect(toPostView(postDoc(), linked).itinerary).toEqual(linked);
+  });
+});
+
 describe('toMyPostRow / toPublicPostRow', () => {
   it('the author row drops the body but keeps status and counts', () => {
     const row = toMyPostRow(postDoc());

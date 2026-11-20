@@ -32,6 +32,7 @@ import {
   CreatePostDto,
   IMAGES_MAX,
   ListMyPostsQueryDto,
+  SetPostItineraryDto,
   UpdatePostDto,
 } from './dto/post.dto';
 import type { MyPostRow, PostView } from './post-view';
@@ -56,6 +57,14 @@ const POST_EXAMPLE = {
   updatedAt: '2026-11-18T10:00:00.000Z',
   likeCount: 0,
   commentCount: 0,
+  itinerary: {
+    id: '6660a1b2c3d4e5f601234567',
+    title: 'A week in Egypt',
+    countries: ['EG'],
+    startDate: '2027-03-01',
+    dayCount: 7,
+    isPublic: true,
+  },
 };
 
 /** The author's own posts. Every route needs sign-in; changes are author-only. */
@@ -156,6 +165,30 @@ export class PostsController {
     @Body() dto: UpdatePostDto,
   ): Promise<PostView> {
     return this.posts.update(user, id, dto);
+  }
+
+  @Patch(':id/itinerary')
+  @ApiReq(
+    'BLG-13',
+    'Link one of my itineraries to my post (optional bonus)',
+    'Links one of your own **public** itineraries to the post (or removes the link with `{ "itineraryId": null }`). Readers of the post see a summary of the itinerary (title, countries, start date, number of days) for as long as it stays public and visible: if you make it private again, a moderator hides it or it is deleted, the post simply shows no itinerary. An itinerary that is not yours or does not exist is a 404; one that is private or hidden is a 400. Only the post’s author can do this.',
+  )
+  @ApiParam({ name: 'id', description: 'Post id' })
+  @ApiOkResponse({ schema: { example: POST_EXAMPLE } })
+  @ApiBadRequestResponse({
+    description: 'Malformed itinerary id, or the itinerary is not public',
+  })
+  @ApiForbiddenResponse({ description: 'Someone else’s published post' })
+  @ApiNotFoundResponse({
+    description:
+      'No such post (or a draft or hidden post of someone else), or the itinerary is not yours',
+  })
+  setItinerary(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SetPostItineraryDto,
+  ): Promise<PostView> {
+    return this.posts.setItinerary(user, id, dto);
   }
 
   @Delete(':id')

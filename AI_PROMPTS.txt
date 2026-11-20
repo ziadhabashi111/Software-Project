@@ -879,3 +879,15 @@ Implement the FLT-27 bonus: change a Confirmed flight booking's date or flight (
 How the output was used:
 Claude wrote it test-first on feature/FLT-27-change-flight (design in docs/design/2026-11-20-flight-change-design.md); I reviewed the full diff, merged FLT-28 in and wired the two together. PATCH /api/flight-bookings/:id/change-flight previews the difference, and with confirm=true applies a same-fare or cheaper change at once in one transaction (new seats booked, old ones returned, lower fare refunded) or holds the new seats for HOLD_MINUTES while the difference is paid as a 'flight-change' payment through the normal payments flow; the webhook applies it. Same airline, route and cabin only; round trips stay in order; passenger types are re-checked; one pending change per booking. The booking keeps a ledger of every payment, so a later cancellation refunds across payments newest first, never more than each received. Seats picked on the old flight are freed when the change applies (my integration, with a test). Lint, unit, build and e2e pass.
 ================================================
+
+================================================
+Date: 2026-11-20
+Student: Habashi
+Tool: Claude Code
+Related Requirement: ITN-27, ITN-28, BLG-13 (bonuses), ITN-14, ITN-21, BLG-02, BLG-12
+Prompt:
+Finish my remaining bonuses: link bookings to itinerary days (ITN-27), export an itinerary as a PDF (ITN-28) and link an itinerary to a blog post (BLG-13).
+
+How the output was used:
+Built test-first on feature/ITN-27-28-BLG-13-itinerary-bonuses. ITN-27: a link stores only the booking reference; its reference, status and price are read from the booking modules as the owner each time, so a cancelled booking stops counting and someone else's booking can never be linked; linked bookings feed the owner's budget (flight as intercity transport, hotel as accommodation) and never the public summary or a clone. ITN-28: a pure model mapper plus a pdfkit renderer; the owner gets bookings and budget, everyone else only the public copy, otherwise 404; the file name is sanitised for the header. BLG-13: the blog's AuthorItineraries port gained ownedBy and publicSummary, implemented by the itinerary module, so readers see the link only while the itinerary stays public. I reviewed the full diff and the unit and e2e tests.
+================================================

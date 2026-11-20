@@ -62,6 +62,13 @@ export class Post {
   @Prop({ type: Boolean, default: false })
   isHidden!: boolean;
 
+  /**
+   * BLG-13: one of the author's public itineraries this post is about. Only
+   * the id is stored; readers see it while the itinerary is still public.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Itinerary' })
+  itinerary?: Types.ObjectId;
+
   @Prop({ type: Number, default: 0, min: 0 })
   likeCount!: number;
 

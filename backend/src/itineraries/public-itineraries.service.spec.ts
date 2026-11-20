@@ -213,3 +213,89 @@ describe('PublicItinerariesService as the author-page source (BLG-12)', () => {
     });
   });
 });
+
+describe('PublicItinerariesService as the post-link source (BLG-13)', () => {
+  const summaryOf = (row: ReturnType<typeof itinerary>) => ({
+    id: row.id,
+    title: 'A week in Egypt',
+    countries: ['EG'],
+    startDate: '2027-03-01',
+    dayCount: 2,
+  });
+
+  describe('ownedBy', () => {
+    it("returns the author's own public itinerary as public", async () => {
+      const row = itinerary();
+      const { service } = build({ found: row });
+      expect(await service.ownedBy(OWNER.toString(), row.id)).toEqual({
+        ...summaryOf(row),
+        isPublic: true,
+      });
+    });
+
+    it.each([
+      ['private', { visibility: Visibility.PRIVATE }],
+      ['hidden by a moderator', { isHidden: true }],
+    ])('returns an itinerary that is %s as not public', async (_n, change) => {
+      const row = itinerary(change);
+      const { service } = build({ found: row });
+      expect(await service.ownedBy(OWNER.toString(), row.id)).toMatchObject({
+        id: row.id,
+        isPublic: false,
+      });
+    });
+
+    // Someone else's itinerary must look exactly like one that does not exist.
+    it("returns null for someone else's itinerary and for an unknown one", async () => {
+      const row = itinerary();
+      const { service } = build({ found: row });
+      expect(
+        await service.ownedBy(new Types.ObjectId().toString(), row.id),
+      ).toBeNull();
+      expect(
+        await build({ found: null }).service.ownedBy(OWNER.toString(), 'x'),
+      ).toBeNull();
+    });
+
+    it('returns null for an id that is not a valid id', async () => {
+      const { service, repository } = build({ found: itinerary() });
+      repository.findById.mockResolvedValue(null);
+      expect(await service.ownedBy(OWNER.toString(), 'nope')).toBeNull();
+    });
+  });
+
+  describe('publicSummary', () => {
+    it('summarises a public itinerary of an active author', async () => {
+      const row = itinerary();
+      const { service } = build({ found: row });
+      expect(await service.publicSummary(row.id)).toEqual(summaryOf(row));
+    });
+
+    // A post must stop advertising an itinerary the moment it stops being public.
+    it.each([
+      ['private', { visibility: Visibility.PRIVATE }],
+      ['hidden by a moderator', { isHidden: true }],
+    ])('shows nothing for an itinerary that is %s', async (_n, change) => {
+      const { service } = build({ found: itinerary(change) });
+      expect(await service.publicSummary('x')).toBeNull();
+    });
+
+    it('shows nothing when the owner is deactivated or gone, or the itinerary is', async () => {
+      const row = itinerary();
+      expect(
+        await build({
+          found: row,
+          ownerStatus: UserStatus.DEACTIVATED,
+        }).service.publicSummary(row.id),
+      ).toBeNull();
+      expect(
+        await build({ found: row, ownerStatus: null }).service.publicSummary(
+          row.id,
+        ),
+      ).toBeNull();
+      expect(
+        await build({ found: null }).service.publicSummary('x'),
+      ).toBeNull();
+    });
+  });
+});

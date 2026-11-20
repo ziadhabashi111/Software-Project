@@ -1,3 +1,4 @@
+import type { LinkedItinerary } from './author-itineraries';
 import type { PostDocument, PostStatus } from './schemas/post.schema';
 
 export const EXCERPT_LENGTH = 200;
@@ -18,6 +19,8 @@ export interface PostView {
   updatedAt: Date;
   likeCount: number;
   commentCount: number;
+  /** BLG-13: the author's itinerary this post links to, if it still exists. */
+  itinerary: LinkedItinerary | null;
 }
 
 /** A row of `GET /api/posts/mine` (BLG-03). */
@@ -54,7 +57,10 @@ export function excerptOf(body: string): string {
     : `${flat.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…`;
 }
 
-export function toPostView(post: PostDocument): PostView {
+export function toPostView(
+  post: PostDocument,
+  itinerary: LinkedItinerary | null = null,
+): PostView {
   return {
     id: post.id,
     title: post.title,
@@ -72,6 +78,7 @@ export function toPostView(post: PostDocument): PostView {
     updatedAt: post.updatedAt,
     likeCount: post.likeCount,
     commentCount: post.commentCount,
+    itinerary,
   };
 }
 

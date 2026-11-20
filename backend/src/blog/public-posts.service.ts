@@ -42,6 +42,11 @@ export interface PublicPostView {
   likedByMe: boolean | null;
   /** First page of comments, oldest first (more: GET /api/posts/:id/comments). */
   comments: Paginated<CommentView>;
+  /**
+   * BLG-13: summary of the author's itinerary this post links to, only while
+   * that itinerary is public and visible; otherwise null.
+   */
+  itinerary: PublicItinerarySummary | null;
 }
 
 /** The public author page (BLG-12). */
@@ -136,11 +141,14 @@ export class PublicPostsService {
 
     const published = post.status === PostStatus.PUBLISHED;
     const firstPage = new ListCommentsQueryDto();
-    const [comments, liked] = await Promise.all([
+    const [comments, liked, itinerary] = await Promise.all([
       published
         ? this.comments.list(post.id, firstPage, viewer)
         : Promise.resolve(toPage<CommentView>([], 0, firstPage)),
       viewer ? this.likes.likedBy(viewer.id, [post._id]) : null,
+      post.itinerary
+        ? this.authorItineraries.publicSummary(post.itinerary.toString())
+        : null,
     ]);
 
     return {
@@ -163,6 +171,7 @@ export class PublicPostsService {
       isHidden: post.isHidden,
       likedByMe: liked ? liked.has(post.id) : null,
       comments,
+      itinerary,
     };
   }
 
