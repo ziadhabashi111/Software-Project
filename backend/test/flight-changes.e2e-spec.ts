@@ -449,6 +449,35 @@ describe('Change a confirmed flight booking (FLT-27; real AppModule, MongoDB rep
     ).not.toBeNull();
   });
 
+  it("frees the passengers' seats on the old flight when the change is applied (FLT-28)", async () => {
+    const from = await makeFlight({ price: 200 });
+    const to = await makeFlight({ price: 200, departInDays: 47 });
+    const { agent, booking } = await confirmedBooking(from);
+    await agent
+      .patch(`/api/flight-bookings/${booking.id}/seat`)
+      .send({ passengerIndex: 0, seat: '1A' })
+      .expect(200);
+
+    const res = await change(
+      agent,
+      booking.id,
+      { flightId: to.id },
+      true,
+    ).expect(200);
+    const changed = (res.body as PreviewBody).booking as unknown as {
+      passengers: { seats: (string | null)[] }[];
+    };
+    expect(changed.passengers[0].seats).toEqual([null]);
+    const map = await agent
+      .get(`/api/flights/${from.id}/seats`)
+      .query({ cabinClass: 'Economy' })
+      .expect(200);
+    const takenOnOld = (
+      map.body as { rows: { seats: { label: string; taken: boolean }[] }[] }
+    ).rows.flatMap((r) => r.seats.filter((x) => x.taken));
+    expect(takenOnOld).toEqual([]);
+  });
+
   it('refunds the difference of a cheaper flight to the original card', async () => {
     const from = await makeFlight({ price: 300 });
     const to = await makeFlight({ price: 220, departInDays: 47 });

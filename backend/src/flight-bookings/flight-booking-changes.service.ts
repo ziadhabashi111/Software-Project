@@ -62,6 +62,7 @@ import {
 } from './schemas/flight-booking.schema';
 import { SeatInventory } from './seat-inventory';
 import { SharedServices } from './shared-services';
+import { SeatAssignments } from './seat-assignments';
 
 /** Expired changes handled per sweep run. */
 const SWEEP_BATCH = 500;
@@ -139,6 +140,7 @@ export class FlightBookingChangesService {
     private readonly views: FlightBookingViews,
     private readonly payments: FlightBookingPayments,
     private readonly shared: SharedServices,
+    private readonly seatAssignments: SeatAssignments,
   ) {}
 
   /** Preview (confirm = false) or make the change of the user's own booking. */
@@ -702,6 +704,12 @@ export class FlightBookingChangesService {
         ledger,
         session,
       );
+      // FLT-28: seats picked on the old flight do not carry over.
+      await this.seatAssignments.releaseSegment(
+        doc._id,
+        prepared.segmentIndex,
+        session,
+      );
       const [change] = await this.changes.create(
         [
           {
@@ -811,6 +819,12 @@ export class FlightBookingChangesService {
         change.segment,
         price,
         ledger,
+        session,
+      );
+      // FLT-28: seats picked on the old flight do not carry over.
+      await this.seatAssignments.releaseSegment(
+        doc._id,
+        change.segmentIndex,
         session,
       );
       const confirmed = await this.changes.findOneAndUpdate(
