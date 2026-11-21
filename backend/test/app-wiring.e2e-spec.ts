@@ -147,7 +147,9 @@ describe('Real AppModule wiring and end-to-end flows', () => {
 
     // Imported only now: AppModule validates the environment when it loads.
     const { AppModule } =
-      (await import('../src/app.module')) as typeof import('../src/app.module');
+      jest.requireActual<typeof import('../src/app.module')>(
+        '../src/app.module',
+      );
     moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(STRIPE_CLIENT)
       .useValue(fakeStripe)

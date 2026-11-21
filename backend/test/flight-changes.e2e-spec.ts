@@ -177,7 +177,9 @@ describe('Change a confirmed flight booking (FLT-27; real AppModule, MongoDB rep
     process.env.NODE_ENV = 'test';
 
     const { AppModule } =
-      (await import('../src/app.module')) as typeof import('../src/app.module');
+      jest.requireActual<typeof import('../src/app.module')>(
+        '../src/app.module',
+      );
     moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(STRIPE_CLIENT)
       .useValue(fakeStripe)
