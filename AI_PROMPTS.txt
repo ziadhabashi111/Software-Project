@@ -939,3 +939,15 @@ Make the Stripe webhook return a 503 instead of a 500 when STRIPE_WEBHOOK_SECRET
 How the output was used:
 Built test-first. POST /api/payments/webhook now answers 503 (ServiceUnavailableException, "Payments are not configured") when the webhook secret is blank or unset, instead of a 500: a missing config is not an unexpected server crash, and Stripe should not retry it as a transient 5xx. A unit test asserts the 503 and that no event is parsed; the normal signed-webhook path is unchanged. I reviewed the diff.
 ================================================
+
+================================================
+Date: 2026-11-21
+Student: Yahia Tarek
+Tool: Claude Code
+Related Requirement: GEN-13 (test quality; specs for BLG-13, BLG-12, ITN-21, FLT-27)
+Prompt:
+Make sure develop and main are synced and that the recent bonuses reached main; do one final audit. Then: fix all the type errors it found and merge into develop, then main.
+
+How the output was used:
+Claude compared origin/develop and origin/main (identical trees; main only adds the develop -> main merge commits), checked each squash-merged fix branch against its merge commit (nothing missing), and confirmed the merged bonuses (HTL-26, BLG-13, ITN-27, ITN-28, FLT-27, FLT-28, GEN-01-B, ACC-07, ACC-02) are on main; BON-01 and BON-02 are not on any branch yet. Build, lint, unit and e2e tests passed on main, but `tsc --noEmit` found 11 type errors in test files that Jest does not type-check: stale fixtures after BLG-13 (post `itinerary` field, AuthorItinerarySource `ownedBy`/`publicSummary`), an untyped activity helper in the clone spec, and two dynamic `import('../src/app.module')` calls that nodenext cannot resolve in a CommonJS file (now `jest.requireActual`, which loads the module the same way). Test files only; no app code changed. After the fix: tsc 0 errors, lint clean, 977 unit and 775 e2e tests pass. I reviewed the full diff.
+================================================

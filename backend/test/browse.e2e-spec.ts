@@ -302,6 +302,8 @@ describe('Browse, search, post page and author page (BLG-02, BLG-09, BLG-12)', (
             total: 1,
           });
         },
+        ownedBy: () => Promise.resolve(null),
+        publicSummary: () => Promise.resolve(null),
       });
       const res = await api().get(`/api/authors/${writer.id}`).expect(200);
       expect((res.body as AuthorPageView).itineraries.items[0].title).toBe(
@@ -318,6 +320,8 @@ describe('Browse, search, post page and author page (BLG-02, BLG-09, BLG-12)', (
           asked.push(page);
           return Promise.resolve({ items: [], total: 15 });
         },
+        ownedBy: () => Promise.resolve(null),
+        publicSummary: () => Promise.resolve(null),
       });
       const res = await api()
         .get(`/api/authors/${writer.id}?itinerariesPage=2`)
