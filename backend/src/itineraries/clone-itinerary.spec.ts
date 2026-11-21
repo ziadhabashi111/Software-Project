@@ -1,7 +1,19 @@
 import { Types } from 'mongoose';
 import { cloneDays } from './clone-itinerary';
 
-const day = (city: string, activities: object[] = [], notes?: string) => ({
+type ActivityFields = {
+  name: string;
+  description?: string;
+  time?: string;
+  cost?: number;
+  currency?: string;
+};
+
+const day = (
+  city: string,
+  activities: ActivityFields[] = [],
+  notes?: string,
+) => ({
   _id: new Types.ObjectId(),
   city,
   ...(notes ? { notes } : {}),

@@ -33,6 +33,7 @@ function postDoc(overrides: Record<string, unknown> = {}) {
     status: PostStatus.DRAFT,
     isHidden: false,
     publishedAt: undefined,
+    itinerary: undefined as Types.ObjectId | undefined,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     likeCount: 0,
